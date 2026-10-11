@@ -60,7 +60,12 @@ typedef enum {
     /// A block with no behaviour of its own: the I/O channels and the displays. Ported in the sense
     /// that the core is complete for it — its pins are the interface, and whoever drives them does the
     /// work — as opposed to `DIRIGO_BLOCK_UNRESOLVED`, which is a behaviour that is still missing.
-    DIRIGO_BLOCK_PASSIVE = 12
+    DIRIGO_BLOCK_PASSIVE = 12,
+
+    /// `TMSetPins`. It computes nothing: it writes its `X` input through to the *producers* that its
+    /// `P1..Pn` pins and its param pin are wired from. That needs the connection graph, so unlike every
+    /// other kind it is implemented in the step loop rather than in `processModule`.
+    DIRIGO_BLOCK_SET = 13
 } DirigoBlockKind;
 
 typedef struct {

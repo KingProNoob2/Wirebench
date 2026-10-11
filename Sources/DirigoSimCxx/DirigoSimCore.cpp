@@ -109,6 +109,9 @@ struct DirigoSim {
     std::unordered_map<int32_t, size_t> indexById;
     std::vector<Connection> connections;
     std::unordered_map<int32_t, std::vector<size_t>> outgoingByModule;
+    /// Connections *into* a module, which is what `Set`'s write-through walks (the Swift
+    /// `inConnectionMap`). Built alongside `outgoingByModule`.
+    std::unordered_map<int32_t, std::vector<size_t>> incomingByModule;
     std::vector<std::vector<size_t>> schedule;   /* by thread id, in ORDER */
     std::vector<int32_t> threadIds;              /* ascending */
     std::map<int32_t, double> threadElapsedMs;
@@ -322,6 +325,53 @@ void propagateFrom(DirigoSim *sim, size_t sourceIndex) {
     }
 }
 
+/// `Set` / `SetIdx`: writes a value into the *producer* on the other end of a connection.
+///
+/// Mirrors the Swift `writeThrough` in `SimulationEngine.stepNode`. Nothing here applies `inverted`:
+/// the Swift applies it when propagating a value *forward* to a consumer, not when writing back, and
+/// this must agree with the Swift engine pin for pin rather than with what would be tidier.
+void writeThroughConnection(DirigoSim *sim, const Connection &c, const DirigoValue &value) {
+    auto source = sim->indexById.find(c.outModule);
+    if (source == sim->indexById.end()) return;
+    Module &producer = sim->modules[source->second];
+
+    /* The Swift writes through `WritableVariable` when the producer conforms to it — which only
+       `IntVar` and `FloatVar` do (`BoolVar` deliberately does not, so a written pin is simply not
+       undone because `BoolVar.process` never overwrites its output). Neither of those two kinds is
+       ported here yet, so there is nothing to add for this case; when one is ported it needs a branch
+       here, or a written value would be discarded the moment the producer next ran. */
+    if (c.toParamPins) {
+        if (c.inPin >= 0 && static_cast<size_t>(c.inPin) < producer.paramPins.size()) {
+            producer.paramPins[c.inPin] = value;
+        }
+        return;
+    }
+    if (c.outPin >= 0 && static_cast<size_t>(c.outPin) < producer.outPins.size()) {
+        producer.outPins[c.outPin] = value;
+    }
+}
+
+/// `TMSetPins`: "Set values of the pin X to the pins P1..Pn".
+///
+/// Unlike every other kind this computes no output, so it lives in the step loop where the connection
+/// graph is in scope. It mirrors the Swift `SetBlock` branch exactly — including that the Swift walks
+/// only the **in** connection map and so does *not* write back a producer reached through a param
+/// connection. That is a difference from the block's own documentation, but the two engines have to
+/// agree, and the corpus (`kostička.pcc`, where `ISwitch1` feeds `Set1`'s param pin) is the test.
+void applySetWriteThrough(DirigoSim *sim, size_t index) {
+    Module &self = sim->modules[index];
+    if (self.inPins.size() < 2) return;
+    const DirigoValue value = self.inPins[1];          /* `writeValue` */
+    /* Walk the connections whose *destination* is this module: `inConnectionMap[module.id]`. */
+    auto incoming = sim->incomingByModule.find(self.id);
+    if (incoming == sim->incomingByModule.end()) return;
+    for (size_t connectionIndex : incoming->second) {
+        const Connection &c = sim->connections[connectionIndex];
+        if (c.inPin < 2) continue;                      /* `where conn.inPinId >= 2` */
+        writeThroughConnection(sim, c, value);
+    }
+}
+
 void propagate(DirigoSim *sim) {
     for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
 }
@@ -376,7 +426,9 @@ DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
         conn.inverted = c.inverted != 0;
         conn.toParamPins = c.toParamPins != 0;
         sim->connections.push_back(conn);
-        sim->outgoingByModule[conn.outModule].push_back(sim->connections.size() - 1);
+        const size_t stored = sim->connections.size() - 1;
+        sim->outgoingByModule[conn.outModule].push_back(stored);
+        sim->incomingByModule[conn.inModule].push_back(stored);
     }
     return sim;
 }
@@ -430,6 +482,9 @@ int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
         for (size_t index : sim->schedule[tid]) {
             processModule(sim->modules[index], sample);
             propagateFrom(sim, index);       /* the Swift engine pushes after every block */
+            if (sim->modules[index].kind == DIRIGO_BLOCK_SET) {
+                applySetWriteThrough(sim, index);
+            }
         }
     }
     if (ranAny) propagate(sim);

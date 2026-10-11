@@ -38,6 +38,9 @@ public final class CxxSimulationCore {
         case "TMInt2Bits": return DIRIGO_BLOCK_INT2BITS
         case "TSystemCommand": return DIRIGO_BLOCK_SYSTEMCMD
         case "TMIntSwitch": return DIRIGO_BLOCK_SWITCH
+        // Writes through to the producers of its P pins rather than computing an output; the core does
+        // that in its step loop, since it needs the connection graph.
+        case "TMSetPins": return DIRIGO_BLOCK_SET
         // Blocks whose pins *are* their behaviour: the I/O channels, and the displays that show them.
         case "TMDigitalInputs", "TMDigitalOutputs", "TDispValueModule", "TDispSegmentModule":
             return DIRIGO_BLOCK_PASSIVE
