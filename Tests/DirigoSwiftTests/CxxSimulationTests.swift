@@ -42,8 +42,7 @@ struct CxxSimulationTests {
     }
 
     @Test("Both engines hold the same pin values after every step")
-    func enginesAgree() throws {
-        let project = Self.pulseIntoNot()
+    func enginesAgree() throws {        let project = Self.pulseIntoNot()
         let swift = SimulationEngine(project: project, scheduling: .everyTick)
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
 
@@ -160,16 +159,19 @@ struct CxxSimulationTests {
                     }
                 }
             }
-            // One module is expected to differ, and the reason is the *Swift* engine: it defines
-            // `propagateWires(from:)` — the immediate push of a block's outputs to its consumers — and
-            // never calls it from `step`, so a block later in the same pass reads the value from the
-            // top of the pass. The C++ core pushes after every block, as the original does.
-            // Listing the module by name means this test fails the moment anything *else* diverges, and
-            // also the moment the Swift engine is fixed — which is when the name should come off.
-            // `8xDO1` and `Segment1` are fed by `Int2Bits1`'s bits, so they are the same root cause
-            // rather than three: the cone downstream of the one module whose consumer runs later in
-            // the same pass.
-            let expected: Set<String> = ["8xDO1", "Int2Bits1", "Segment1"]
+            // Nothing is expected to differ any more. This used to be `["8xDO1", "Int2Bits1",
+            // "Segment1"]`, from a Swift-side gap: the engine defined `propagateWires(from:)` — the
+            // immediate push of a block's outputs to its consumers — and never called it, so a
+            // **consumer that does not execute** (gated, or inside a false branch) never reached
+            // `pullInputs` and held the previous pass's value until the end-of-step sweep. `8xDO1` and
+            // `Segment1` are fed by `Int2Bits1`'s bits, so the three names were one root cause: the cone
+            // downstream of the one module whose consumers do not run in the same pass.
+            //
+            // `stepNode` now pushes after each block, as the original and the core do. Keeping the
+            // expectation as an explicit empty set — rather than dropping the check — means the next
+            // divergence anywhere still fails here, and the empty set is itself the record that the
+            // three names came off deliberately.
+            let expected: Set<String> = []
             if mismatchingModules != expected {
                 Issue.record(ProgramBuilderTests.Mismatch(description:
                     "\(name): mismatching modules \(mismatchingModules.sorted())"
@@ -177,8 +179,7 @@ struct CxxSimulationTests {
             }
             compared.append(name)
         }
-        print("C++ core whole-project agreement — compared: \(compared); skipped (not fully ported): \(skipped);"
-              + " known Swift-side gap: Int2Bits1 (mid-pass propagation)")
+        print("C++ core whole-project agreement — compared: \(compared); skipped (not fully ported): \(skipped)")
         #expect(!compared.isEmpty, "no project was fully ported, so nothing was compared")
     }
 

@@ -498,6 +498,25 @@ public final class SimulationEngine: @unchecked Sendable {
                 writeThrough(conn, value)
             }
         }
+
+        // Push this block's outputs to its consumers the moment it has run, which is what the original
+        // does and what the C++ core does (`propagateFrom` after every module).
+        //
+        // Removing this call — and nothing else — puts the disagreement back: the differential test
+        // reports `Int2Bits1` out[0] `cxx 1 vs swift 0` at step 0, plus the `Segment1` and `8xDO1` pins it
+        // feeds, and the call removes all three. That is measured, twice, with the expectation set to a
+        // name that cannot match, so the test's own report says which modules differ.
+        //
+        // The precise step-by-step reason is **not** established, and an earlier explanation here was
+        // wrong: `pullInputs` does run for these blocks and does refresh them from the producer's current
+        // output, so "the consumer never reaches `pullInputs`" is not it. What a trace does show is that
+        // the push changes whether these blocks *execute at all*, not merely what they read — so the next
+        // person should instrument `stepNode`'s gate (`condStack == 0, enabled`) rather than the pull.
+        // See `docs/port-status.md` for the surrounding argument.
+        //
+        // The sweeps at the top and bottom of `step` stay, for macro plumbing whose values cross module
+        // lists and cannot be reached by a single block pushing.
+        propagateWires(from: id)
     }
 
     /// Refreshes a module's inputs from its producers' *current* output values.
