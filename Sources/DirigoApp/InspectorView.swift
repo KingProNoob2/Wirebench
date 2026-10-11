@@ -377,12 +377,17 @@ struct SignalRow: View, Equatable {
                     .fill(isHigh ? Theme.signalHigh : Color.secondary.opacity(0.35))
                     .frame(width: 7, height: 7)
                 if let number {
+                    // A snug field rather than a fixed 56 pt one: the width follows the digits, so the dot
+                    // sits beside the number instead of half a row away from it. Slack of a couple of
+                    // characters is deliberate — the binding only commits on Enter or blur, so the text can
+                    // briefly be longer than the value.
                     TextField("", value: number, format: .number)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
                         .multilineTextAlignment(.trailing)
                         .font(.system(.body, design: .monospaced))
                         .monospacedDigit()
-                        .frame(width: 56, alignment: .trailing)
+                        .frame(width: max(34, CGFloat(value.count) * 8.5 + 22), alignment: .trailing)
                         .help("Type a value for this input.")
                 } else {
                     Text(value)

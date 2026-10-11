@@ -19,6 +19,16 @@ struct InspectorSnapshotTests {
             .deletingLastPathComponent()
     }
 
+    /// A binding that behaves like the model's.
+    ///
+    /// Note that `ImageRenderer` draws a `TextField` as a disabled placeholder — the yellow bars — so an
+    /// offscreen render cannot show the editable input rows as they really look. Everything else in the
+    /// panel renders faithfully; the field widths have to be judged on screen.
+    @MainActor
+    static func editable(_ value: Int) -> Binding<Int> {
+        Binding(get: { value }, set: { _ in })
+    }
+
     @Test("Render the inspector, light and dark", .enabled(if: ProcessInfo.processInfo.environment["DIRIGO_SNAPSHOT"] != nil))
     @MainActor
     func render() throws {
@@ -46,9 +56,14 @@ struct InspectorSnapshotTests {
                               onReset: {})
                 .padding(.horizontal, 16)   // stands in for the grouped form's row inset
                 VStack(spacing: 6) {
-                    SignalRow(name: "Trigger", value: "false", isHigh: false).equatable()
-                    SignalRow(name: "Reset", value: "false", isHigh: true).equatable()
-                    SignalRow(name: "Set", value: "true", isHigh: true).equatable()
+                    // A plain value row (an output) and an editable integer row (an input), which is
+                    // where the spacing question is.
+                    SignalRow(name: "Y (Count)", value: "1", isHigh: true).equatable()
+                    // A real binding, not `.constant`: SwiftUI draws a constant binding as a disabled
+                    // field, which is not what the app shows.
+                    SignalRow(name: "En (Enabled)", value: "1", isHigh: true, onToggle: {}, number: Self.editable(1)).equatable()
+                    SignalRow(name: "Sw (Switch)", value: "6", isHigh: true, onToggle: {}, number: Self.editable(6)).equatable()
+                    SignalRow(name: "X7 (Input 7)", value: "128", isHigh: true, onToggle: {}, number: Self.editable(128)).equatable()
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
