@@ -364,6 +364,11 @@ struct SignalRow: View, Equatable {
     /// Present for an integer input pin: its value can be typed over.
     var number: Binding<Int>?
 
+    /// Whether the value is currently a field rather than text. Purely local: the row rests as text so
+    /// it is laid out like every other row, and becomes a field for as long as it is being edited.
+    @State private var isEditing = false
+    @FocusState private var isEditingFocused: Bool
+
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.name == rhs.name && lhs.value == rhs.value && lhs.isHigh == rhs.isHigh
             && (lhs.onToggle == nil) == (rhs.onToggle == nil)
@@ -377,22 +382,34 @@ struct SignalRow: View, Equatable {
                     .fill(isHigh ? Theme.signalHigh : Color.secondary.opacity(0.35))
                     .frame(width: 7, height: 7)
                 if let number {
-                    // A snug field rather than a fixed 56 pt one: the width follows the digits, so the dot
-                    // sits beside the number instead of half a row away from it. Slack of a couple of
-                    // characters is deliberate — the binding only commits on Enter or blur, so the text can
-                    // briefly be longer than the value.
-                    // Plain, with a faint background, and no vertical padding of its own: a bordered
-                    // control pads itself and makes the row twice the height of a read-only one.
-                    TextField("", value: number, format: .number)
-                        .textFieldStyle(.plain)
-                        .multilineTextAlignment(.trailing)
-                        .font(.system(.body, design: .monospaced))
-                        .monospacedDigit()
-                        .frame(width: max(30, CGFloat(value.count) * 8.5 + 16), alignment: .trailing)
-                        .padding(.horizontal, 4)
-                        .background(Color.primary.opacity(0.07),
-                                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .help("Type a value for this input.")
+                    // A field only while it is being edited. A `TextField` inside a `Form` reserves the
+                    // standard control height however plain its style is, which is what made these rows
+                    // taller than the read-only ones and left the label off their baseline. At rest this
+                    // is the *same view* as a read-only row, so the two cannot differ.
+                    if isEditing {
+                        TextField("", value: number, format: .number)
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(.body, design: .monospaced))
+                            .monospacedDigit()
+                            .focused($isEditingFocused)
+                            .frame(width: max(38, CGFloat(value.count) * 8.5 + 18), alignment: .trailing)
+                            .padding(.horizontal, 3)
+                            .background(Color.primary.opacity(0.10),
+                                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .onSubmit { isEditing = false }
+                            .onChange(of: isEditingFocused) { _, focused in
+                                if !focused { isEditing = false }
+                            }
+                    } else {
+                        Text(value)
+                            .font(.system(.body, design: .monospaced))
+                            .monospacedDigit()
+                            .foregroundStyle(isHigh ? .primary : .secondary)
+                            .contentShape(Rectangle())
+                            .onTapGesture { isEditing = true; isEditingFocused = true }
+                            .help("Click to edit this input.")
+                    }
                 } else {
                     Text(value)
                         .font(.system(.body, design: .monospaced))
@@ -403,15 +420,16 @@ struct SignalRow: View, Equatable {
             }
         } label: {
             if let onToggle {
-                Button(action: onToggle) {
-                    Text(name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Click to set this input to 0, and again to 1.")
+                // A tap gesture rather than a `Button`: a button brings its own metrics, which pushed the
+                // label off the value's baseline. This keeps the row laid out exactly like a read-only one
+                // while still being clickable.
+                Text(name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onToggle)
+                    .help("Click to set this input to 0, and again to 1.")
             } else {
                 Text(name)
                     .lineLimit(1)
