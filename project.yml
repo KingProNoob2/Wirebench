@@ -14,6 +14,15 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: false
     ALWAYS_SEARCH_USER_PATHS: false
 
+  # A fourth SwiftPM-versus-Xcode trap, alongside the three on the targets below, and the one that
+  # actually broke the app: under this SDK `@State` is a **macro** in an `xcodebuild` build but is
+  # still resolved as a property wrapper by `swift test`/`swift build`. So `_draft = State(...)` in
+  # an `init` compiles under SwiftPM and fails under Xcode with "cannot find '_draft' in scope" —
+  # which means the suite, which links `DirigoApp` precisely so app code is covered, cannot see this
+  # class of error at all. Never write the property-wrapper init idiom here; seed `@State` from
+  # `onAppear` (see `TextAnnotationEditor`) so it is valid either way.
+  # Why the two disagree is not established and is worth knowing before trusting either alone.
+
 targets:
   DirigoCore:
     type: library.static
