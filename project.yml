@@ -53,6 +53,10 @@ targets:
         # module map `import DirigoSimCxx` fails in the app even though `swift test` builds it.
         DEFINES_MODULE: true
         MODULEMAP_FILE: $(SRCROOT)/Sources/DirigoSimCxx/include/module.modulemap
+        # The simulation core is the hot loop, so it is optimised in every configuration, and `-pipe`
+        # keeps the compiler stages in memory rather than in temporary files.
+        GCC_OPTIMIZATION_LEVEL: 2
+        OTHER_CPLUSPLUSFLAGS: -pipe
         HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/DirigoSimCxx/include
         CLANG_CXX_LANGUAGE_STANDARD: c++17
         CLANG_CXX_LIBRARY: libc++
@@ -97,6 +101,9 @@ targets:
       - target: DirigoLibrary
       - target: DirigoEngine
       - target: DirigoHardware
+      # Static archives do not carry their own dependencies, so anything that links DirigoEngine has to
+      # link the C++ core too — otherwise the linker reports every `dirigo_sim_*` symbol as undefined.
+      - target: DirigoSimCxx
     info:
       path: Info.plist
       properties:
@@ -139,6 +146,9 @@ targets:
       - target: DirigoLibrary
       - target: DirigoEngine
       - target: DirigoHardware
+      # Static archives do not carry their own dependencies, so anything that links DirigoEngine has to
+      # link the C++ core too — otherwise the linker reports every `dirigo_sim_*` symbol as undefined.
+      - target: DirigoSimCxx
     settings:
       base:
         OTHER_LDFLAGS: -lc++
@@ -155,6 +165,9 @@ targets:
       - target: DirigoLibrary
       - target: DirigoEngine
       - target: DirigoHardware
+      # Static archives do not carry their own dependencies, so anything that links DirigoEngine has to
+      # link the C++ core too — otherwise the linker reports every `dirigo_sim_*` symbol as undefined.
+      - target: DirigoSimCxx
     settings:
       base:
         PRODUCT_NAME: DirigoSwiftTests

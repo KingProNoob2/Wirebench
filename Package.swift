@@ -28,7 +28,7 @@ let package = Package(
             name: "DirigoSimCxx",
             path: "Sources/DirigoSimCxx",
             publicHeadersPath: "include",
-            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+            cxxSettings: [.unsafeFlags(["-std=c++17", "-O2", "-pipe"])]
         ),
         .target(
             name: "DirigoEngine",
