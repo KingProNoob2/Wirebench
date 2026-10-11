@@ -65,7 +65,13 @@ typedef enum {
     /// `TMSetPins`. It computes nothing: it writes its `X` input through to the *producers* that its
     /// `P1..Pn` pins and its param pin are wired from. That needs the connection graph, so unlike every
     /// other kind it is implemented in the step loop rather than in `processModule`.
-    DIRIGO_BLOCK_SET = 13
+    DIRIGO_BLOCK_SET = 13,
+
+    /// `TMInRange`: a window test with a wrapping case, used as a time switch.
+    DIRIGO_BLOCK_INRANGE = 14,
+
+    /// `TMEquitherm`: the heating curve — the line through two configured points, extrapolated.
+    DIRIGO_BLOCK_EQUITHERM = 15
 } DirigoBlockKind;
 
 typedef struct {

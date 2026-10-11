@@ -256,6 +256,33 @@ void processModule(Module &m, const Sample &sample) {
             }
             return;
         }
+        case DIRIGO_BLOCK_INRANGE: {
+            /* `En` holds rather than clearing, like the rest. `L` and `H` are *parameters*, not pins. */
+            const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+            if (!enabled) return;
+            const int64_t x = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            if (m.paramPins.size() < 2) return;
+            const int64_t l = asInt(m.paramPins[0]);
+            const int64_t h = asInt(m.paramPins[1]);
+            /* H is exclusive, and L > H wraps — the time switch that spans midnight. The Swift
+               transposes the help's two comparisons deliberately; mirror the Swift. */
+            const bool inRange = l <= h ? (x >= l && x < h) : (x >= l || x < h);
+            if (!m.outPins.empty()) m.outPins[0] = boolean(inRange);
+            return;
+        }
+        case DIRIGO_BLOCK_EQUITHERM: {
+            const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+            if (!enabled) return;
+            const int64_t ot = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            if (m.paramPins.size() < 4) return;
+            const int64_t ax = asInt(m.paramPins[0]), ay = asInt(m.paramPins[1]);
+            const int64_t bx = asInt(m.paramPins[2]), by = asInt(m.paramPins[3]);
+            /* The line through A and B, extrapolated beyond the segment. Integer division truncates
+               toward zero in both languages, and `int64_t` is wide enough for `(by-ay)*(ot-ax)`. */
+            const int64_t wt = bx == ax ? ay : ay + (by - ay) * (ot - ax) / (bx - ax);
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(wt));
+            return;
+        }
         case DIRIGO_BLOCK_PASSIVE:
             return;
         default:
@@ -285,7 +312,13 @@ void resetModule(Module &m) {
         case DIRIGO_BLOCK_INT2BITS:
         case DIRIGO_BLOCK_SYSTEMCMD:
         case DIRIGO_BLOCK_SWITCH:
+        case DIRIGO_BLOCK_INRANGE:
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+            return;
+        case DIRIGO_BLOCK_EQUITHERM:
+            /* `WT` resets to an *int* zero, not the boolean default: the kind of a pin is part of the
+               value, and the differential test compares the kinds. */
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
             return;
         default:
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));

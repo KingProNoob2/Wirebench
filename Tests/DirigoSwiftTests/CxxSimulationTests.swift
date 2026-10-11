@@ -104,6 +104,96 @@ struct CxxSimulationTests {
         }
     }
 
+    /// `InRange` and `Equitherm` are the two arithmetic kinds `zelznice` needs, and until that project
+    /// is fully ported it is *skipped* by the corpus comparison below — so without this test they would
+    /// ship with no verification at all. That is the gap this closes: every branch of both blocks, both
+    /// engines, compared pin for pin.
+    ///
+    /// The cases are the ones that are actually easy to get wrong: the exclusive upper bound, the
+    /// wrapping window where `L > H`, `En = 0` holding rather than clearing, the degenerate curve where
+    /// `BX == AX` (a division by zero), a curve that extrapolates below A, and negative temperature
+    /// values, where C's integer division and Swift's both truncate *toward zero* — unlike a floor.
+    @Test("Both engines agree on InRange and Equitherm across their edge cases")
+    func inRangeAndEquithermAgree() throws {
+        // (x, l, h) for InRange: inside, on L, on H (exclusive), below, above, and L > H wrapping.
+        let rangeCases: [(Int32, Int32, Int32)] = [
+            (50, 0, 100), (0, 0, 100), (100, 0, 100), (-1, 0, 100), (101, 0, 100),
+            (0, 22, 6), (22, 22, 6), (5, 22, 6), (6, 22, 6), (23, 22, 6),
+            (-30, -20, -10), (-10, -20, -10), (-20, -20, -10),
+        ]
+        for (x, l, h) in rangeCases {
+            let project = Self.oneModuleProject(name: "inrange", guid: InRangeBlock.guid,
+                                                inPins: [.bool(true), .int32(x)],
+                                                paramPins: [.int32(l), .int32(h)],
+                                                outPins: 1)
+            try Self.compareBothEngines(project, label: "InRange x=\(x) l=\(l) h=\(h)")
+        }
+        // `En = 0` must hold the output, not clear it.
+        let disabled = Self.oneModuleProject(name: "inrange-off", guid: InRangeBlock.guid,
+                                            inPins: [.bool(false), .int32(50)],
+                                            paramPins: [.int32(0), .int32(100)],
+                                            outPins: 1)
+        try Self.compareBothEngines(disabled, label: "InRange En=0")
+
+        // (ot, ax, ay, bx, by) for Equitherm: a normal curve, the degenerate BX==AX, extrapolation at
+        // both ends, and values that force a negative product and a truncating divide.
+        let curveCases: [(Int32, Int32, Int32, Int32, Int32)] = [
+            (0, -10, 40, 15, 20), (10, -10, 40, 15, 20), (-10, -10, 40, 15, 20),
+            (15, -10, 40, 15, 20), (20, -10, 40, 15, 20), (-30, -10, 40, 15, 20),
+            (5, 0, 0, 0, 0), (5, 0, 7, 0, 9), (-7, 3, 25, -4, 60), (1, 2, 3, 5, 7),
+        ]
+        for (ot, ax, ay, bx, by) in curveCases {
+            let project = Self.oneModuleProject(name: "equitherm", guid: EquithermBlock.guid,
+                                                inPins: [.bool(true), .int32(ot)],
+                                                paramPins: [.int32(ax), .int32(ay),
+                                                            .int32(bx), .int32(by)],
+                                                outPins: 1)
+            try Self.compareBothEngines(project,
+                                        label: "Equitherm ot=\(ot) A=(\(ax),\(ay)) B=(\(bx),\(by))")
+        }
+    }
+
+    /// A one-module project, so a block kind can be compared in isolation.
+    static func oneModuleProject(name: String, guid: UUID, inPins: [PinValue],
+                                 paramPins: [PinValue], outPins: Int) -> PCCProject {
+        var project = PCCProject(name: name)
+        project.pages = [ProjectPage(caption: "main")]
+        project.appOptions.cycleDelay = 10
+        project.modules = [
+            PCCModule(id: 1, guid: guid, name: "U1", x: 0, y: 0, order: 10,
+                      threadId: 1, page: "main",
+                      inPins: inPins.enumerated().map { Pin(id: $0.offset, value: $0.element) },
+                      paramPins: paramPins.enumerated().map { Pin(id: $0.offset, value: $0.element) },
+                      outPins: (0..<outPins).map { Pin(id: $0, value: .bool(false)) }),
+        ]
+        return project
+    }
+
+    /// Runs both engines over one project and requires every pin to agree at every step.
+    static func compareBothEngines(_ project: PCCProject, label: String) throws {
+        #expect(CxxSimulationCore.isFullyPorted(project),
+                "\(label): the block under test must be ported, or nothing is being compared")
+        let swift = SimulationEngine(project: project, scheduling: .everyTick)
+        let cxx = CxxSimulationCore(project: project, profileScheduling: false)
+        for step in 0..<60 {
+            swift.step()
+            cxx.step(deltaMs: 10)
+            for module in project.modules {
+                guard let node = swift.getNode(id: module.id) else { continue }
+                for pin in node.block.outPins.indices {
+                    let theirs = cxx.outValue(moduleId: module.id, pin: pin)?.description ?? "-"
+                    let ours = node.block.outPins[pin].description
+                    #expect(theirs == ours, "\(label): step \(step) out[\(pin)] cxx \(theirs) vs swift \(ours)")
+                }
+                for pin in node.block.inPins.indices {
+                    let theirs = cxx.inValue(moduleId: module.id, pin: pin)?.description ?? "-"
+                    let ours = node.block.inPins[pin].description
+                    #expect(theirs == ours, "\(label): step \(step) in[\(pin)] cxx \(theirs) vs swift \(ours)")
+                }
+            }
+        }
+    }
+
     /// The test that matters for real projects: both engines on a corpus project, every pin, every
     /// step. Only projects where *every* module is ported can be compared — one unported block stops
     /// the wires it carries, which would make the ported blocks look wrong for the wrong reason.
