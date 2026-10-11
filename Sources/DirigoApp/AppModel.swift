@@ -912,6 +912,63 @@ public final class AppModel: @unchecked Sendable {
         simulationDidChange()
     }
 
+    /// Writes one **input** pin: the runtime block, and the document, so the change is saved the way a
+    /// parameter edit is. Then it makes the change visible straight away rather than at the next tick,
+    /// on whichever backend is running — while paused that means one step, and while playing the value is
+    /// simply pushed into the core for the next one.
+    public func setModuleInput(moduleId: Int, pinIndex: Int, value: PinValue) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == moduleId }) else { return }
+        if pinIndex < (project?.modules[idx].inPins.count ?? 0) {
+            project?.modules[idx].inPins[pinIndex].value = value
+        }
+        if let node = getNode(id: moduleId), pinIndex < node.block.inPins.count {
+            node.block.inPins[pinIndex] = value
+        }
+        isDocumentEdited = true
+        refreshAfterPinEdit()
+    }
+
+    /// The same for an **output** pin a person drives directly: a `BoolVar`'s switch, an `8xDI` channel.
+    public func setModuleOutput(moduleId: Int, pinIndex: Int, value: PinValue) {
+        guard let node = getNode(id: moduleId), pinIndex < node.block.outPins.count else { return }
+        node.block.outPins[pinIndex] = value
+        if let boolVar = node.block as? BoolVarBlock {
+            boolVar.setOutput(value.asBool)
+        }
+        refreshAfterPinEdit()
+    }
+
+    /// Re-propagates and, when the simulation is not running, takes one step so an edit shows up now.
+    private func refreshAfterPinEdit() {
+        engine?.propagateWires()
+        if isPlaying {
+            syncPinsIntoCore()
+        } else {
+            stepBackend(deltaMs: Double(max(1, project?.appOptions.cycleDelay ?? 1)))
+        }
+        simulationDidChange()
+    }
+
+    static func zero(like value: PinValue) -> PinValue {
+        switch value {
+        case .int16: return .int16(0)
+        case .int32: return .int32(0)
+        case .int64: return .int64(0)
+        case .float: return .float(0)
+        default: return .bool(false)
+        }
+    }
+
+    static func one(like value: PinValue) -> PinValue {
+        switch value {
+        case .int16: return .int16(1)
+        case .int32: return .int32(1)
+        case .int64: return .int64(1)
+        case .float: return .float(1)
+        default: return .bool(true)
+        }
+    }
+
     public func updateModuleParam(id: Int, paramIndex: Int, value: PinValue) {
         guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
         if paramIndex < (project?.modules[idx].paramPins.count ?? 0) {
@@ -1321,8 +1378,12 @@ public final class AppModel: @unchecked Sendable {
         } else if let eightDI = node.block as? EightDIBlock {
             eightDI.togglePin(pinIndex)
         } else if pinIndex < node.block.inPins.count {
-            let current = node.block.inPins[pinIndex].asBool
-            node.block.inPins[pinIndex] = .bool(!current)
+            // A click clears a set pin and sets a clear one, keeping the value's *kind* so a switch's
+            // `X3 = 8` becomes `0` and then `1` instead of turning into a Boolean.
+            let current = node.block.inPins[pinIndex]
+            setModuleInput(moduleId: moduleId, pinIndex: pinIndex,
+                           value: current.asBool ? Self.zero(like: current) : Self.one(like: current))
+            return
         } else if pinIndex < node.block.outPins.count {
             let current = node.block.outPins[pinIndex].asBool
             node.block.outPins[pinIndex] = .bool(!current)

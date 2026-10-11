@@ -55,9 +55,14 @@ public struct InspectorView: View {
                         ForEach(0..<mod.inPins.count, id: \.self) { idx in
                             let val = node?.block.inPins.indices.contains(idx) == true
                                 ? node!.block.inPins[idx] : mod.inPins[idx].value
+                            // An input can be driven by hand: clicking its name clears a set pin and sets
+                            // a clear one, and an integer pin's value can be typed over. That is how a
+                            // `Switch`'s selector or its `X3` values are poked without a wire.
                             SignalRow(name: ModulePinCatalog.inputPinFullName(for: mod, index: idx),
                                       value: val.description,
-                                      isHigh: val.asBool)
+                                      isHigh: val.asBool,
+                                      onToggle: { model.toggleModuleInput(moduleId: mod.id, pinIndex: idx) },
+                                      number: Self.editableNumber(model: model, module: mod, index: idx, value: val))
                                 .equatable()
                         }
                     }
@@ -132,6 +137,33 @@ public struct InspectorView: View {
             } description: {
                 Text("Select a function block on the canvas to inspect its signals and parameters.")
             }
+        }
+    }
+
+    /// A typed-in value for an input pin that holds an integer.
+    ///
+    /// Boolean and Float pins are shown rather than edited: a click already toggles those, and a text
+    /// field over a Float would be a different control with different rules.
+    static func editableNumber(model: AppModel, module: PCCModule, index: Int,
+                               value: PinValue) -> Binding<Int>? {
+        func kind(_ int: Int) -> PinValue {
+            switch value {
+            case .int16: return .int16(Int16(truncatingIfNeeded: int))
+            case .int64: return .int64(Int64(int))
+            default: return .int32(Int32(truncatingIfNeeded: int))
+            }
+        }
+        switch value {
+        case .int16, .int32, .int64:
+            return Binding(
+                get: {
+                    guard let node = model.getNode(id: module.id),
+                          node.block.inPins.indices.contains(index) else { return value.asInt }
+                    return node.block.inPins[index].asInt
+                },
+                set: { model.setModuleInput(moduleId: module.id, pinIndex: index, value: kind($0)) })
+        default:
+            return nil
         }
     }
 
@@ -327,9 +359,15 @@ struct SignalRow: View, Equatable {
     let name: String
     let value: String
     let isHigh: Bool
+    /// Present for an input pin: clicking the name clears it, clicking again sets it.
+    var onToggle: (() -> Void)?
+    /// Present for an integer input pin: its value can be typed over.
+    var number: Binding<Int>?
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.name == rhs.name && lhs.value == rhs.value && lhs.isHigh == rhs.isHigh
+            && (lhs.onToggle == nil) == (rhs.onToggle == nil)
+            && (lhs.number == nil) == (rhs.number == nil)
     }
 
     var body: some View {
@@ -338,16 +376,38 @@ struct SignalRow: View, Equatable {
                 Circle()
                     .fill(isHigh ? Theme.signalHigh : Color.secondary.opacity(0.35))
                     .frame(width: 7, height: 7)
-                Text(value)
-                    .font(.system(.body, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundStyle(isHigh ? .primary : .secondary)
-                    .textSelection(.enabled)
+                if let number {
+                    TextField("", value: number, format: .number)
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing)
+                        .font(.system(.body, design: .monospaced))
+                        .monospacedDigit()
+                        .frame(width: 56, alignment: .trailing)
+                        .help("Type a value for this input.")
+                } else {
+                    Text(value)
+                        .font(.system(.body, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(isHigh ? .primary : .secondary)
+                        .textSelection(.enabled)
+                }
             }
         } label: {
-            Text(name)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if let onToggle {
+                Button(action: onToggle) {
+                    Text(name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Click to set this input to 0, and again to 1.")
+            } else {
+                Text(name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
     }
 }
