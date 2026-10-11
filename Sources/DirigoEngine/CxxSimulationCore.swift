@@ -197,12 +197,15 @@ public final class CxxSimulationCore {
     }
 
     static func pinValue(_ value: DirigoValue) -> PinValue {
-        switch DirigoValueKind(rawValue: UInt32(value.kind)) ?? DIRIGO_VALUE_UNDEFINED {
-        case DIRIGO_VALUE_BOOL: return .bool(value.i != 0)
-        case DIRIGO_VALUE_INT16: return .int16(Int16(truncatingIfNeeded: value.i))
-        case DIRIGO_VALUE_INT32: return .int32(value.i)
-        case DIRIGO_VALUE_INT64: return .int64(value.i64)
-        case DIRIGO_VALUE_FLOAT: return .float(Float(value.f))
+        // Switched on the raw value rather than on `DirigoValueKind(rawValue:)`: a C enum's Swift
+        // initialiser is not failable — it traps on an unknown value — so an unexpected `kind` from the
+        // core would be a crash rather than `.undefined`.
+        switch Int32(value.kind) {
+        case Int32(DIRIGO_VALUE_BOOL.rawValue): return .bool(value.i != 0)
+        case Int32(DIRIGO_VALUE_INT16.rawValue): return .int16(Int16(truncatingIfNeeded: value.i))
+        case Int32(DIRIGO_VALUE_INT32.rawValue): return .int32(value.i)
+        case Int32(DIRIGO_VALUE_INT64.rawValue): return .int64(value.i64)
+        case Int32(DIRIGO_VALUE_FLOAT.rawValue): return .float(Float(value.f))
         default: return .undefined
         }
     }

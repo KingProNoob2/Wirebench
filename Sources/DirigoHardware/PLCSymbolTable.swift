@@ -172,7 +172,7 @@ public struct PLCSymbolTable: Sendable {
                                    umisteni: Int(m.umisteni), svorka: sv))
             }
             // Block-local bits: indexed from 0 inside the block, in a container word.
-            if let sv = s.localBitSvorka {
+            if s.localBitSvorka != nil {
                 let container: Int
                 if let own = moduleWord[m.umisteni] {
                     container = own
@@ -184,7 +184,7 @@ public struct PLCSymbolTable: Sendable {
                     container = 0
                 }
                 let width = s.fixedWidth ?? (s.localBitsAreUnexported ? 0 : m.outPinCount)
-                let names = s.localBits.isEmpty ? (0..<width).map { "\(s.localBitSvorka == 0 ? "B" : "B")\($0)" }
+                let names = s.localBits.isEmpty ? (0..<width).map { "B\($0)" }
                                                 : Array(s.localBits.prefix(width))
                 if !s.localBitsAreUnexported {
                     for (i, name) in names.enumerated() {

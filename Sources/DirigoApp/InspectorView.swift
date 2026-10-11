@@ -62,7 +62,8 @@ public struct InspectorView: View {
                                       value: val.description,
                                       isHigh: val.asBool,
                                       onToggle: { model.toggleModuleInput(moduleId: mod.id, pinIndex: idx) },
-                                      number: Self.editableNumber(model: model, module: mod, index: idx, value: val))
+                                      number: Self.editableNumber(model: model, module: mod, index: idx, value: val),
+                                      isInput: true)
                                 .equatable()
                         }
                     }
@@ -363,6 +364,9 @@ struct SignalRow: View, Equatable {
     var onToggle: (() -> Void)?
     /// Present for an integer input pin: its value can be typed over.
     var number: Binding<Int>?
+    /// Whether this is an input row. A plain `Bool`, because this is what `==` compares: the closure above
+    /// is main-actor isolated and cannot be read from a nonisolated comparison.
+    var isInput: Bool = false
 
     /// Whether the value is currently a field rather than text. Purely local: the row rests as text so
     /// it is laid out like every other row, and becomes a field for as long as it is being edited.
@@ -372,7 +376,7 @@ struct SignalRow: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.name == rhs.name && lhs.value == rhs.value && lhs.isHigh == rhs.isHigh
-            && (lhs.onToggle == nil) == (rhs.onToggle == nil)
+            && lhs.isInput == rhs.isInput
             && (lhs.number == nil) == (rhs.number == nil)
     }
 

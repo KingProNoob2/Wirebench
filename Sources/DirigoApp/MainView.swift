@@ -474,12 +474,11 @@ public struct MainView: View {
                     .disabled(model.project == nil)
                     .help("Maximum step rate. Threads run on the periods their profile declares.")
 
-                Text("max \(Int(model.tickRateHz)) Hz")
+                Text("\(Int(model.tickRateHz)) Hz")
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 46, alignment: .leading)
-                Spacer()
             }
         }
 
