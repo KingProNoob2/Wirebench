@@ -162,6 +162,19 @@ struct PlayLoopTests {
         #expect(model.tickCount > 0, "the loop must still be running for this to be meaningful")
         #expect(later == settled,
                 "a settled project invalidated \(later - settled) more times with identical values")
+
+        // And the work is skipped, not merely discarded: once a refresh has published, the digest says the
+        // values still agree, so the next refresh returns before building anything. Returning early *is*
+        // the optimization — before it, every one of those ticks rebuilt the whole dictionary and compared
+        // it only to throw it away (measured: 2 changes in 460 refreshes on `had+1block.pcc`).
+        #expect(model.refreshSnapshots() == false,
+                "a settled project must not republish")
+        let rebuilds = model.snapshotRebuildCount
+        for _ in 0..<5 { _ = model.refreshSnapshots() }
+        let extra = model.snapshotRebuildCount - rebuilds
+        let message = "5 more refreshes rebuilt the dictionary \(extra) times with identical values,"
+            + " so the digest shortcut is not returning early"
+        #expect(model.snapshotRebuildCount == rebuilds, "\(message)")
     }
 
     /// A project opened from Finder arrives through `AppDelegate.openFiles`, which reaches the model
@@ -172,5 +185,51 @@ struct PlayLoopTests {
         let model = AppModel()
         #expect(AppModel.shared === model,
                 "a Finder-opened project would have no model to load into")
+    }
+
+    /// `refreshSnapshots` asks the engine for a digest of every pin value and returns early when it
+    /// matches the digest the published snapshots correspond to, so the dictionary build, the per-module
+    /// snapshots and the whole-dictionary comparison are all skipped on a tick where nothing moved —
+    /// **99.6% of ticks** on `had+1block.pcc` (2 changes in 460 refreshes).
+    ///
+    /// That shortcut is only safe while the digest is faithful, and faithfulness is the whole risk: a
+    /// digest that missed a change would leave a stale value on the canvas, which is the worst thing this
+    /// file can do. So this test pins the digest to *values*, in both directions — it moves when a value
+    /// moves, comes back when the value does, and does not drift on its own.
+    @Test("The pin digest tracks values exactly, and does not drift")
+    func pinDigestIsFaithful() throws {
+        let project = CxxSimulationTests.pulseIntoNot()
+        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        func digest() -> UInt64 { engine.pinsDigest() }
+
+        // Stable when nothing happened, including across repeat calls.
+        let settled = digest()
+        #expect(digest() == settled, "the digest must not drift between two calls with no step between")
+
+        // A step that moves a value moves it.
+        engine.step()
+        #expect(digest() != settled, "a step that changed an output must move the digest")
+
+        // A second digest call with no step between must agree, or the shortcut would republish every
+        // tick and the optimization would be worse than nothing.
+        let afterStep = digest()
+        #expect(digest() == afterStep, "the digest must be a function of the values, not of call count")
+
+        // It tracks values exactly: writing one back restores the earlier digest.
+        guard let node = engine.getNode(id: 1)?.block else {
+            Issue.record("the fixture must expose PulseGen1"); return
+        }
+        let restore = node.outPins
+        node.outPins[0] = .int32(1234)
+        #expect(digest() != afterStep, "a changed pin value must change the digest")
+        node.outPins = restore
+        #expect(digest() == afterStep, "restoring the values must restore the digest")
+
+        // And it is not blind to the *kind* of a value, which an `asInt`-based digest would be: `out[0]`
+        // is an int32 here, so the same number as a bool must still read as a different value.
+        node.outPins[0] = .bool(true)
+        #expect(digest() != afterStep, "the same number as a different kind is a different value")
+        node.outPins = restore
+        #expect(digest() == afterStep)
     }
 }

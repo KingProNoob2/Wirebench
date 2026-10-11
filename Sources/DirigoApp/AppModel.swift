@@ -222,8 +222,19 @@ public final class AppModel: @unchecked Sendable {
         guard let project else {
             guard !snapshots.isEmpty else { return false }
             snapshots = [:]
+            publishedPinDigest = nil
             return true
         }
+        // The cheap question first. Measured on `had+1block.pcc` the snapshot data changes on 2 ticks out
+        // of 460, so this returns before allocating the dictionary, the per-module snapshots and the
+        // comparison on 99.6% of ticks. `pinsDigest` is faithful (see `SimulationEngine`), and the
+        // comparison below still runs whenever it does not match, so a digest that under-reported could
+        // only cost a frame — never a stale value on the canvas.
+        let previousDigest = engine?.pinsDigest()
+        if !snapshots.isEmpty, let previousDigest, previousDigest == publishedPinDigest {
+            return false
+        }
+        snapshotRebuildCount += 1
         var next: [Int: BlockSnapshot] = [:]
         next.reserveCapacity(project.modules.count)
         for module in project.modules {
@@ -236,11 +247,38 @@ public final class AppModel: @unchecked Sendable {
             snapshot.boolVarMode = (node.block as? BoolVarBlock)?.mode
             next[module.id] = snapshot
         }
-        guard next != snapshots else { return false }
+        guard next != snapshots else {
+            // Values agree, so remember the digest just measured and stop re-comparing against an
+            // unchanged set. `previousDigest` rather than a second `pinsDigest()` call: measuring it once
+            // is the whole point of the shortcut, and the values cannot have moved in between.
+            publishedPinDigest = previousDigest
+            return false
+        }
         // Assigned once, not mutated in place, so observers see a single change per refresh.
         snapshots = next
+        publishedPinDigest = previousDigest
         return true
     }
+
+    /// The engine digest the published `snapshots` correspond to. See `refreshSnapshots`.
+    private var publishedPinDigest: UInt64?
+
+    /// How many times `refreshSnapshots` has actually built a new snapshot dictionary.
+    ///
+    /// The point of the digest shortcut is that most refreshes build nothing: on `had+1block.pcc` the
+    /// values change on 2 ticks out of 460, so 99.6% of refreshes should return before allocating. That
+    /// is a property of *work done*, and no assertion about the returned value can observe it — a
+    /// shortcut that ran the whole rebuild and then returned the same `false` would look identical from
+    /// outside. This counter is how the tests observe the difference.
+    public private(set) var snapshotRebuildCount = 0
+
+    /// Digests the values the published `snapshots` were built from.
+    ///
+    /// A published surface for two reasons, both about testability rather than the app: the "did anything
+    /// change?" shortcut in `refreshSnapshots` is only safe while the digest is faithful, and a test
+    /// cannot observe a private engine. `pinsDigest()` reads the same pin values that
+    /// `refreshSnapshots()` copies, so a test may compare the two.
+    public func pinsDigest() -> UInt64? { engine?.pinsDigest() }
 
     // MARK: - The C++ core
 

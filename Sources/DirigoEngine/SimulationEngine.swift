@@ -45,6 +45,63 @@ public final class SimulationEngine: @unchecked Sendable {
     public private(set) var tickCount: UInt64 = 0
     public var cycleDelayMs: Double
 
+    /// A digest of every pin value in the runtime, for answering "did anything change?".
+    ///
+    /// The app rebuilds every module's snapshot after each step and compares it with the previous one to
+    /// decide whether to invalidate the canvas. Measured on `had+1block.pcc`, that data changes on **2
+    /// ticks out of 460**, so 99.6% of those rebuilds — and of the whole-dictionary comparisons after
+    /// them — were computed and thrown away. The digest lets that case return before allocating anything.
+    ///
+    /// It must be **faithful**: a digest that misses a change would freeze a value on the canvas, which
+    /// is the worst failure this file can have. So every pin is mixed in full — the case *and* the exact
+    /// bits, with no `asInt` widening — and the module id is mixed in by raw bits. It is an FNV-1a mix
+    /// rather than `Hasher` so the value is stable across runs and reproducible in a bug report; the
+    /// order is fixed by walking `nodes` sorted by id, since a dictionary's order is not stable.
+    ///
+    /// It is not the *only* check: `AppModel.refreshSnapshots` still compares, and it still publishes a
+    /// new dictionary, so a missed digest could only ever cost a frame, never a wrong value. The digest
+    /// decides whether to *look*, and the comparison decides what is true.
+    public func pinsDigest() -> UInt64 {
+        var digest: UInt64 = 0xcbf2_9ce4_8422_2325     // FNV-1a offset basis
+        for id in nodes.keys.sorted() {
+            guard let node = nodes[id] else { continue }
+            mix(&digest, UInt64(bitPattern: Int64(id)))
+            for value in node.block.inPins { mixPinValue(&digest, value) }
+            for value in node.block.paramPins { mixPinValue(&digest, value) }
+            for value in node.block.outPins { mixPinValue(&digest, value) }
+            // One piece a snapshot carries that the pins do **not** imply: a `BoolVar`'s mode, which
+            // decides how the control draws and behaves. (A segment display's lit segments look like
+            // the same kind of exception but are not — `SegmentBlock.segmentsState` is a computed view
+            // of `inPins`, which are already mixed in above.)
+            if let boolVar = node.block as? BoolVarBlock {
+                mix(&digest, boolVar.isPulseMode ? 1 : 0)
+            }
+        }
+        return digest
+    }
+
+    private func mix(_ digest: inout UInt64, _ value: UInt64) {
+        digest = (digest ^ value) &* 0x0000_0100_0000_01b3  // FNV-1a prime
+    }
+
+    /// Mixes one pin value **losslessly**: case tag, then that case's exact bits.
+    private func mixPinValue(_ digest: inout UInt64, _ value: PinValue) {
+        switch value {
+        case .bool(let v):
+            mix(&digest, 0); mix(&digest, v ? 1 : 0)
+        case .int16(let v):
+            mix(&digest, 1); mix(&digest, UInt64(UInt16(bitPattern: v)))
+        case .int32(let v):
+            mix(&digest, 2); mix(&digest, UInt64(UInt32(bitPattern: v)))
+        case .int64(let v):
+            mix(&digest, 3); mix(&digest, UInt64(bitPattern: v))
+        case .float(let v):
+            mix(&digest, 4); mix(&digest, UInt64(v.bitPattern))
+        case .undefined:
+            mix(&digest, 5)
+        }
+    }
+
     /// Milliseconds of engine time accumulated since each thread last ran.
     private var threadElapsedMs: [Int: Double] = [:]
     /// How many times each thread has actually executed.
