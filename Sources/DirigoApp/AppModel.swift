@@ -1,0 +1,1448 @@
+import Foundation
+import SwiftUI
+import DirigoCore
+import DirigoLibrary
+import DirigoEngine
+import DirigoHardware
+
+
+/// Everything a block card draws, as plain value data.
+///
+/// The canvas used to read live pin values straight out of the engine — a plain, non-observable
+/// class — during `body`, and leaned on a version counter to force re-evaluation. That is fragile:
+/// correct only if every invalidation path is remembered, and impossible for SwiftUI to diff,
+/// because the data it compares is owned by an object it cannot see change. Capturing the values
+/// into an observable value type makes the dependency explicit and the diff ordinary.
+public struct BlockSnapshot: Equatable, Sendable {
+    public var inValues: [PinValue] = []
+    public var paramValues: [PinValue] = []
+    public var outValues: [PinValue] = []
+    public var segments: [Bool] = []
+    public var boolVarMode: BoolVarBlock.Mode?
+
+    public init() {}
+}
+
+@Observable
+public final class AppModel: @unchecked Sendable {
+    public var project: PCCProject? {
+        didSet {
+            // One choke point for undo. Every edit to the document goes through this property, so
+            // no mutator can forget to record itself.
+            guard !isRestoringUndo,
+                  let previous = oldValue,
+                  let current = project,
+                  previous != current else { return }
+            history.record(UndoSnapshot(project: previous,
+                                        selectedModuleId: selectedModuleId,
+                                        selectedPage: selectedPage))
+        }
+    }
+
+    /// Undo/redo for document edits.
+    public private(set) var history = UndoHistory()
+    private var isRestoringUndo = false
+
+    public var canUndo: Bool { history.canUndo }
+    public var canRedo: Bool { history.canRedo }
+
+    public func undo() {
+        guard let current = project,
+              let snapshot = history.undo(current: UndoSnapshot(project: current,
+                                                               selectedModuleId: selectedModuleId,
+                                                               selectedPage: selectedPage))
+        else { return }
+        restore(snapshot)
+    }
+
+    public func redo() {
+        guard let current = project,
+              let snapshot = history.redo(current: UndoSnapshot(project: current,
+                                                               selectedModuleId: selectedModuleId,
+                                                               selectedPage: selectedPage))
+        else { return }
+        restore(snapshot)
+    }
+
+    private func restore(_ snapshot: UndoSnapshot) {
+        isRestoringUndo = true
+        project = snapshot.project
+        selectedModuleId = snapshot.selectedModuleId
+        selectedPage = snapshot.selectedPage
+        isRestoringUndo = false
+        engine = makeEngine(project: snapshot.project)
+        refreshSnapshots()
+        isDocumentEdited = true
+    }
+    public var selectedPage: String = "main"
+    public var selectedModuleId: Int?
+    public var isPlaying: Bool = false
+    public var tickRateHz: Double = 20.0
+    public var tickCount: UInt64 = 0
+    public var simulationVersion: UInt64 = 0
+
+    /// Live block values, refreshed from the engine whenever it advances. Views read this, never the
+    /// engine, so SwiftUI always has a change it can actually see.
+    public private(set) var snapshots: [Int: BlockSnapshot] = [:]
+
+    /// The model the app delegate reaches documents through.
+    ///
+    /// Set by `init`, so a project opened from Finder — `open`, or a double-click — lands in the
+    /// same model the window is already showing. `nonisolated(unsafe)` because `init` is nonisolated
+    /// and the assignment happens once per process, on the main thread, before any view exists.
+    nonisolated(unsafe) public static weak var shared: AppModel?
+
+    /// The running play loop, cancelled and replaced by `play()`/`pause()`.
+    private var simulationTimerTask: Task<Void, Never>?
+
+    /// The runtime the canvas draws its values from. Rebuilt on any structural change, which is why
+    /// `play()` re-reads it every iteration instead of capturing it.
+    private var engine: SimulationEngine?
+
+    // MARK: - Hardware link
+
+    /// Path of the selected serial port, and the ports found on this machine.
+    public var selectedPortPath: String = ""
+    public var availablePorts: [SerialPort.PortInfo] = []
+
+    /// The serial link to the PLC. `SerialPort` is a plain class, so its open/closed state is
+    /// mirrored into `isHardwareConnected` for the UI.
+    private let serialPort = SerialPort()
+
+    /// Whether the serial link to the PLC is open.
+    public var isHardwareConnected: Bool = false
+
+    // MARK: - Uploading a program to the PLC
+
+    /// The addresses from *Unit config*: the PLC is 1, the PC is 31. They are the frame's `DA` and
+    /// `SA`, and the captured upload uses exactly these.
+    public var plcAddress: UInt8 = 1
+    public var pcAddress: UInt8 = 31
+
+    /// True while an upload is in progress; the work runs off the main thread.
+    public var isUploading: Bool = false
+    /// A one-line status for the UI, updated between steps.
+    public var uploadStatus: String = ""
+
+    /// Uploads a program table exported from Dirigo (a `.pbd` file) to the PLC.
+    ///
+    /// The sequence is the captured one: stop the PLC, write the table as matrix frames, start it.
+    /// Everything it needs was recovered from the wire and the decomp, so nothing here is estimated.
+    public func uploadProgram(from url: URL) {
+        guard !isUploading else { return }
+        isUploading = true
+        uploadStatus = "Reading \(url.lastPathComponent)…"
+
+        if !isHardwareConnected { connectHardware() }
+        guard isHardwareConnected else {
+            uploadStatus = "No serial link. Choose a port and connect first."
+            isUploading = false
+            return
+        }
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            do {
+                let image = try PLCProgramImage.load(contentsOf: url)
+                guard let block = image.blocks.first(where: { $0.id == 525 }) else {
+                    await MainActor.run {
+                        self.uploadStatus = "That file has no program table (no 525 section)."
+                        self.isUploading = false
+                    }
+                    return
+                }
+                // The block's payload is an eight-byte sub-header then the table.
+                let body = Array(block.payload.dropFirst(8))
+                let table = try PLCProgramTable(bytes: body)
+                await self.upload(table: table)
+            } catch {
+                await MainActor.run {
+                    self.uploadStatus = "Upload failed: \(error)"
+                    self.isUploading = false
+                }
+            }
+        }
+    }
+
+    /// Sends one prepared table to the PLC. Shared by the file path and by *Build → Upload Compiled
+    /// Program*, which produces the table in-process instead of reading a `.pbd`.
+    public func upload(table: PLCProgramTable) async {
+        if !isHardwareConnected { connectHardware() }
+        guard isHardwareConnected else {
+            uploadStatus = "No serial link. Choose a port and connect first."
+            isUploading = false
+            return
+        }
+        do {
+            await MainActor.run { self.uploadStatus = "Stopping the PLC…" }
+            let session = DbNetSession(transport: SerialDbNetTransport(port: self.serialPort),
+                                       address: UInt32(self.plcAddress))
+            let uploader = PLCUploader(session: session,
+                                       destination: self.plcAddress,
+                                       source: self.pcAddress)
+            await MainActor.run { self.uploadStatus = "Writing \(table.realLength) bytes…" }
+            let frames = try uploader.upload(table: table)
+            await MainActor.run {
+                self.uploadStatus = "Uploaded \(frames) frame(s). The PLC is running."
+                self.isUploading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.uploadStatus = "Upload failed: \(error)"
+                self.isUploading = false
+            }
+        }
+    }
+
+    /// Asks for a `.pbd` and uploads it.
+    public func uploadProgramFile() {
+        pendingFilePanel = .uploadProgram
+    }
+
+    public init() {
+        AppModel.shared = self
+    }
+
+    /// Bumps the version that tells the canvas its live values have changed.
+    ///
+    /// This must be a **plain assignment**. `simulationVersion &+= 1` compiles to a `_modify`
+    /// accessor rather than the property setter, and `@Observable`'s mutation hook is not invoked
+    /// for it — so every view that read this property was never invalidated. The symptom was a
+    /// canvas that silently never repainted while the simulation ran: the engine advanced, the
+    /// toolbar's tick counter (a plain assignment) kept up, and every block stayed frozen until
+    /// some *other* observed property happened to change and forced a repaint.
+    /// Re-captures every block's live values and reports whether anything actually changed.
+    ///
+    /// The "did anything change" answer matters: republishing identical values invalidates every
+    /// card on the sheet for nothing. A settled project was re-rendering ~17 times a second with
+    /// byte-identical data, which is pure waste and made the canvas look busy while nothing moved.
+    @discardableResult
+    public func refreshSnapshots() -> Bool {
+        guard let project else {
+            guard !snapshots.isEmpty else { return false }
+            snapshots = [:]
+            return true
+        }
+        var next: [Int: BlockSnapshot] = [:]
+        next.reserveCapacity(project.modules.count)
+        for module in project.modules {
+            guard let node = getNode(id: module.id) else { continue }
+            var snapshot = BlockSnapshot()
+            snapshot.inValues = node.block.inPins
+            snapshot.paramValues = node.block.paramPins
+            snapshot.outValues = node.block.outPins
+            snapshot.segments = (node.block as? SegmentBlock)?.segmentsState ?? []
+            snapshot.boolVarMode = (node.block as? BoolVarBlock)?.mode
+            next[module.id] = snapshot
+        }
+        guard next != snapshots else { return false }
+        // Assigned once, not mutated in place, so observers see a single change per refresh.
+        snapshots = next
+        return true
+    }
+
+    /// The simulation moved: refresh the values the canvas draws — and, only if they really moved,
+    /// tell the views. A settled simulation therefore stops invalidating anything at all.
+    public func simulationDidChange() {
+        if refreshSnapshots() { bumpSimulationVersion() }
+    }
+
+    private func bumpSimulationVersion() {
+        simulationVersion = simulationVersion &+ 1
+    }
+
+    public var zoomScale: CGFloat = 1.0
+    public var panOffset: CGSize = CGSize(width: 40, height: 40)
+    public var dragStartPan: CGSize = CGSize(width: 40, height: 40)
+    public var viewportSize: CGSize = CGSize(width: 1200, height: 800)
+
+    public var canvasGlobalFrame: CGRect = .zero
+
+    public var currentFileURL: URL? = nil
+    public var isDocumentEdited: Bool = false
+
+    public var projectTitle: String {
+        if let currentFileURL = currentFileURL {
+            return currentFileURL.deletingPathExtension().lastPathComponent
+        } else if let name = project?.name, !name.isEmpty {
+            return name
+        } else {
+            return "Dirigo"
+        }
+    }
+
+    public func refreshPorts() {
+        availablePorts = SerialPort.availablePorts()
+        if let first = availablePorts.first, selectedPortPath.isEmpty {
+            selectedPortPath = first.path
+        }
+    }
+
+    public func createNewProject() {
+        pause()
+        let newProj = PCCProject(
+            name: "Untitled",
+            pages: [ProjectPage(caption: "main")],
+            modules: []
+        )
+        isRestoringUndo = true
+        self.project = newProj
+        isRestoringUndo = false
+        history.clear()
+        self.currentFileURL = nil
+        self.selectedPage = "main"
+        self.selectedModuleId = nil
+        self.engine = makeEngine(project: newProj)
+        self.tickCount = 0
+        self.simulationVersion = 0
+        self.isDocumentEdited = false
+        resetZoom()
+    }
+
+    @MainActor
+    public func loadProject(url: URL) {
+        pause()
+        do {
+            let parser = PCCParser()
+            let proj = try parser.parse(fileAt: url)
+            isRestoringUndo = true
+            self.project = proj
+            isRestoringUndo = false
+            history.clear()
+            self.currentFileURL = url
+            self.selectedPage = proj.pages.first?.caption ?? "main"
+            self.selectedModuleId = nil
+            self.engine = makeEngine(project: proj)
+        refreshSnapshots()
+            self.tickCount = 0
+            self.simulationVersion = 0
+            self.isDocumentEdited = false
+            // The canvas has not been laid out yet, so its viewport size is still the placeholder.
+            // Fitting to that produces a wrong zoom and pan; defer until the view reports a real
+            // size (see `performPendingZoomToFit`).
+            self.needsZoomToFit = true
+        } catch {
+            presentMessage(title: "Failed to open PCC project",
+                           message: error.localizedDescription,
+                           kind: .warning)
+        }
+    }
+
+    /// Asks the view for a file. The panel itself belongs to the view layer now.
+    @MainActor
+    public func openProjectFile() {
+        pendingFilePanel = .open
+    }
+
+    /// Called once the open panel has a result.
+    @MainActor
+    public func openProject(at url: URL) {
+        loadProject(url: url)
+    }
+
+    @MainActor
+    public func saveProject() {
+        if let url = currentFileURL {
+            do {
+                try saveProject(to: url)
+            } catch {
+                saveProjectAs()
+            }
+        } else {
+            saveProjectAs()
+        }
+    }
+
+    @MainActor
+    // MARK: - Adding blocks
+
+    /// Inserts a new block of `guid` on the current page.
+    ///
+    /// It lands in the middle of the visible canvas, which is where the eye already is. The engine
+    /// is rebuilt so the new block takes part in simulation immediately.
+    @discardableResult
+    public func addBlock(guid: UUID, at point: CGPoint? = nil) -> Int? {
+        guard var project else { return nil }
+
+        let id = BlockFactory.nextId(in: project)
+        let name = BlockFactory.suggestedName(for: guid, existing: project.modules)
+        let order = BlockFactory.nextOrder(in: project, page: selectedPage)
+        let centre = point ?? viewportCentreInCanvas()
+
+        // Nudge down-right while the spot is taken, so repeated insertions do not stack.
+        var spot = centre
+        while project.modules.contains(where: {
+            $0.page == selectedPage && abs($0.x - spot.x) < 24 && abs($0.y - spot.y) < 24
+        }) {
+            spot.x += 28
+            spot.y += 22
+        }
+
+        let module = BlockFactory.makeModule(
+            guid: guid, id: id, name: name,
+            x: spot.x, y: spot.y,
+            order: order, threadId: 1, page: selectedPage
+        )
+        project.modules.append(module)
+        self.project = project
+        self.selectedModuleId = id
+        self.isDocumentEdited = true
+        self.engine = makeEngine(project: project)
+        return id
+    }
+
+    /// The middle of the visible canvas, in content coordinates.
+    public func viewportCentreInCanvas() -> CGPoint {
+        let scale = max(zoomScale, 0.01)
+        return CGPoint(
+            x: (viewportSize.width / 2 - panOffset.width) / scale,
+            y: (viewportSize.height / 2 - panOffset.height) / scale
+        )
+    }
+
+    /// Deletes a block and its cables. Undoable, so there is no confirmation step — that is what
+    /// ⌘Z is for, and a modal on every delete gets tiresome fast.
+    /// Applies a structural change to the runtime: rebuild the engine and mark the document edited.
+    ///
+    /// Call this *after* assigning `project`, because that setter is the single undo choke point and
+    /// has already recorded history by the time we get here.
+    func runtimeDidChangeStructure() {
+        if let project { engine = makeEngine(project: project) }
+        isDocumentEdited = true
+        refreshSnapshots()
+    }
+
+    public func deleteModule(id: Int) -> Bool {
+        guard var project else { return false }
+        guard project.deleteModule(id: id) != nil else { return false }
+
+        self.project = project
+        if selectedModuleId == id { selectedModuleId = nil }
+        if configuringModuleId == id { configuringModuleId = nil }
+        self.engine = makeEngine(project: project)
+        self.isDocumentEdited = true
+        return true
+    }
+
+    /// Deletes whatever is selected.
+    public func deleteSelectedModule() {
+        guard let selectedModuleId else { return }
+        _ = deleteModule(id: selectedModuleId)
+    }
+
+    /// Tidy hand-drawn wire routes on the current page back to Dirigo's default, mirroring the
+    /// IDE's *Default points* command.
+    @MainActor
+    public func resetWireRouting() {
+        guard var project else { return }
+        let count = project.resetWireRouting(onPage: selectedPage)
+        guard count > 0 else {
+            presentMessage(title: "No hand-drawn wire routes",
+                           message: "Every cable on this page already uses Dirigo's default routing.",
+                           kind: .info)
+            return
+        }
+        self.project = project
+        self.isDocumentEdited = true
+    }
+
+    /// Writes a copy that the original Dirigo can open.
+    ///
+    /// The workspace here is unbounded, so the layout may not fit Dirigo's single A3 sheet. This
+    /// translates it (and, as a last resort, scales it) onto the sheet and reports what it did.
+    @MainActor
+    public func exportForDirigo() {
+        guard let project else { return }
+
+        preparedExport = PaperSize.prepareForDirigo(project)
+        pendingFilePanel = .export
+    }
+
+    /// What the export panel should suggest as a name.
+    public var exportDefaultName: String {
+        let base = currentFileURL?.deletingPathExtension().lastPathComponent
+            ?? (project?.name ?? "project")
+        return base + "-dirigo.pcc"
+    }
+
+    /// Writes the prepared export, once the user has chosen where.
+    @MainActor
+    public func finishExport(to url: URL) {
+        guard project != nil, let result = preparedExport else { return }
+        preparedExport = nil
+
+        // Extra properties become Dirigo counterparts — or are removed — on export only. A normal
+        // save keeps them, which is what lets a block be improved here and still hand back a project
+        // the original can open.
+        let translation = ExtraPropertyTranslator.translate(result.project,
+                                                            declarations: ExtraPropertyCatalog.byGuid)
+
+        var output = translation.project
+        output.projectPath = url.path
+        do {
+            let xml = PCCSerializer().serialize(project: output)
+            try xml.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            presentError("Could not write \(url.lastPathComponent)", detail: error.localizedDescription)
+            return
+        }
+
+        var notes = result.adjustments
+        if let warning = result.warning { notes.append(warning) }
+        notes.append(contentsOf: translation.notes)
+        if notes.isEmpty {
+            notes = ["The layout already fits an A3 sheet; nothing was moved."]
+        }
+        presentMessage(title: "Exported \(url.lastPathComponent)",
+                       message: notes.joined(separator: "\n\n"),
+                       kind: result.warning == nil ? .info : .warning)
+    }
+
+    @MainActor
+    private func presentError(_ message: String, detail: String) {
+        presentMessage(title: message, message: detail, kind: .warning)
+    }
+
+    @MainActor
+    public func saveProjectAs() {
+        guard project != nil else { return }
+        pendingFilePanel = .saveAs
+
+    }
+
+    /// What the save panel should suggest as a name.
+    public var saveAsDefaultName: String {
+        let base = currentFileURL?.lastPathComponent
+            ?? ((project?.name.isEmpty == false) ? project!.name : "Untitled")
+        let named = base.hasSuffix(".pcc") ? base : base + ".pcc"
+        return named
+    }
+
+    /// Called once the save panel has a destination.
+    public func didChooseSaveURL(_ url: URL) {
+        do {
+            try saveProject(to: url)
+        } catch {
+            presentMessage(title: "Failed to save project",
+                           message: error.localizedDescription,
+                           kind: .critical)
+        }
+    }
+
+    public func saveProject(to url: URL) throws {
+        guard var project = project else { return }
+        project.projectPath = url.path
+        let serializer = PCCSerializer()
+        let xmlString = serializer.serialize(project: project)
+        try xmlString.write(to: url, atomically: true, encoding: .utf8)
+        self.project = project
+        self.currentFileURL = url
+        self.isDocumentEdited = false
+    }
+
+    public func zoomIn(anchor: CGPoint? = nil) {
+        zoomBy(factor: 1.25, anchor: anchor)
+    }
+
+    public func zoomOut(anchor: CGPoint? = nil) {
+        zoomBy(factor: 0.8, anchor: anchor)
+    }
+
+    public func resetZoom() {
+        noteZoomActivity()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            zoomScale = 1.0
+            panOffset = CGSize(width: 40, height: 40)
+            dragStartPan = panOffset
+        }
+    }
+
+    public func zoomTo(_ targetZoom: CGFloat, anchor: CGPoint? = nil) {
+        guard zoomScale > 0 else { return }
+        let factor = targetZoom / zoomScale
+        zoomBy(factor: factor, anchor: anchor)
+    }
+
+    public func zoomBy(factor: CGFloat, anchor: CGPoint? = nil) {
+        // Counted before the no-op guard: a pinch that momentarily changes nothing is still an
+        // active gesture, and must not let the sharpening kick in mid-gesture.
+        noteZoomActivity()
+        let oldZoom = zoomScale
+        let newZoom = max(0.2, min(3.5, oldZoom * factor))
+        guard newZoom != oldZoom else { return }
+
+        let focus = anchor ?? CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
+
+        let contentX = (focus.x - panOffset.width) / oldZoom
+        let contentY = (focus.y - panOffset.height) / oldZoom
+
+        panOffset.width = focus.x - contentX * newZoom
+        panOffset.height = focus.y - contentY * newZoom
+        dragStartPan = panOffset
+        zoomScale = newZoom
+        noteZoomActivity()
+    }
+
+    /// True once the zoom has been still for a moment.
+    ///
+    /// Card rasterisation is sharpened only while this is true. Changing a card's render scale
+    /// re-rasterises it, so doing that mid-gesture re-renders all 57 cards in a single frame —
+    /// measured as a 95 ms hitch on essentially every zoom step. Holding the sharpening until the
+    /// gesture stops removes every spike from the interaction while keeping text crisp at rest.
+    public private(set) var isZoomSettled = true
+    private var zoomSettleTask: Task<Void, Never>?
+
+    private func noteZoomActivity() {
+        zoomSettleTask?.cancel()
+        if isZoomSettled { isZoomSettled = false }
+        zoomSettleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.isZoomSettled = true
+        }
+    }
+
+    /// Set when a project is loaded before the canvas knows its size.
+    public var needsZoomToFit: Bool = false
+
+    /// Called by the canvas once it has a real viewport size.
+    public func performPendingZoomToFit() {
+        guard needsZoomToFit, viewportSize.width > 80, viewportSize.height > 80 else { return }
+        needsZoomToFit = false
+        zoomToFit()
+    }
+
+    public func zoomToFit() {
+        guard let project = project else {
+            resetZoom()
+            return
+        }
+        let pageModules = project.modules.filter { $0.page == selectedPage }
+        guard !pageModules.isEmpty else {
+            resetZoom()
+            return
+        }
+
+        var minX = Double.greatestFiniteMagnitude
+        var minY = Double.greatestFiniteMagnitude
+        var maxX = -Double.greatestFiniteMagnitude
+        var maxY = -Double.greatestFiniteMagnitude
+
+        for mod in pageModules {
+            let w = Double(ModuleCardView.cardWidth(for: mod))
+            let h = Double(ModuleCardView.cardHeight(for: mod))
+            minX = min(minX, mod.x)
+            minY = min(minY, mod.y)
+            maxX = max(maxX, mod.x + w)
+            maxY = max(maxY, mod.y + h)
+        }
+
+        let bboxW = CGFloat(maxX - minX)
+        let bboxH = CGFloat(maxY - minY)
+        guard bboxW > 0, bboxH > 0 else { return }
+
+        let padding: CGFloat = 60.0
+        let availW = max(100, viewportSize.width - padding * 2)
+        let availH = max(100, viewportSize.height - padding * 2)
+
+        let scaleX = availW / bboxW
+        let scaleY = availH / bboxH
+        let targetScale = max(0.25, min(1.8, min(scaleX, scaleY)))
+
+        let targetPanX = (viewportSize.width - bboxW * targetScale) / 2.0 - CGFloat(minX) * targetScale
+        let targetPanY = (viewportSize.height - bboxH * targetScale) / 2.0 - CGFloat(minY) * targetScale
+
+        noteZoomActivity()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            zoomScale = targetScale
+            panOffset = CGSize(width: targetPanX, height: targetPanY)
+            dragStartPan = panOffset
+        }
+    }
+
+    public func step() {
+        guard let engine = engine else { return }
+        engine.step()
+        self.tickCount = engine.tickCount
+        simulationDidChange()
+    }
+
+    public func reset() {
+        simulationTimerTask?.cancel()
+        simulationTimerTask = nil
+        isPlaying = false
+        engine?.reset()
+        tickCount = 0
+        simulationDidChange()
+    }
+
+    public func togglePlay() {
+        if isPlaying {
+            pause()
+        } else {
+            play()
+        }
+    }
+
+
+    public func play() {
+        guard engine != nil else { return }
+        isPlaying = true
+        simulationTimerTask?.cancel()
+
+        simulationTimerTask = Task { @MainActor [weak self] in
+            var lastUIUpdateTime = ContinuousClock.now
+            var lastStepTime = ContinuousClock.now
+            var updatePending = false
+            while !Task.isCancelled {
+                guard let self = self, self.isPlaying else { break }
+                // Step the engine the *views* read, re-read every iteration. Capturing it once
+                // orphaned the loop the moment anything rebuilt the runtime (wiring a connection,
+                // deleting a block, an undo): the tick counter kept advancing from the discarded
+                // engine while the canvas drew values from the new one, so the workspace froze and
+                // only moved when an interaction forced a repaint.
+                guard let engine = self.engine else { break }
+
+                // Step only when a thread is due. A project whose fastest thread runs once a second is
+                // then stepped once a second, instead of twenty times for nothing — and the cycle is
+                // given the wall-clock time that actually elapsed, so the simulation still advances in
+                // real time however seldom it is stepped.
+                let now = ContinuousClock.now
+                let elapsedMs = Double((now - lastStepTime).components.seconds) * 1000
+                    + Double((now - lastStepTime).components.attoseconds) / 1e15
+                let ran = engine.stepIfDue(deltaMs: max(1, elapsedMs))
+                if ran { lastStepTime = now }
+                if updatePending && !ran && now - lastUIUpdateTime >= .milliseconds(28) {
+                    self.simulationDidChange()
+                    lastUIUpdateTime = now
+                    updatePending = false
+                }
+                if ran {
+                    self.tickCount = engine.tickCount
+                    // Throttle UI property invalidations to ~30-40 Hz maximum to keep UI at solid 60fps
+                    // without choking — but never *drop* one. Dropping is what a rare step cannot afford:
+                    // a thread that runs once a second would have its single update swallowed by the
+                    // frame budget, and the canvas would show the old values until the next second.
+                    if now - lastUIUpdateTime >= .milliseconds(28) {
+                        self.simulationDidChange()
+                        lastUIUpdateTime = now
+                        updatePending = false
+                    } else {
+                        updatePending = true
+                    }
+                }
+
+                // Sleep until the next thread is due, never faster than the rate the user asked for and
+                // never longer than a second. A pending update caps the wait instead, so it is delivered
+                // within one frame rather than one thread period.
+                let frameSec = 1.0 / max(1.0, self.tickRateHz)
+                var dueSec = min(max(engine.nextDueInMs() / 1000.0, frameSec), 1.0)
+                if updatePending { dueSec = min(dueSec, 0.028) }
+                try? await Task.sleep(nanoseconds: UInt64(dueSec * 1_000_000_000))
+            }
+        }
+    }
+
+    public func pause() {
+        isPlaying = false
+        simulationTimerTask?.cancel()
+        simulationTimerTask = nil
+    }
+
+    /// `Profiles.ini`, read once. A profile gives each thread its real period (`Timer 1s` every
+    /// 1000 ms, `Tick` every 71 ms, `Idle` every 50 ms), which is what lets the play loop sleep instead
+    /// of waking twenty times a second whether or not anything is due.
+    private static let profileDatabase = ProfileRegistry.load()
+
+    /// Builds the runtime with the project's profile, so scheduling follows the hardware rather than a
+    /// fixed cadence. Falls back to the project's `CYCLE_DELAY` when no profile matches, which is the
+    /// same period for every thread.
+    private func makeEngine(project: PCCProject) -> SimulationEngine {
+        let profile = Self.profileDatabase.flatMap { ProfileRegistry.profile(for: project, in: $0) }
+        return SimulationEngine(project: project, profile: profile, scheduling: .profileIntervals)
+    }
+
+    public func getNode(id: Int) -> SimulationEngine.RuntimeNode? {
+        engine?.getNode(id: id)
+    }
+
+    /// Swaps in a differently-shaped instance of the same block type, copying across every pin
+    /// value the two shapes have in common (En, switch selector, operands, parameters).
+    private func replaceBlock(id: Int, with newBlock: FunctionBlock) {
+        guard let node = getNode(id: id) else { return }
+        for (index, value) in node.block.inPins.enumerated() where index < newBlock.inPins.count {
+            newBlock.inPins[index] = value
+        }
+        for (index, value) in node.block.paramPins.enumerated() where index < newBlock.paramPins.count {
+            newBlock.paramPins[index] = value
+        }
+        for (index, value) in node.block.outPins.enumerated() where index < newBlock.outPins.count {
+            newBlock.outPins[index] = value
+        }
+        engine?.updateBlock(for: id, newBlock: newBlock)
+    }
+
+    /// Moves a module. The workspace is unbounded — Dirigo's fixed A3 sheet is only a *reference*
+    /// here; `exportForDirigo()` is what reconciles an oversized layout with it.
+    public func updateModulePosition(id: Int, deltaX: Double, deltaY: Double) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].x += deltaX
+        project?.modules[idx].y += deltaY
+    }
+
+    public var configuringModuleId: Int? = nil
+
+    public func openConfigureModule(id: Int) {
+        self.configuringModuleId = id
+        self.selectedModuleId = id
+    }
+
+    public func closeConfigureModule() {
+        self.configuringModuleId = nil
+    }
+
+    public func updateBoolVarMode(id: Int, mode: BoolVarBlock.Mode) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].simulMode = mode.rawValue
+        project?.modules[idx].rawAttributes["SimulMode"] = "\(mode.rawValue)"
+        if let node = getNode(id: id), let boolVar = node.block as? BoolVarBlock {
+            boolVar.mode = mode
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func updateModuleParam(id: Int, paramIndex: Int, value: PinValue) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        if paramIndex < (project?.modules[idx].paramPins.count ?? 0) {
+            project?.modules[idx].paramPins[paramIndex].value = value
+        }
+        if let node = getNode(id: id), paramIndex < node.block.paramPins.count {
+            node.block.paramPins[paramIndex] = value
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func updatePulseGenTiming(id: Int, tOn: Int, tOff: Int) {
+        updateModuleParam(id: id, paramIndex: 0, value: .int32(Int32(tOn)))
+        updateModuleParam(id: id, paramIndex: 1, value: .int32(Int32(tOff)))
+    }
+
+    public func updateCounterStep(id: Int, step: Int) {
+        updateModuleParam(id: id, paramIndex: 0, value: .int32(Int32(step)))
+    }
+
+    // MARK: - Presenting
+
+    /// A message waiting to be shown.
+    ///
+    /// The model never opens a window of its own: it records what should be said and a view presents
+    /// it. That is what keeps this file free of AppKit.
+    public struct PendingAlert: Identifiable, Equatable {
+        public enum Kind: Equatable { case info, warning, critical }
+        public let id = UUID()
+        public var title: String
+        public var message: String
+        public var kind: Kind
+    }
+
+    public var pendingAlert: PendingAlert?
+
+    /// The export prepared while the user picks a destination.
+    private var preparedExport: DirigoExport?
+
+    /// A file panel the user has asked for, for the same reason.
+    public enum FilePanel: Equatable {
+        case open, saveAs, export, uploadProgram
+        /// The build's two exports, and the template it can read.
+        case exportProgramBinary, exportSymbolTable, importBuildTemplate
+    }
+    public var pendingFilePanel: FilePanel?
+
+    /// Shows a message.
+    public func presentMessage(title: String, message: String, kind: PendingAlert.Kind = .warning) {
+        pendingAlert = PendingAlert(title: title, message: message, kind: kind)
+    }
+
+    // MARK: - Search
+
+    /// What the sidebar's search box contains.
+    ///
+    /// It searches *blocks*, not pages: typing a block type or an instance name highlights the
+    /// matches on the sheet instead of hiding everything that does not match.
+    public var blockSearchText: String = ""
+
+    private var searchQuery: String {
+        blockSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether a block matches the current search — by instance name, block type, the original
+    /// Delphi class, or its category.
+    public func moduleMatchesSearch(_ module: PCCModule) -> Bool {
+        let query = searchQuery
+        guard !query.isEmpty else { return false }
+        let info = BlockTypeCatalog.info(forGuid: module.guid)
+        let fields = [module.name, info?.blockName ?? "", info?.delphiClass ?? "", info?.category ?? ""]
+        return fields.contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    /// Matches on the page being shown — the ones the canvas can actually highlight.
+    public var highlightedModuleIds: Set<Int> {
+        guard !searchQuery.isEmpty, let project else { return [] }
+        return Set(project.modules
+            .filter { $0.page == selectedPage && moduleMatchesSearch($0) }
+            .map(\.id))
+    }
+
+    /// Matches anywhere in the project, so the sidebar can say when hits are on another page.
+    public var blockSearchMatchCount: Int {
+        guard !searchQuery.isEmpty, let project else { return 0 }
+        return project.modules.filter { moduleMatchesSearch($0) }.count
+    }
+
+    // MARK: - Sheet text
+
+    /// The text object being edited, and the one selected, as indices into `project.graphics`.
+    ///
+    /// A graphic has no id of its own, so an index is the only handle there is. It stays valid for as
+    /// long as the array is not restructured, and every path that restructures it clears these.
+    public var selectedAnnotationIndex: Int?
+    public var editingAnnotationIndex: Int?
+
+    /// The text objects on a page, each with the index it has in the project's array — which is what
+    /// the canvas needs in order to select or delete one.
+    public func textAnnotations(onPage page: String) -> [(index: Int, graphic: ProjectGraphic)] {
+        (project?.graphics ?? []).enumerated().compactMap { offset, graphic in
+            guard graphic.page == page, graphic.text != nil else { return nil }
+            return (index: offset, graphic: graphic)
+        }
+    }
+
+    public func beginEditingAnnotation(at index: Int) {
+        guard project?.graphics.indices.contains(index) == true else { return }
+        selectedAnnotationIndex = index
+        editingAnnotationIndex = index
+    }
+
+    /// Adds a text object at a point in canvas coordinates — the middle of the view when omitted —
+    /// and opens it for editing, because an object you cannot type into is not much use.
+    @discardableResult
+    public func addTextAnnotation(_ text: String = "A", at point: CGPoint? = nil) -> Int? {
+        guard var project else { return nil }
+        let spot = point ?? viewportCentreInCanvas()
+        project.graphics.append(
+            PCCGraphicBuilder.text(text,
+                                   at: RoutePoint(x: Double(spot.x), y: Double(spot.y)),
+                                   page: selectedPage)
+        )
+        self.project = project
+        isDocumentEdited = true
+
+        let index = project.graphics.count - 1
+        selectedAnnotationIndex = index
+        editingAnnotationIndex = index
+        return index
+    }
+
+    /// Sets a text object's character. An empty string is refused: the object would still be in the
+    /// document but nothing would be drawn, leaving an invisible thing to find and delete.
+    public func updateAnnotationText(at index: Int, text: String) {
+        guard var project, project.graphics.indices.contains(index) else { return }
+        guard !text.isEmpty else { return }
+        guard project.graphics[index].text != text else { return }
+        project.graphics[index].text = text
+        self.project = project
+        isDocumentEdited = true
+    }
+
+    public func deleteAnnotation(at index: Int) {
+        guard var project, project.graphics.indices.contains(index) else { return }
+        project.graphics.remove(at: index)
+        self.project = project
+        selectedAnnotationIndex = nil
+        editingAnnotationIndex = nil
+        isDocumentEdited = true
+    }
+
+    /// Deletes the selected text object, and only if it belongs to the page being shown — otherwise a
+    /// selection made on one page could delete something invisible from another.
+    public func deleteSelectedAnnotation() {
+        guard let index = selectedAnnotationIndex,
+              let project,
+              project.graphics.indices.contains(index),
+              project.graphics[index].page == selectedPage else { return }
+        deleteAnnotation(at: index)
+    }
+
+    // MARK: - Pages
+
+    /// Adds a page, selecting it.
+    ///
+    /// A page's caption is what every block on it references, so captions must be unique. A clashing
+    /// name is given a numeric suffix rather than silently merging two pages into one.
+    @discardableResult
+    public func addPage(caption: String, isMacro: Bool = false) -> String? {
+        guard var project else { return nil }
+        var base = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty { base = isMacro ? "Macro" : "Page" }
+        if isMacro, !base.hasPrefix("*") { base = "*" + base }
+
+        var candidate = base
+        var suffix = 2
+        while project.pages.contains(where: { $0.caption == candidate }) {
+            candidate = "\(base)\(suffix)"
+            suffix += 1
+        }
+
+        project.pages.append(ProjectPage(caption: candidate))
+        self.project = project
+        selectedPage = candidate
+        isDocumentEdited = true
+        return candidate
+    }
+
+    /// How many blocks sit on a page.
+    public func moduleCount(onPage caption: String) -> Int {
+        project?.modules.filter { $0.page == caption }.count ?? 0
+    }
+
+    /// Deletes a page together with everything on it.
+    ///
+    /// Blocks reference their page by caption, so leaving them behind would strand them: no sheet
+    /// draws them, no export places them, but they stay in the file. They go too, with their cables.
+    /// The last page is never removed — a project with no pages has nowhere to put a block.
+    @discardableResult
+    public func deletePage(caption: String) -> Bool {
+        guard var project else { return false }
+        guard project.pages.count > 1 else { return false }
+        guard let index = project.pages.firstIndex(where: { $0.caption == caption }) else { return false }
+
+        for module in project.modules where module.page == caption {
+            _ = project.deleteModule(id: module.id)
+        }
+        project.graphics.removeAll { $0.page == caption }
+        project.pages.remove(at: index)
+        self.project = project
+
+        if selectedPage == caption {
+            selectedPage = project.pages.first?.caption ?? "main"
+        }
+        if let selectedModuleId, project.modules.first(where: { $0.id == selectedModuleId }) == nil {
+            self.selectedModuleId = nil
+        }
+        isDocumentEdited = true
+        runtimeDidChangeStructure()
+        return true
+    }
+
+    /// Module ids on a thread, in the order the runtime will execute them.
+    public func executionOrder(forThread threadId: Int) -> [Int] {
+        (engine?.executionSchedule[threadId] ?? []).map(\.module.id)
+    }
+
+    /// The module whose name is being edited on the canvas, if any.
+    public var renamingModuleId: Int?
+
+    /// Renames a module.
+    ///
+    /// Rebuilds the runtime: the registry falls back to name matching for a few types (`Inputs` and
+    /// `Outputs` share a GUID, and some blocks are recognised by a word in the name), so a rename can
+    /// change which block is built.
+    public func renameModule(id: Int, name: String) {
+        defer { renamingModuleId = nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = project?.modules.firstIndex(where: { $0.id == id }),
+              project?.modules[index].name != trimmed else { return }
+        project?.modules[index].name = trimmed
+        runtimeDidChangeStructure()
+    }
+
+    /// The module with this id, if it is still in the document.
+    public func module(id: Int) -> PCCModule? {
+        project?.modules.first { $0.id == id }
+    }
+
+    /// Moves a module to another thread.
+    ///
+    /// The runtime files every module under its thread (`executionSchedule[tid]`), so this has to
+    /// rebuild it — a plain field write would leave the block running on its old thread until some
+    /// other edit happened to rebuild.
+    public func updateModuleThread(id: Int, threadId: Int) {
+        guard let index = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        let clamped = max(0, min(31, threadId))
+        guard project?.modules[index].threadId != clamped else { return }
+        project?.modules[index].threadId = clamped
+        runtimeDidChangeStructure()
+    }
+
+    /// Changes where a module sits in its thread's execution order.
+    ///
+    /// Within a thread, blocks run in ascending `ORDER`, so this re-sorts the schedule and therefore
+    /// rebuilds it too.
+    public func updateModuleOrder(id: Int, order: Int) {
+        guard let index = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        let clamped = max(0, min(9999, order))
+        guard project?.modules[index].order != clamped else { return }
+        project?.modules[index].order = clamped
+        runtimeDidChangeStructure()
+    }
+
+    public func setModuleRawAttribute(id: Int, key: String, value: String) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].rawAttributes[key] = value
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func updateDivModuloVisible(id: Int, isVisible: Bool) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].rawAttributes["MODULO_VISIBLE"] = isVisible ? "True" : "False"
+        // Ensure outPins count in module aligns with visibility
+        if isVisible {
+            while (project?.modules[idx].outPins.count ?? 0) < 2 {
+                project?.modules[idx].outPins.append(Pin(id: project?.modules[idx].outPins.count ?? 1, value: .int32(0)))
+            }
+        } else {
+            // Keep at least 1 (quotient Y)
+            if (project?.modules[idx].outPins.count ?? 0) > 1 {
+                // If no connection uses pin 1, trim or keep pin count
+                let hasWireOnMod = project?.inConnections.contains(where: { $0.outModuleId == id && $0.outPinId == 1 }) ?? false
+                if !hasWireOnMod {
+                    project?.modules[idx].outPins.removeSubrange(1...)
+                }
+            }
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func updateRSPriority(id: Int, higherPriorityS: Bool) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        let priVal = higherPriorityS ? "S" : "R"
+        project?.modules[idx].rawAttributes["PRIORITY"] = priVal
+        project?.modules[idx].rawAttributes["RS_PRIORITY"] = priVal
+        if let node = getNode(id: id), let rs = node.block as? RSBlock {
+            rs.resetPriority = !higherPriorityS
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func updateModuleInputCount(id: Int, count: Int) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].rawAttributes["INPUT_COUNT"] = "\(count)"
+        // For ISwitch, inPins = En (0), Sw (1), X0...X(count-1) -> total count + 2
+        // For And/Or/Xor, inPins = En (0), X0...X(count-1) -> total count + 1
+        let isSwitch = project?.modules[idx].name.lowercased().contains("switch") ?? false
+        let totalNeeded = isSwitch ? (count + 2) : (count + 1)
+        
+        while (project?.modules[idx].inPins.count ?? 0) < totalNeeded {
+            let nextId = project?.modules[idx].inPins.count ?? 0
+            let defVal: PinValue = isSwitch ? (nextId == 0 ? .bool(true) : .int32(0)) : (nextId == 0 ? .bool(true) : .bool(false))
+            project?.modules[idx].inPins.append(Pin(id: nextId, value: defVal))
+        }
+        if (project?.modules[idx].inPins.count ?? 0) > totalNeeded {
+            // Only trim if not connected
+            let hasWire = project?.inConnections.contains(where: { $0.inModuleId == id && $0.inPinId >= totalNeeded }) ?? false
+            if !hasWire {
+                project?.modules[idx].inPins.removeSubrange(totalNeeded...)
+            }
+        }
+        
+        // Update the live runtime block, carrying the current pin values over so that changing
+        // the input count does not reset a running simulation.
+        if let node = getNode(id: id) {
+            if node.block is ISwitchBlock {
+                replaceBlock(id: id, with: ISwitchBlock(inputCount: count))
+            } else if node.block is AndBlock {
+                replaceBlock(id: id, with: AndBlock(inputCount: count))
+            } else if node.block is OrBlock {
+                replaceBlock(id: id, with: OrBlock(inputCount: count))
+            }
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func updateModuleOutputCount(id: Int, count: Int) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].rawAttributes["OUTPUT_COUNT"] = "\(count)"
+        
+        while (project?.modules[idx].outPins.count ?? 0) < count {
+            let nextId = project?.modules[idx].outPins.count ?? 0
+            project?.modules[idx].outPins.append(Pin(id: nextId, value: .bool(false)))
+        }
+        if (project?.modules[idx].outPins.count ?? 0) > count {
+            let hasWire = project?.inConnections.contains(where: { $0.outModuleId == id && $0.outPinId >= count }) ?? false
+            if !hasWire {
+                project?.modules[idx].outPins.removeSubrange(count...)
+            }
+        }
+        
+        if let node = getNode(id: id) {
+            if node.block is Int2BitsBlock {
+                engine?.updateBlock(for: id, newBlock: Int2BitsBlock(bitCount: count))
+            } else if node.block is IntDemuxBlock {
+                engine?.updateBlock(for: id, newBlock: IntDemuxBlock(outputCount: count))
+            }
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func update8xDIMask(id: Int, maskHex: String, showWord: Bool) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].rawAttributes["PIN_MASK"] = maskHex
+        if showWord {
+            project?.modules[idx].rawAttributes["PIN_ALL_VISIBLE"] = "True"
+        } else {
+            project?.modules[idx].rawAttributes.removeValue(forKey: "PIN_ALL_VISIBLE")
+        }
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func update8xDOConfig(id: Int, pinCount: Int, hiddenMaskHex: String) {
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        project?.modules[idx].rawAttributes["PIN_COUNT"] = "\(pinCount)"
+        project?.modules[idx].rawAttributes["HIDDEN_PIN_MASK"] = hiddenMaskHex
+        self.isDocumentEdited = true
+        simulationDidChange()
+    }
+
+    public func toggleModuleInput(moduleId: Int, pinIndex: Int) {
+        guard let node = getNode(id: moduleId) else { return }
+        if let boolVar = node.block as? BoolVarBlock {
+            boolVar.trigger()
+        } else if let inputs = node.block as? InputsBlock {
+            inputs.togglePin(pinIndex)
+        } else if let eightDI = node.block as? EightDIBlock {
+            eightDI.togglePin(pinIndex)
+        } else if pinIndex < node.block.inPins.count {
+            let current = node.block.inPins[pinIndex].asBool
+            node.block.inPins[pinIndex] = .bool(!current)
+        } else if pinIndex < node.block.outPins.count {
+            let current = node.block.outPins[pinIndex].asBool
+            node.block.outPins[pinIndex] = .bool(!current)
+        }
+        engine?.propagateWires()
+
+        if !isPlaying {
+            engine?.step()
+            self.tickCount = engine?.tickCount ?? (self.tickCount &+ 1)
+        }
+        simulationDidChange()
+    }
+
+    /// Reports a momentary control being held down or let go.
+    ///
+    /// Kept separate from `toggleModuleInput` because a push button's value is the *duration* of
+    /// the press, which a single call cannot express.
+    public func setModuleInputPressed(moduleId: Int, pinIndex: Int, isPressed: Bool) {
+        guard let node = getNode(id: moduleId) else { return }
+        if let boolVar = node.block as? BoolVarBlock {
+            if isPressed { boolVar.press() } else { boolVar.release() }
+        } else if isPressed {
+            // Everything else is a latch, so a press is the whole interaction.
+            toggleModuleInput(moduleId: moduleId, pinIndex: pinIndex)
+            return
+        }
+        engine?.propagateWires()
+        if !isPlaying {
+            engine?.step()
+            self.tickCount = engine?.tickCount ?? (self.tickCount &+ 1)
+        }
+        simulationDidChange()
+    }
+
+    public func connectHardware() {
+        guard !selectedPortPath.isEmpty else { return }
+        do {
+            // 57600 and even parity are the *Unit config* settings; see docs/plc-protocol.md.
+            try serialPort.open(path: selectedPortPath, baudRate: 57600, parity: .even)
+            isHardwareConnected = true
+        } catch {
+            print("Hardware connection failed: \(error)")
+            isHardwareConnected = false
+        }
+    }
+
+    public func disconnectHardware() {
+        serialPort.close()
+        isHardwareConnected = false
+    }
+
+    // MARK: - Building the project
+
+    /// What a build produced, and where its header came from.
+    ///
+    /// The compiling, the counts and the wording all come from `PLCProjectBuild` in DirigoHardware — the
+    /// same type `dirigo-cli build` uses — so this only adds what is the app's: the template it remembered
+    /// and the program binary ready to be written.
+    public struct BuildReport {
+        public var build: PLCProjectBuild
+        public var templateNote: String
+        public var programBinary: [UInt8]
+
+        public var moduleCount: Int { build.report.moduleCount }
+        public var compiledModules: Int { build.report.compiledModules }
+        public var displayModules: Int { build.report.displayModules }
+        public var recordBytes: Int { build.report.recordBytes }
+        public var dataSlots: Int { build.report.dataSlots }
+        public var terminals: Int { build.report.terminals }
+        public var symbolRows: Int { build.report.symbolRows }
+        public var unshaped: [String] { build.report.unshaped }
+        public var unshapedModules: [String] { build.report.unshapedModules }
+        public var macros: [String] { build.report.macros }
+        public var table: [UInt8] { build.table }
+        public var symbolCSV: String { build.symbolCSV }
+
+        public var summary: String { ([templateNote] + build.report.lines).joined(separator: "\n") }
+    }
+
+    /// The last build, kept so the exporters and the report sheet can use it without recompiling.
+    public var buildReport: BuildReport?
+    public var isBuilding = false
+    /// Whether the report sheet is up.
+    public var isShowingBuildReport = false
+
+    /// The program binary the user imported, if any: the build takes its table and header from it.
+    private var buildTemplateImage: PLCProgramImage?
+
+    /// The template the next build fills in — an imported `.pbd` when there is one, otherwise the blank
+    /// table `PLCProgramTable.buildTemplate()` describes.
+    private func buildTemplate() -> PLCProgramTable? {
+        buildTemplateImage.flatMap(PLCProgramTable.from(image:)) ?? PLCProgramTable.buildTemplate()
+    }
+
+    /// Compiles the project as it stands. Returns the report, and stores it.
+    @discardableResult
+    @MainActor
+    public func compileProject() -> BuildReport? {
+        guard let project else {
+            presentMessage(title: "Nothing to build", message: "Open a project first.")
+            return nil
+        }
+        guard let template = buildTemplate() else {
+            presentMessage(title: "Could not prepare a program table",
+                           message: "The build template is not a 256-byte table.")
+            return nil
+        }
+        let xml = PCCSerializer().serialize(project: project)
+        do {
+            let build = try PLCProjectBuild.compile(xml: xml,
+                                                    classForGUID: BlockTypeCatalog.classNamesByGUID,
+                                                    template: template)
+            let name = currentFileURL?.lastPathComponent ?? (project.name + ".pcc")
+            let binary = try PLCProgramImage.programBinary(table: build.table, projectName: name,
+                                                           header: buildTemplateImage?.header)
+            let report = BuildReport(
+                build: build,
+                templateNote: buildTemplateImage == nil
+                    ? "Header: this app's default (import a .pbd to carry Dirigo's own across). "
+                      + "Hidden-pin flags are not in the project, so every record is written with a zero flag."
+                    : "Header: taken from the imported program binary. Hidden-pin flags are not in the "
+                      + "project, so every record is written with a zero flag.",
+                programBinary: binary)
+            buildReport = report
+            return report
+        } catch {
+            presentMessage(title: "Build failed", message: String(describing: error))
+            return nil
+        }
+    }
+
+    /// Compiles, then shows the report.
+    @MainActor
+    public func buildAndShowReport() {
+        if compileProject() != nil { isShowingBuildReport = true }
+    }
+
+    /// Writes the compiled program binary (`.pbd`).
+    @MainActor
+    public func exportCompiledProgram() {
+        guard compileProject() != nil else { return }
+        pendingFilePanel = .exportProgramBinary
+    }
+
+    /// Writes the compiled symbol table (`.csv`).
+    @MainActor
+    public func exportSymbolTable() {
+        guard compileProject() != nil else { return }
+        pendingFilePanel = .exportSymbolTable
+    }
+
+    /// Uploads what the compiler just produced, rather than a file.
+    @MainActor
+    public func uploadCompiledProgram() {
+        guard let report = compileProject() else { return }
+        guard let table = try? PLCProgramTable(bytes: report.table) else { return }
+        isUploading = true
+        Task { await upload(table: table) }
+    }
+
+    /// The name the program-binary panel suggests.
+    public var programBinaryDefaultName: String {
+        let base = currentFileURL?.deletingPathExtension().lastPathComponent ?? (project?.name ?? "program")
+        return base + ".pbd"
+    }
+
+    /// The name the symbol-table panel suggests.
+    public var symbolTableDefaultName: String {
+        let base = currentFileURL?.deletingPathExtension().lastPathComponent ?? (project?.name ?? "program")
+        return base + ".csv"
+    }
+
+    /// Writes the built program binary once the user has chosen where.
+    @MainActor
+    public func finishProgramBinaryExport(to url: URL) {
+        guard let report = buildReport else { return }
+        do {
+            try Data(report.programBinary).write(to: url, options: .atomic)
+            presentMessage(title: "Exported \(url.lastPathComponent)",
+                           message: "\(report.compiledModules) modules, "
+                                    + "\(report.table.count) bytes of table.",
+                           kind: .info)
+        } catch {
+            presentError("Could not write \(url.lastPathComponent)", detail: error.localizedDescription)
+        }
+    }
+
+    /// Writes the built symbol table once the user has chosen where.
+    @MainActor
+    public func finishSymbolTableExport(to url: URL) {
+        guard let report = buildReport else { return }
+        do {
+            try report.symbolCSV.write(to: url, atomically: true, encoding: .utf8)
+            presentMessage(title: "Exported \(url.lastPathComponent)",
+                           message: "\(report.symbolRows) symbol row(s).", kind: .info)
+        } catch {
+            presentError("Could not write \(url.lastPathComponent)", detail: error.localizedDescription)
+        }
+    }
+
+    /// Reads a `.pbd` to use as the build template: its table is filled in, and its header is carried
+    /// through to the next export.
+    @MainActor
+    public func loadBuildTemplate(from url: URL) {
+        do {
+            let image = try PLCProgramImage.load(contentsOf: url)
+            guard image.blocks.contains(where: { $0.id == PLCProgramImage.programTableSection }) else {
+                presentMessage(title: "No program table in \(url.lastPathComponent)",
+                               message: "A program binary needs a 525 section.")
+                return
+            }
+            buildTemplateImage = image
+            buildReport = nil
+            presentMessage(title: "Using \(url.lastPathComponent) as the build template",
+                           message: "The table's header and profile come from it now.", kind: .info)
+        } catch {
+            presentError("Could not read \(url.lastPathComponent)", detail: error.localizedDescription)
+        }
+    }
+
+    /// Asks for a `.pbd` to use as the build template.
+    public func chooseBuildTemplate() { pendingFilePanel = .importBuildTemplate }
+}

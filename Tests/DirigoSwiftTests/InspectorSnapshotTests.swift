@@ -1,0 +1,73 @@
+import Testing
+import Foundation
+import SwiftUI
+import AppKit
+@testable import DirigoApp
+
+/// Renders the inspector offscreen so a visual change can be looked at without launching the app.
+///
+/// Gated on `DIRIGO_SNAPSHOT`: it writes files rather than asserting anything, so it is not a test of
+/// behaviour, and a normal `swift test` run skips it. Materials and glass are drawn by the window server,
+/// so a render like this shows the layout and typography faithfully and the translucency roughly.
+@Suite("Inspector snapshot")
+struct InspectorSnapshotTests {
+    static var root: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    @Test("Render the inspector, light and dark", .enabled(if: ProcessInfo.processInfo.environment["DIRIGO_SNAPSHOT"] != nil))
+    @MainActor
+    func render() throws {
+        let url = Self.root.appendingPathComponent("had+1block.pcc")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        for scheme in [ColorScheme.dark, .light] {
+            let model = AppModel()
+            model.loadProject(url: url)
+            // `Counter1`: a block with both inputs and outputs, and the two hero actions.
+            model.selectedModuleId = 3
+
+            // The header and a few signal rows, which is the part of the panel the screenshot shows. A
+            // grouped `Form` has no layout outside a window, so rendering the pieces is what works; the
+            // header's container is the form row, so here it is drawn on the panel colour instead.
+            let view = VStack(alignment: .leading, spacing: 10) {
+                InspectorHero(name: "Counter1",
+                              blockName: "Counter",
+                              category: "Main\\Other",
+                              summary: "Increases Y by Step on Trigger 0->1 event",
+                              symbol: InspectorView.iconForBlockType("Counter"),
+                              tint: Theme.tint(forCategory: "Main\\Other"),
+                              isSimulated: true,
+                              onToggleFirstInput: {},
+                              onReset: {})
+                .padding(.horizontal, 16)   // stands in for the grouped form's row inset
+                VStack(spacing: 6) {
+                    SignalRow(name: "Trigger", value: "false", isHigh: false).equatable()
+                    SignalRow(name: "Reset", value: "false", isHigh: true).equatable()
+                    SignalRow(name: "Set", value: "true", isHigh: true).equatable()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+            }
+            .frame(width: 320)
+            .environment(\.colorScheme, scheme)
+            .background(scheme == .dark ? Color(white: 0.12) : Color(white: 0.95))
+
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 2
+            guard let image = renderer.nsImage,
+                  let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) else {
+                Issue.record(ProgramBuilderTests.Mismatch(description: "ImageRenderer produced nothing"))
+                return
+            }
+            let name = scheme == .dark ? "/tmp/dirigo-inspector-dark.png" : "/tmp/dirigo-inspector-light.png"
+            try png.write(to: URL(fileURLWithPath: name))
+        }
+    }
+}

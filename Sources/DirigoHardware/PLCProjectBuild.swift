@@ -1,0 +1,164 @@
+import Foundation
+
+/// One project compiled: the records, the program table, the symbol table, and what was left out.
+///
+/// The app's *Build* menu and `dirigo-cli build` both go through here, so the two cannot drift: what the
+/// UI reports is what the command prints, and both are the compiler the tests pin against `had.dmp` and
+/// the real symbol tables.
+public struct PLCProjectBuild: Equatable, Sendable {
+    /// What the build could and could not do. Counts are of *modules*, not classes.
+    public struct Report: Equatable, Sendable {
+        public var moduleCount: Int
+        /// Modules whose class has a record shape that contributes to the program.
+        public var compiledModules: Int
+        /// Modules on the sheet that are not in the program at all — the displays.
+        public var displayModules: Int
+        /// Modules whose class has no shape yet, and the classes themselves.
+        public var unshapedModules: [String]
+        public var unshaped: [String]
+        /// Modules whose GUID is not a block at all: a sheet saved as a block, expanded by hand.
+        public var macros: [String]
+        public var recordBytes: Int
+        public var dataSlots: Int
+        public var terminals: Int
+        public var symbolRows: Int
+
+        /// The summary both front ends show, in the same words.
+        public var lines: [String] {
+            var out = [
+                "\(compiledModules) of \(moduleCount) modules compiled, \(recordBytes) bytes of records."
+                    + (displayModules > 0 ? " \(displayModules) display module(s) write no record." : ""),
+                "\(dataSlots) data slot(s), \(terminals) terminal(s), \(symbolRows) symbol row(s).",
+            ]
+            if !unshaped.isEmpty {
+                out.append("\(unshaped.count) class(es) have no record shape yet: "
+                           + unshaped.prefix(6).joined(separator: ", ")
+                           + (unshaped.count > 6 ? ", …" : ""))
+                out.append("   modules: " + unshapedModules.prefix(8).joined(separator: ", ")
+                           + (unshapedModules.count > 8 ? ", …" : ""))
+            }
+            if !macros.isEmpty {
+                out.append("\(macros.count) macro module(s) were left out: "
+                           + macros.prefix(4).joined(separator: ", ")
+                           + (macros.count > 4 ? ", …" : ""))
+            }
+            return out
+        }
+
+        /// True when every module either compiled, writes no record by design, or is a macro.
+        public var isComplete: Bool { unshaped.isEmpty }
+    }
+
+    /// One module's share of the record region.
+    public struct ModuleRecord: Equatable, Sendable {
+        public var name: String
+        /// The implementing class, or `nil` when the GUID is a macro.
+        public var className: String?
+        /// How many bytes this module's record takes.
+        public var bytes: Int
+        /// Whether it is part of the program at all (a display writes nothing).
+        public var contributes: Bool
+    }
+
+    /// Per module, in file order — what the region is actually made of.
+    public var moduleRecords: [ModuleRecord]
+
+    public var report: Report
+    /// The 256-byte program table, ready to be wrapped as a `.pbd`.
+    public var table: [UInt8]
+    /// The record region that went into the table's body.
+    public var records: [UInt8]
+    /// The symbol table as Dirigo's `.csv`.
+    public var symbolCSV: String
+
+    /// Compiles a project's XML.
+    ///
+    /// - Parameters:
+    ///   - xml: the project as `.pcc`, which is what the compiler's readers take.
+    ///   - classForGUID: normalised GUID to implementing class name. A GUID that is absent is a macro.
+    ///   - template: the table whose header and profile are carried into the build.
+    public static func compile(xml: String, classForGUID: [String: String],
+                               template: PLCProgramTable) throws -> PLCProjectBuild {
+        let modules = PLCProjectCompiler.modules(in: xml)
+        let wires = PLCProjectCompiler.wires(in: xml)
+        let normalised = Dictionary(uniqueKeysWithValues: classForGUID.map {
+            (PLCProjectCompiler.normaliseGUID($0.key), $0.value)
+        })
+        let allocation = PLCSymbolTable(modules: modules, wires: wires,
+                                        classForGUID: normalised,
+                                        shapes: PLCProjectCompiler.classShapes)
+        let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
+                                          classForGUID: normalised)
+        let records = try compiler.records(modules: modules, wires: wires, allocation: allocation)
+        let table = try compiler.table(fromTemplate: template, modules: modules, wires: wires,
+                                       allocation: allocation)
+
+        var compiled = 0, displays = 0
+        var unshapedClasses: Set<String> = []
+        var unshapedModules: [String] = []
+        var macros: [String] = []
+        for module in modules {
+            guard let cls = normalised[PLCProjectCompiler.normaliseGUID(module.guid)] else {
+                macros.append(module.name)
+                continue
+            }
+            guard let shape = PLCProjectCompiler.classShapes[cls] else {
+                unshapedClasses.insert(cls)
+                unshapedModules.append(module.name)
+                continue
+            }
+            if shape.contributesRecord { compiled += 1 } else { displays += 1 }
+        }
+
+        // Each module measured on its own: the roles write a word whether or not a wire resolves, so a
+        // module's record length does not depend on the rest of the project.
+        var perModule: [ModuleRecord] = []
+        for module in modules {
+            let cls = normalised[PLCProjectCompiler.normaliseGUID(module.guid)]
+            let length = (try? compiler.records(modules: [module], wires: [], allocation: allocation).count) ?? 0
+            let contributes = cls.flatMap { PLCProjectCompiler.classShapes[$0]?.contributesRecord } ?? false
+            perModule.append(ModuleRecord(name: module.name, className: cls, bytes: length,
+                                          contributes: contributes))
+        }
+
+        let report = Report(
+            moduleCount: modules.count,
+            compiledModules: compiled,
+            displayModules: displays,
+            unshapedModules: unshapedModules.sorted(),
+            unshaped: unshapedClasses.sorted(),
+            macros: macros.sorted(),
+            recordBytes: records.count,
+            dataSlots: allocation.addresses.values.filter { !$0.isBoolean }.count,
+            terminals: allocation.addresses.values.filter { $0.isBoolean }.count,
+            symbolRows: allocation.rows.count)
+        return PLCProjectBuild(moduleRecords: perModule, report: report, table: table, records: records,
+                               symbolCSV: allocation.csv)
+    }
+}
+
+public extension PLCProgramTable {
+    /// The table a build starts from when no `.pbd` was imported.
+    ///
+    /// Only the two fields that are established are filled: the version, which is `1` in every real table
+    /// (`movw $0x1`, 0x4B0A07), and the real length at `0xD0`, which equals `0xD0` itself. Everything else
+    /// is left zero rather than guessed — a header that matters should come from a program binary Dirigo
+    /// wrote, which carries the profile name and the project flags too.
+    static func buildTemplate() -> PLCProgramTable? {
+        var bytes = [UInt8](repeating: 0, count: PLCProgramTable.size)
+        bytes[PLCProgramTable.versionOffset] = 1
+        let length = UInt16(PLCProgramTable.lengthOffset)
+        for i in 0..<2 {
+            bytes[PLCProgramTable.lengthOffset + i] = UInt8(truncatingIfNeeded: length >> (8 * i))
+            bytes[PLCProgramTable.lengthOffset + 2 + i] = UInt8(truncatingIfNeeded: length >> (8 * i))
+        }
+        return try? PLCProgramTable(bytes: bytes)
+    }
+
+    /// The table inside a program binary, if the file has one.
+    static func from(image: PLCProgramImage) -> PLCProgramTable? {
+        guard let section = image.blocks.first(where: { $0.id == PLCProgramImage.programTableSection }),
+              section.payload.count >= 8 + PLCProgramTable.size else { return nil }
+        return try? PLCProgramTable(bytes: Array(section.payload[8..<(8 + PLCProgramTable.size)]))
+    }
+}
