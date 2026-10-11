@@ -367,6 +367,7 @@ struct SignalRow: View, Equatable {
     /// Whether the value is currently a field rather than text. Purely local: the row rests as text so
     /// it is laid out like every other row, and becomes a field for as long as it is being edited.
     @State private var isEditing = false
+    @State private var isHovering = false
     @FocusState private var isEditingFocused: Bool
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -398,16 +399,28 @@ struct SignalRow: View, Equatable {
                             .background(Color.primary.opacity(0.10),
                                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                             .onSubmit { isEditing = false }
+                            // Focus after the field exists rather than in the same update that creates it,
+                            // which is what makes the caret land in it reliably.
+                            .task { isEditingFocused = true }
                             .onChange(of: isEditingFocused) { _, focused in
                                 if !focused { isEditing = false }
                             }
                     } else {
+                        // A resting value that still *looks* and *behaves* like something you can type
+                        // into: a padded chip so the whole box is the tap target rather than the glyphs,
+                        // with a faint fill at rest and a stronger one under the pointer. The padding is
+                        // horizontal only — vertical padding is what inflated these rows before.
                         Text(value)
                             .font(.system(.body, design: .monospaced))
                             .monospacedDigit()
                             .foregroundStyle(isHigh ? .primary : .secondary)
+                            .frame(minWidth: max(30, CGFloat(value.count) * 8.5 + 12), alignment: .trailing)
+                            .padding(.horizontal, 4)
+                            .background(Color.primary.opacity(isHovering ? 0.16 : 0.08),
+                                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                             .contentShape(Rectangle())
-                            .onTapGesture { isEditing = true; isEditingFocused = true }
+                            .onHover { isHovering = $0 }
+                            .onTapGesture { isEditing = true }
                             .help("Click to edit this input.")
                     }
                 } else {
