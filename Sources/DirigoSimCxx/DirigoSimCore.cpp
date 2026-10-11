@@ -321,25 +321,6 @@ void propagate(DirigoSim *sim) {
     for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
 }
 
-void propagateUnused(DirigoSim *sim) {
-    for (const Connection &c : sim->connections) {
-        auto src = sim->indexById.find(c.outModule);
-        auto dst = sim->indexById.find(c.inModule);
-        if (src == sim->indexById.end() || dst == sim->indexById.end()) continue;
-        Module &from = sim->modules[src->second];
-        Module &to = sim->modules[dst->second];
-        if (c.outPin < 0 || static_cast<size_t>(c.outPin) >= from.outPins.size()) continue;
-        DirigoValue value = from.outPins[c.outPin];
-        if (c.inverted) value = boolean(!asBool(value));
-        if (c.inPin < 0) continue;
-        if (c.toParamPins) {
-            if (static_cast<size_t>(c.inPin) < to.paramPins.size()) to.paramPins[c.inPin] = value;
-        } else if (static_cast<size_t>(c.inPin) < to.inPins.size()) {
-            to.inPins[c.inPin] = value;
-        }
-    }
-}
-
 }  // namespace
 
 extern "C" {

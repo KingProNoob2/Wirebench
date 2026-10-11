@@ -49,8 +49,13 @@ targets:
     settings:
       base:
         PRODUCT_NAME: DirigoSimCxx
+        # SwiftPM works out the module for a C target on its own; Xcode does not. Without an explicit
+        # module map `import DirigoSimCxx` fails in the app even though `swift test` builds it.
+        DEFINES_MODULE: true
+        MODULEMAP_FILE: $(SRCROOT)/Sources/DirigoSimCxx/include/module.modulemap
         HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/DirigoSimCxx/include
         CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
         SKIP_INSTALL: true
 
   DirigoEngine:
@@ -120,6 +125,9 @@ targets:
         INFOPLIST_FILE: Info.plist
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
+        # DirigoEngine embeds the C++ core; the linker needs the C++ runtime named for the app and the
+        # CLI even though nothing in Swift mentions it.
+        OTHER_LDFLAGS: -lc++
 
   DirigoCLI:
     type: tool
@@ -133,6 +141,7 @@ targets:
       - target: DirigoHardware
     settings:
       base:
+        OTHER_LDFLAGS: -lc++
         PRODUCT_NAME: dirigo-cli
         PRODUCT_BUNDLE_IDENTIFIER: com.dirigo.cli
 

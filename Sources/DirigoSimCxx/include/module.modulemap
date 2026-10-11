@@ -1,0 +1,8 @@
+// SwiftPM finds this automatically, because it sits in the target's public headers directory. Xcode
+// does not: it only synthesises a module map for a target that defines one, so `project.yml` names this
+// file in `MODULEMAP_FILE` as well. Without it `import DirigoSimCxx` fails in the app while the same
+// sources build fine under `swift test`.
+module DirigoSimCxx {
+    header "DirigoSimCxx.h"
+    export *
+}
