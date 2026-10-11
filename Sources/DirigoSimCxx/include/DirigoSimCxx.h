@@ -39,7 +39,7 @@ typedef struct {
     double f;       /* float */
 } DirigoValue;
 
-/// The block kinds the core implements — six of them. Anything else maps to `DIRIGO_BLOCK_UNRESOLVED`,
+/// The block kinds the core implements. Anything else maps to `DIRIGO_BLOCK_UNRESOLVED`,
 /// which holds its inputs and does nothing, the same contract the Swift `UnresolvedBlock` keeps. Which
 /// kinds are ported is therefore visible from the outside: `dirigo_sim_portable_kind_count()` reports
 /// the number, and a caller can compare pin-for-pin against the Swift engine to see how far the port
@@ -51,7 +51,16 @@ typedef enum {
     DIRIGO_BLOCK_OR = 3,
     DIRIGO_BLOCK_XOR = 4,
     DIRIGO_BLOCK_BOOLVAR = 5,
-    DIRIGO_BLOCK_PULSEGEN = 6
+    DIRIGO_BLOCK_PULSEGEN = 6,
+    DIRIGO_BLOCK_COUNTER = 7,
+    DIRIGO_BLOCK_COMPARATOR = 8,
+    DIRIGO_BLOCK_INT2BITS = 9,
+    DIRIGO_BLOCK_SYSTEMCMD = 10,
+    DIRIGO_BLOCK_SWITCH = 11,
+    /// A block with no behaviour of its own: the I/O channels and the displays. Ported in the sense
+    /// that the core is complete for it — its pins are the interface, and whoever drives them does the
+    /// work — as opposed to `DIRIGO_BLOCK_UNRESOLVED`, which is a behaviour that is still missing.
+    DIRIGO_BLOCK_PASSIVE = 12
 } DirigoBlockKind;
 
 typedef struct {

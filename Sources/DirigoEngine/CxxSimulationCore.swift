@@ -21,17 +21,33 @@ public final class CxxSimulationCore {
     public let portedModuleCount: Int
     public let unresolvedModuleCount: Int
 
-    /// The block kinds the core implements, by the GUID the project uses. Anything absent is inert.
+    /// The block kinds the core implements, by the class the GUID maps to in the block table.
+    /// Anything absent is inert — and a project with an inert module does not run here at all, because
+    /// one unported block stops wires it carries from moving and would make the *ported* blocks look
+    /// wrong too. `isFullyPorted` is the check for that.
     public static func kind(forGUID guid: UUID) -> DirigoBlockKind? {
-        switch guid.uuidString.uppercased() {
-        case "058EE871-1370-46E7-AC3E-905CB632A211": return DIRIGO_BLOCK_AND
-        case "5745AE44-2B47-4828-AEFA-B96375DA31C4": return DIRIGO_BLOCK_OR
-        case "72ECCB1C-F9E5-42A7-847D-12F37BC9EE47": return DIRIGO_BLOCK_NOT
-        case "F6F4BEA6-AE94-429F-B1D2-98A60FA51B3E": return DIRIGO_BLOCK_XOR
-        case "4139463D-8956-4642-BE4E-8A02E95392D3": return DIRIGO_BLOCK_BOOLVAR
-        case "74F92168-F67B-4364-8AC0-B735DAA400A3": return DIRIGO_BLOCK_PULSEGEN
+        switch BlockTypeCatalog.info(forGuid: guid)?.delphiClass {
+        case "TMNot": return DIRIGO_BLOCK_NOT
+        case "TMAnd": return DIRIGO_BLOCK_AND
+        case "TMOr": return DIRIGO_BLOCK_OR
+        case "TMXor": return DIRIGO_BLOCK_XOR
+        case "TMBoolVar": return DIRIGO_BLOCK_BOOLVAR
+        case "TMPulseGenerator": return DIRIGO_BLOCK_PULSEGEN
+        case "TMCounter": return DIRIGO_BLOCK_COUNTER
+        case "TMComparator": return DIRIGO_BLOCK_COMPARATOR
+        case "TMInt2Bits": return DIRIGO_BLOCK_INT2BITS
+        case "TSystemCommand": return DIRIGO_BLOCK_SYSTEMCMD
+        case "TMIntSwitch": return DIRIGO_BLOCK_SWITCH
+        // Blocks whose pins *are* their behaviour: the I/O channels, and the displays that show them.
+        case "TMDigitalInputs", "TMDigitalOutputs", "TDispValueModule", "TDispSegmentModule":
+            return DIRIGO_BLOCK_PASSIVE
         default: return nil
         }
+    }
+
+    /// Whether every module in a project has a ported kind, which is what makes running it here sound.
+    public static func isFullyPorted(_ project: PCCProject) -> Bool {
+        project.modules.allSatisfy { kind(forGUID: $0.guid) != nil }
     }
 
     public init(project: PCCProject, profileScheduling: Bool = true) {
@@ -121,6 +137,9 @@ public final class CxxSimulationCore {
     }
 
     deinit { dirigo_sim_destroy(sim) }
+
+    /// Winds every block back to its own reset state, as `SimulationEngine.reset()` does.
+    public func reset() { dirigo_sim_reset(sim) }
 
     public var tickCount: UInt64 { dirigo_sim_tick_count(sim) }
 

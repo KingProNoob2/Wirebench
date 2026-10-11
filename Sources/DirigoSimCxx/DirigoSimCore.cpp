@@ -61,6 +61,13 @@ inline DirigoValue int32Value(int32_t value) {
     return v;
 }
 
+inline DirigoValue floatValue(double value) {
+    DirigoValue v{};
+    v.kind = DIRIGO_VALUE_FLOAT;
+    v.f = value;
+    return v;
+}
+
 inline DirigoValue undefinedValue() {
     DirigoValue v{};
     v.kind = DIRIGO_VALUE_UNDEFINED;
@@ -77,6 +84,8 @@ struct Module {
     std::vector<DirigoValue> outPins;
     int32_t cycleCounter = 0;      /* PulseGen */
     int32_t pulseRemaining = 0;    /* BoolVar */
+    int32_t currentCount = 0;      /* Counter */
+    bool lastTr = false;           /* Counter: for the 0->1 edge */
 };
 
 struct Connection {
@@ -174,8 +183,110 @@ void processModule(Module &m, const Sample &sample) {
             if (m.cycleCounter >= period) m.cycleCounter = 0;
             return;
         }
+        case DIRIGO_BLOCK_COUNTER: {
+            bool enabled, tr, rst;
+            if (m.inPins.size() <= 2) {                              /* the two-pin form has no En */
+                enabled = true;
+                tr = m.inPins.size() > 0 ? asBool(m.inPins[0]) : false;
+                rst = m.inPins.size() > 1 ? asBool(m.inPins[1]) : false;
+            } else {
+                enabled = asBool(m.inPins[0]);
+                tr = asBool(m.inPins[1]);
+                rst = asBool(m.inPins[2]);
+            }
+            const int32_t step = m.paramPins.size() > 0
+                ? static_cast<int32_t>(asInt(m.paramPins[0])) : 1;
+            if (rst) {
+                m.currentCount = 0;
+                m.lastTr = tr;
+                if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
+                return;
+            }
+            if (!enabled) { m.lastTr = tr; return; }                 /* holds, but the edge is tracked */
+            const bool rising = !m.lastTr && tr;
+            m.lastTr = tr;
+            if (rising) {                                            /* `&+=`: wrapping, as in the Swift */
+                m.currentCount = static_cast<int32_t>(
+                    static_cast<uint32_t>(m.currentCount) + static_cast<uint32_t>(step));
+            }
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(m.currentCount);
+            return;
+        }
+        case DIRIGO_BLOCK_COMPARATOR: {
+            // The Swift compares whether or not `En` is set — a quirk of the block, mirrored here.
+            int64_t a, b;
+            if (m.inPins.size() <= 2) {
+                a = m.inPins.size() > 0 ? asInt(m.inPins[0]) : 0;
+                b = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            } else {
+                a = asInt(m.inPins[1]);
+                b = asInt(m.inPins[2]);
+            }
+            if (m.outPins.size() > 0) m.outPins[0] = boolean(a > b);
+            if (m.outPins.size() > 1) m.outPins[1] = boolean(a == b);
+            if (m.outPins.size() > 2) m.outPins[2] = boolean(a < b);
+            return;
+        }
+        case DIRIGO_BLOCK_INT2BITS: {
+            const int64_t value = m.inPins.empty() ? 0 : asInt(m.inPins[0]);
+            for (size_t i = 0; i < m.outPins.size(); ++i) {
+                m.outPins[i] = boolean(i < 63 && (value & (static_cast<int64_t>(1) << i)) != 0);
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_SYSTEMCMD: {
+            const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+            if (!enabled) return;                                    /* holds */
+            for (DirigoValue &out : m.outPins) out = int32Value(0);
+            return;
+        }
+        case DIRIGO_BLOCK_SWITCH: {
+            if (m.inPins.size() < 2) return;
+            if (!asBool(m.inPins[0])) return;                        /* En = 0 holds */
+            const int64_t sw = asInt(m.inPins[1]);
+            const int64_t target = 2 + sw;
+            if (target >= 2 && target < static_cast<int64_t>(m.inPins.size())) {
+                if (!m.outPins.empty()) m.outPins[0] = m.inPins[target];
+            } else if (!m.outPins.empty()) {
+                /* "If the Sw input is outside the range 0 to (N-1), output Y is cleared." */
+                m.outPins[0] = m.outPins[0].kind == DIRIGO_VALUE_FLOAT ? floatValue(0) : int32Value(0);
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_PASSIVE:
+            return;
         default:
             return;                                                  /* unresolved: holds everything */
+    }
+}
+
+/// The per-kind `reset()`, mirroring each Swift block's own. `NotBlock` really does reset high and
+/// `EightDOBlock` really does keep its `En`, so these are quirks to copy rather than tidy.
+void resetModule(Module &m) {
+    m.cycleCounter = 0;
+    m.pulseRemaining = 0;
+    m.currentCount = 0;
+    m.lastTr = false;
+    std::fill(m.inPins.begin(), m.inPins.end(), boolean(false));
+    std::fill(m.paramPins.begin(), m.paramPins.end(), int32Value(0));
+    switch (m.kind) {
+        case DIRIGO_BLOCK_NOT:
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(true));
+            return;
+        case DIRIGO_BLOCK_PULSEGEN:
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
+            return;
+        case DIRIGO_BLOCK_COUNTER:
+        case DIRIGO_BLOCK_COMPARATOR:
+        case DIRIGO_BLOCK_INT2BITS:
+        case DIRIGO_BLOCK_SYSTEMCMD:
+        case DIRIGO_BLOCK_SWITCH:
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+            return;
+        default:
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+            return;
     }
 }
 
@@ -290,13 +401,7 @@ void dirigo_sim_reset(DirigoSim *sim) {
     if (!sim) return;
     sim->tickCount = 0;
     sim->threadElapsedMs.clear();
-    for (Module &m : sim->modules) {
-        m.cycleCounter = 0;
-        m.pulseRemaining = 0;
-        std::fill(m.inPins.begin(), m.inPins.end(), boolean(false));
-        std::fill(m.paramPins.begin(), m.paramPins.end(), int32Value(0));
-        std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
-    }
+    for (Module &m : sim->modules) resetModule(m);
 }
 
 double dirigo_sim_next_due_ms(const DirigoSim *sim) {
@@ -390,6 +495,6 @@ void dirigo_sim_set_out(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue 
     m.pulseRemaining = 0;                 /* `BoolVarBlock.setOutput` */
 }
 
-int32_t dirigo_sim_portable_kind_count(void) { return 6; }
+int32_t dirigo_sim_portable_kind_count(void) { return 12; }
 
 }  // extern "C"

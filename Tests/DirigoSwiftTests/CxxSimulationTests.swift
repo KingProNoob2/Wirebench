@@ -3,6 +3,7 @@ import Foundation
 import DirigoCore
 import DirigoLibrary
 import DirigoEngine
+@testable import DirigoApp
 
 /// The C++ core against the Swift engine, pin for pin.
 ///
@@ -102,6 +103,120 @@ struct CxxSimulationTests {
                     == swift.getNode(id: 1)?.block.outPins[0].description,
                     "step \(step)")
         }
+    }
+
+    /// The test that matters for real projects: both engines on a corpus project, every pin, every
+    /// step. Only projects where *every* module is ported can be compared — one unported block stops
+    /// the wires it carries, which would make the ported blocks look wrong for the wrong reason.
+    @Test("Both engines agree on a whole real project, pin for pin")
+    func corpusProjectAgrees() throws {
+        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
+            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        var compared: [String] = []
+        var skipped: [String] = []
+
+        for name in ["had.pcc", "kostička.pcc", "had+1block.pcc"] {
+            let url = name.hasPrefix("had+") ? Self.root.appendingPathComponent(name)
+                                              : school.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let project = try? PCCParser().parse(fileAt: url) else { continue }
+            guard CxxSimulationCore.isFullyPorted(project) else {
+                skipped.append(name)
+                continue
+            }
+            let swift = SimulationEngine(project: project, scheduling: .everyTick)
+            let cxx = CxxSimulationCore(project: project, profileScheduling: false)
+            #expect(cxx.unresolvedModuleCount == 0)
+            let delta = Double(max(1, project.appOptions.cycleDelay))
+
+            var mismatchingModules: Set<String> = []
+            var firstMismatch = ""
+            for step in 0..<200 {
+                swift.step()
+                cxx.step(deltaMs: delta)
+                for module in project.modules {
+                    guard let node = swift.getNode(id: module.id) else { continue }
+                    for pin in 0..<node.block.outPins.count {
+                        let theirs = cxx.outValue(moduleId: module.id, pin: pin)?.description ?? "-"
+                        let ours = node.block.outPins[pin].description
+                        if theirs != ours {
+                            mismatchingModules.insert(module.name)
+                            if firstMismatch.isEmpty {
+                                firstMismatch = "step \(step) \(module.name) out[\(pin)]:"
+                                    + " cxx \(theirs) vs swift \(ours)"
+                            }
+                        }
+                    }
+                    for pin in 0..<node.block.inPins.count {
+                        let theirs = cxx.inValue(moduleId: module.id, pin: pin)?.description ?? "-"
+                        let ours = node.block.inPins[pin].description
+                        if theirs != ours {
+                            mismatchingModules.insert(module.name)
+                            if firstMismatch.isEmpty {
+                                firstMismatch = "step \(step) \(module.name) in[\(pin)]:"
+                                    + " cxx \(theirs) vs swift \(ours)"
+                            }
+                        }
+                    }
+                }
+            }
+            // One module is expected to differ, and the reason is the *Swift* engine: it defines
+            // `propagateWires(from:)` — the immediate push of a block's outputs to its consumers — and
+            // never calls it from `step`, so a block later in the same pass reads the value from the
+            // top of the pass. The C++ core pushes after every block, as the original does.
+            // Listing the module by name means this test fails the moment anything *else* diverges, and
+            // also the moment the Swift engine is fixed — which is when the name should come off.
+            // `8xDO1` and `Segment1` are fed by `Int2Bits1`'s bits, so they are the same root cause
+            // rather than three: the cone downstream of the one module whose consumer runs later in
+            // the same pass.
+            let expected: Set<String> = ["8xDO1", "Int2Bits1", "Segment1"]
+            if mismatchingModules != expected {
+                Issue.record(ProgramBuilderTests.Mismatch(description:
+                    "\(name): mismatching modules \(mismatchingModules.sorted())"
+                    + " (expected \(expected.sorted())); first: \(firstMismatch)"))
+            }
+            compared.append(name)
+        }
+        print("C++ core whole-project agreement — compared: \(compared); skipped (not fully ported): \(skipped);"
+              + " known Swift-side gap: Int2Bits1 (mid-pass propagation)")
+        #expect(!compared.isEmpty, "no project was fully ported, so nothing was compared")
+    }
+
+    /// The app must actually be running on the core, and the values the canvas reads must keep moving
+    /// while it does — the pins are mirrored back into the Swift blocks for exactly that reason.
+    @Test("The app plays a covered project on the C++ core")
+    @MainActor
+    func appUsesTheCore() async throws {
+        let model = AppModel()
+        model.loadProject(url: try PlayLoopTests.temporaryProject())
+        #expect(model.isUsingCxxCore, "the two-block fixture is fully ported, so the core should run it")
+
+        let before = model.getNode(id: 1)?.block.outPins.map(\.description) ?? []
+        model.play()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        let after = model.getNode(id: 1)?.block.outPins.map(\.description) ?? []
+        model.pause()
+
+        #expect(model.tickCount > 0, "the core never stepped")
+        #expect(after != before, "the mirrored pins never moved: \(before) then \(after)")
+    }
+
+    /// And a project with one unported block must stay on the Swift engine, because an inert module
+    /// would stop the wires it carries and make the ported blocks look wrong too.
+    @Test("A project with an unported block stays on the Swift engine")
+    @MainActor
+    func appFallsBackForUnportedBlocks() throws {
+        var project = CxxSimulationTests.pulseIntoNot()
+        project.modules.append(PCCModule(id: 3, guid: DivBlock.guid, name: "Div1", x: 0, y: 0, order: 30,
+                                         threadId: 1, page: "main",
+                                         inPins: [], paramPins: [], outPins: []))
+        #expect(!CxxSimulationCore.isFullyPorted(project))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cxx-fallback-\(UUID().uuidString).pcc")
+        try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
+        let model = AppModel()
+        model.loadProject(url: url)
+        #expect(model.isUsingCxxCore == false, "an unported `TMDiv` must keep the Swift engine in charge")
     }
 
     @Test("How much of a real project the core simulates")

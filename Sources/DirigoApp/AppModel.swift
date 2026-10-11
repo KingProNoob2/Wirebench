@@ -70,7 +70,7 @@ public final class AppModel: @unchecked Sendable {
         selectedModuleId = snapshot.selectedModuleId
         selectedPage = snapshot.selectedPage
         isRestoringUndo = false
-        engine = makeEngine(project: snapshot.project)
+        engine = installEngine(project: snapshot.project)
         refreshSnapshots()
         isDocumentEdited = true
     }
@@ -241,6 +241,69 @@ public final class AppModel: @unchecked Sendable {
         return true
     }
 
+    // MARK: - The C++ core
+
+    /// The C++ simulation core, when the project is one it can run completely.
+    ///
+    /// A project with a single unported block cannot run here: one inert module stops the wires it
+    /// carries, which would make the *ported* blocks look wrong too. So the Swift engine stays the
+    /// engine of record, and this takes over only for projects the core covers entirely — and then the
+    /// pins are mirrored back into the Swift blocks after every step, because the canvas, the inspector
+    /// and the segment displays all read *those*.
+    private var cxxCore: CxxSimulationCore?
+
+    /// Whether the running project is being simulated by the C++ core. Surfaced for the UI and tests.
+    public private(set) var isUsingCxxCore = false
+
+    private func makeCxxCore(project: PCCProject) -> CxxSimulationCore? {
+        guard CxxSimulationCore.isFullyPorted(project) else { return nil }
+        return CxxSimulationCore(project: project)
+    }
+
+    /// Pushes every block's inputs and parameters into the core, so an edit made in the UI reaches it
+    /// without every mutation site having to remember to tell it.
+    private func syncPinsIntoCore() {
+        guard let core = cxxCore, let project else { return }
+        for module in project.modules {
+            guard let node = getNode(id: module.id) else { continue }
+            for pin in 0..<node.block.inPins.count { core.setIn(moduleId: module.id, pin: pin, value: node.block.inPins[pin]) }
+            for pin in 0..<node.block.paramPins.count { core.setParam(moduleId: module.id, pin: pin, value: node.block.paramPins[pin]) }
+            // An output written by hand — a `BoolVar`'s switch, an `8xDI` channel — is an input to the
+            // core in practice, so it is pushed before the step rather than overwritten by it.
+            for pin in 0..<node.block.outPins.count where node.block is BoolVarBlock || node.block is EightDIBlock {
+                core.setOut(moduleId: module.id, pin: pin, value: node.block.outPins[pin])
+            }
+        }
+    }
+
+    /// Pulls the core's pins back into the blocks the views read.
+    private func syncPinsFromCore() {
+        guard let core = cxxCore, let project else { return }
+        for module in project.modules {
+            guard let node = getNode(id: module.id) else { continue }
+            for pin in 0..<node.block.inPins.count {
+                if let value = core.inValue(moduleId: module.id, pin: pin) { node.block.inPins[pin] = value }
+            }
+            for pin in 0..<node.block.outPins.count {
+                if let value = core.outValue(moduleId: module.id, pin: pin) { node.block.outPins[pin] = value }
+            }
+        }
+    }
+
+    /// One cycle, on whichever engine is running the project. Reports whether anything ran.
+    @discardableResult
+    private func stepBackend(deltaMs: Double) -> Bool {
+        guard let core = cxxCore else {
+            engine?.step(deltaMs: deltaMs)
+            return true
+        }
+        syncPinsIntoCore()
+        let ran = core.step(deltaMs: deltaMs)
+        if ran { syncPinsFromCore() }
+        tickCount = core.tickCount
+        return ran
+    }
+
     /// The simulation moved: refresh the values the canvas draws — and, only if they really moved,
     /// tell the views. A settled simulation therefore stops invalidating anything at all.
     public func simulationDidChange() {
@@ -292,7 +355,7 @@ public final class AppModel: @unchecked Sendable {
         self.currentFileURL = nil
         self.selectedPage = "main"
         self.selectedModuleId = nil
-        self.engine = makeEngine(project: newProj)
+        self.engine = installEngine(project: newProj)
         self.tickCount = 0
         self.simulationVersion = 0
         self.isDocumentEdited = false
@@ -312,7 +375,7 @@ public final class AppModel: @unchecked Sendable {
             self.currentFileURL = url
             self.selectedPage = proj.pages.first?.caption ?? "main"
             self.selectedModuleId = nil
-            self.engine = makeEngine(project: proj)
+            self.engine = installEngine(project: proj)
         refreshSnapshots()
             self.tickCount = 0
             self.simulationVersion = 0
@@ -387,7 +450,7 @@ public final class AppModel: @unchecked Sendable {
         self.project = project
         self.selectedModuleId = id
         self.isDocumentEdited = true
-        self.engine = makeEngine(project: project)
+        self.engine = installEngine(project: project)
         return id
     }
 
@@ -407,7 +470,7 @@ public final class AppModel: @unchecked Sendable {
     /// Call this *after* assigning `project`, because that setter is the single undo choke point and
     /// has already recorded history by the time we get here.
     func runtimeDidChangeStructure() {
-        if let project { engine = makeEngine(project: project) }
+        if let project { engine = installEngine(project: project) }
         isDocumentEdited = true
         refreshSnapshots()
     }
@@ -419,7 +482,7 @@ public final class AppModel: @unchecked Sendable {
         self.project = project
         if selectedModuleId == id { selectedModuleId = nil }
         if configuringModuleId == id { configuringModuleId = nil }
-        self.engine = makeEngine(project: project)
+        self.engine = installEngine(project: project)
         self.isDocumentEdited = true
         return true
     }
@@ -661,9 +724,8 @@ public final class AppModel: @unchecked Sendable {
     }
 
     public func step() {
-        guard let engine = engine else { return }
-        engine.step()
-        self.tickCount = engine.tickCount
+        guard engine != nil else { return }
+        stepBackend(deltaMs: max(1, cxxCore == nil ? engine!.cycleDelayMs : Double(max(1, project?.appOptions.cycleDelay ?? 1))))
         simulationDidChange()
     }
 
@@ -672,6 +734,7 @@ public final class AppModel: @unchecked Sendable {
         simulationTimerTask = nil
         isPlaying = false
         engine?.reset()
+        cxxCore?.reset()
         tickCount = 0
         simulationDidChange()
     }
@@ -710,7 +773,9 @@ public final class AppModel: @unchecked Sendable {
                 let now = ContinuousClock.now
                 let elapsedMs = Double((now - lastStepTime).components.seconds) * 1000
                     + Double((now - lastStepTime).components.attoseconds) / 1e15
-                let ran = engine.stepIfDue(deltaMs: max(1, elapsedMs))
+                let ran = cxxCore != nil
+                    ? stepBackend(deltaMs: max(1, elapsedMs))
+                    : engine.stepIfDue(deltaMs: max(1, elapsedMs))
                 if ran { lastStepTime = now }
                 if updatePending && !ran && now - lastUIUpdateTime >= .milliseconds(28) {
                     self.simulationDidChange()
@@ -718,7 +783,7 @@ public final class AppModel: @unchecked Sendable {
                     updatePending = false
                 }
                 if ran {
-                    self.tickCount = engine.tickCount
+                    self.tickCount = self.cxxCore?.tickCount ?? engine.tickCount
                     // Throttle UI property invalidations to ~30-40 Hz maximum to keep UI at solid 60fps
                     // without choking — but never *drop* one. Dropping is what a rare step cannot afford:
                     // a thread that runs once a second would have its single update swallowed by the
@@ -736,7 +801,8 @@ public final class AppModel: @unchecked Sendable {
                 // never longer than a second. A pending update caps the wait instead, so it is delivered
                 // within one frame rather than one thread period.
                 let frameSec = 1.0 / max(1.0, self.tickRateHz)
-                var dueSec = min(max(engine.nextDueInMs() / 1000.0, frameSec), 1.0)
+                let nextDueMs = cxxCore?.nextDueInMs() ?? engine.nextDueInMs()
+                var dueSec = min(max(nextDueMs / 1000.0, frameSec), 1.0)
                 if updatePending { dueSec = min(dueSec, 0.028) }
                 try? await Task.sleep(nanoseconds: UInt64(dueSec * 1_000_000_000))
             }
@@ -757,8 +823,12 @@ public final class AppModel: @unchecked Sendable {
     /// Builds the runtime with the project's profile, so scheduling follows the hardware rather than a
     /// fixed cadence. Falls back to the project's `CYCLE_DELAY` when no profile matches, which is the
     /// same period for every thread.
-    private func makeEngine(project: PCCProject) -> SimulationEngine {
+    /// Installs both backends for a project: the Swift engine, which owns the block objects the whole
+    /// UI reads, and — when the project is one it covers completely — the C++ core that actually steps.
+    private func installEngine(project: PCCProject) -> SimulationEngine {
         let profile = Self.profileDatabase.flatMap { ProfileRegistry.profile(for: project, in: $0) }
+        cxxCore = makeCxxCore(project: project)
+        isUsingCxxCore = cxxCore != nil
         return SimulationEngine(project: project, profile: profile, scheduling: .profileIntervals)
     }
 
