@@ -1,0 +1,190 @@
+import Foundation
+import DirigoCore
+import DirigoLibrary
+import DirigoSimCxx
+
+/// The simulation core, in C++.
+///
+/// A thin wrapper: it builds the C structures from a `PCCProject`, steps them, and reads pins back. The
+/// point of it is that the Swift `SimulationEngine` still exists beside it, so the two can be run on the
+/// same project and compared pin for pin — a port that only compiles proves nothing, and this one is
+/// deliberately partial.
+///
+/// The boundary is a plain C ABI (see `DirigoSimCxx.h`), so nothing here needs a C++ interoperability
+/// mode, and the same sources build through SwiftPM and through the generated Xcode project.
+public final class CxxSimulationCore {
+    private let sim: OpaquePointer
+    private let indexByModuleId: [Int: Int32]
+
+    /// Modules the core actually simulates, and modules it holds inert because their block kind has not
+    /// been ported. Reported rather than assumed: a caller can see how far the port reaches.
+    public let portedModuleCount: Int
+    public let unresolvedModuleCount: Int
+
+    /// The block kinds the core implements, by the GUID the project uses. Anything absent is inert.
+    public static func kind(forGUID guid: UUID) -> DirigoBlockKind? {
+        switch guid.uuidString.uppercased() {
+        case "058EE871-1370-46E7-AC3E-905CB632A211": return DIRIGO_BLOCK_AND
+        case "5745AE44-2B47-4828-AEFA-B96375DA31C4": return DIRIGO_BLOCK_OR
+        case "72ECCB1C-F9E5-42A7-847D-12F37BC9EE47": return DIRIGO_BLOCK_NOT
+        case "F6F4BEA6-AE94-429F-B1D2-98A60FA51B3E": return DIRIGO_BLOCK_XOR
+        case "4139463D-8956-4642-BE4E-8A02E95392D3": return DIRIGO_BLOCK_BOOLVAR
+        case "74F92168-F67B-4364-8AC0-B735DAA400A3": return DIRIGO_BLOCK_PULSEGEN
+        default: return nil
+        }
+    }
+
+    public init(project: PCCProject, profileScheduling: Bool = true) {
+        // The same starting state `SimulationEngine.setupRuntime` builds: a block per module, the
+        // project's in-pin and param-pin values applied over the block's own defaults. The values are
+        // handed over as flat C arrays the core copies from, so nothing here outlives the call.
+        var descs: [DirigoModuleDesc] = []
+        var index: [Int: Int32] = [:]
+        var ported = 0
+        var totalIn = 0, totalOut = 0
+        var pinValues: [(inPins: [PinValue], outPins: [PinValue])] = []
+
+        for (position, mod) in project.modules.enumerated() {
+            let block = BlockRegistry.shared.create(for: mod)
+            for (idx, pin) in mod.inPins.enumerated() where idx < block.inPins.count {
+                block.inPins[idx] = pin.value
+            }
+            for (idx, pin) in mod.paramPins.enumerated() where idx < block.paramPins.count {
+                block.paramPins[idx] = pin.value
+            }
+            let kind = Self.kind(forGUID: mod.guid) ?? DIRIGO_BLOCK_UNRESOLVED
+            if kind != DIRIGO_BLOCK_UNRESOLVED { ported += 1 }
+            index[mod.id] = Int32(position)
+            totalIn += block.inPins.count
+            totalOut += block.outPins.count
+            pinValues.append((block.inPins, block.outPins))
+            descs.append(DirigoModuleDesc(
+                id: Int32(mod.id),
+                order: Int32(mod.order),
+                threadId: Int32(mod.threadId),
+                kind: Int32(kind.rawValue),
+                inCount: Int32(block.inPins.count),
+                paramCount: Int32(block.paramPins.count),
+                outCount: Int32(block.outPins.count),
+                initialOut: nil, initialIn: nil))
+        }
+
+        let inFlat = UnsafeMutablePointer<DirigoValue>.allocate(capacity: max(1, totalIn))
+        let outFlat = UnsafeMutablePointer<DirigoValue>.allocate(capacity: max(1, totalOut))
+        defer { inFlat.deallocate(); outFlat.deallocate() }
+        var offsetIn = 0, offsetOut = 0
+        for i in 0..<descs.count {
+            let values = pinValues[i]
+            for (pin, value) in values.inPins.enumerated() { (inFlat + offsetIn + pin).pointee = Self.cValue(value) }
+            for (pin, value) in values.outPins.enumerated() { (outFlat + offsetOut + pin).pointee = Self.cValue(value) }
+            // `initialIn`/`initialOut` are `UnsafePointer` on the Swift side; the storage is ours to write.
+            descs[i].initialIn = UnsafePointer(inFlat + offsetIn)
+            descs[i].initialOut = UnsafePointer(outFlat + offsetOut)
+            offsetIn += values.inPins.count
+            offsetOut += values.outPins.count
+        }
+
+        var connections: [DirigoConnection] = []
+        for (list, isParam) in [(project.inConnections, false), (project.paramConnections, true)] {
+            for conn in list {
+                connections.append(DirigoConnection(
+                    inModule: Int32(conn.inModuleId), inPin: Int32(conn.inPinId),
+                    outModule: Int32(conn.outModuleId), outPin: Int32(conn.outPinId),
+                    inverted: 0, toParamPins: isParam ? 1 : 0))
+            }
+        }
+
+        let cycle = Double(max(1, project.appOptions.cycleDelay))
+        let created: OpaquePointer? = descs.withUnsafeBufferPointer { descBuffer in
+            connections.withUnsafeBufferPointer { connBuffer in
+                dirigo_sim_create(descBuffer.baseAddress, Int32(descBuffer.count),
+                                  connBuffer.baseAddress, Int32(connBuffer.count),
+                                  cycle, profileScheduling ? 1 : 0)
+            }
+        }
+        guard let created else {
+            fatalError("dirigo_sim_create returned null")
+        }
+        // Parameter pins are not part of `DirigoModuleDesc`: they are per-instance configuration, so
+        // they are pushed in afterwards. Without this a `PulseGen` ran with `TOn = TOff = 0` and its
+        // period was two cycles instead of four.
+        for (position, mod) in project.modules.enumerated() {
+            let block = BlockRegistry.shared.create(for: mod)
+            for (idx, pin) in mod.paramPins.enumerated() where idx < block.paramPins.count {
+                dirigo_sim_set_param(created, Int32(position), Int32(idx), Self.cValue(pin.value))
+            }
+        }
+        self.sim = created
+        self.indexByModuleId = index
+        self.portedModuleCount = ported
+        self.unresolvedModuleCount = descs.count - ported
+    }
+
+    deinit { dirigo_sim_destroy(sim) }
+
+    public var tickCount: UInt64 { dirigo_sim_tick_count(sim) }
+
+    /// One cycle. Reports whether a thread ran, like `SimulationEngine.stepIfDue`.
+    @discardableResult
+    public func step(deltaMs: Double) -> Bool { dirigo_sim_step(sim, deltaMs) != 0 }
+
+    /// Milliseconds until the earliest thread is due.
+    public func nextDueInMs() -> Double { dirigo_sim_next_due_ms(sim) }
+
+    public func outValue(moduleId: Int, pin: Int) -> PinValue? {
+        guard let index = indexByModuleId[moduleId] else { return nil }
+        return Self.pinValue(dirigo_sim_get_out(sim, index, Int32(pin)))
+    }
+
+    public func inValue(moduleId: Int, pin: Int) -> PinValue? {
+        guard let index = indexByModuleId[moduleId] else { return nil }
+        return Self.pinValue(dirigo_sim_get_in(sim, index, Int32(pin)))
+    }
+
+    public func setIn(moduleId: Int, pin: Int, value: PinValue) {
+        guard let index = indexByModuleId[moduleId] else { return }
+        dirigo_sim_set_in(sim, index, Int32(pin), Self.cValue(value))
+    }
+
+    public func setOut(moduleId: Int, pin: Int, value: PinValue) {
+        guard let index = indexByModuleId[moduleId] else { return }
+        dirigo_sim_set_out(sim, index, Int32(pin), Self.cValue(value))
+    }
+
+    public func setParam(moduleId: Int, pin: Int, value: PinValue) {
+        guard let index = indexByModuleId[moduleId] else { return }
+        dirigo_sim_set_param(sim, index, Int32(pin), Self.cValue(value))
+    }
+
+    // MARK: - Value translation
+
+    static func cValue(_ value: PinValue) -> DirigoValue {
+        var out = DirigoValue()
+        switch value {
+        case .bool(let v):
+            out.kind = Int32(DIRIGO_VALUE_BOOL.rawValue); out.i = v ? 1 : 0
+        case .int16(let v):
+            out.kind = Int32(DIRIGO_VALUE_INT16.rawValue); out.i = Int32(v)
+        case .int32(let v):
+            out.kind = Int32(DIRIGO_VALUE_INT32.rawValue); out.i = v
+        case .int64(let v):
+            out.kind = Int32(DIRIGO_VALUE_INT64.rawValue); out.i64 = v
+        case .float(let v):
+            out.kind = Int32(DIRIGO_VALUE_FLOAT.rawValue); out.f = Double(v)
+        case .undefined:
+            out.kind = Int32(DIRIGO_VALUE_UNDEFINED.rawValue)
+        }
+        return out
+    }
+
+    static func pinValue(_ value: DirigoValue) -> PinValue {
+        switch DirigoValueKind(rawValue: UInt32(value.kind)) ?? DIRIGO_VALUE_UNDEFINED {
+        case DIRIGO_VALUE_BOOL: return .bool(value.i != 0)
+        case DIRIGO_VALUE_INT16: return .int16(Int16(truncatingIfNeeded: value.i))
+        case DIRIGO_VALUE_INT32: return .int32(value.i)
+        case DIRIGO_VALUE_INT64: return .int64(value.i64)
+        case DIRIGO_VALUE_FLOAT: return .float(Float(value.f))
+        default: return .undefined
+        }
+    }
+}

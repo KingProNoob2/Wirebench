@@ -39,6 +39,20 @@ targets:
         DEFINES_MODULE: true
         SKIP_INSTALL: true
 
+  # The C++ simulation core, built as its own static library. Its public header is plain C, so no
+  # C++ interoperability mode is needed anywhere that imports it.
+  DirigoSimCxx:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/DirigoSimCxx
+    settings:
+      base:
+        PRODUCT_NAME: DirigoSimCxx
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/DirigoSimCxx/include
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        SKIP_INSTALL: true
+
   DirigoEngine:
     type: library.static
     platform: macOS
@@ -47,6 +61,7 @@ targets:
     dependencies:
       - target: DirigoCore
       - target: DirigoLibrary
+      - target: DirigoSimCxx
     settings:
       base:
         PRODUCT_NAME: DirigoEngine

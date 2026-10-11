@@ -22,9 +22,17 @@ let package = Package(
             name: "DirigoLibrary",
             dependencies: ["DirigoCore"]
         ),
+        // The C++ simulation core. A target of its own because SwiftPM will not mix Swift and C++ in
+        // one target, and a plain-C public header so importing it needs no interop mode.
+        .target(
+            name: "DirigoSimCxx",
+            path: "Sources/DirigoSimCxx",
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
         .target(
             name: "DirigoEngine",
-            dependencies: ["DirigoCore", "DirigoLibrary"]
+            dependencies: ["DirigoCore", "DirigoLibrary", "DirigoSimCxx"]
         ),
         .target(
             name: "DirigoHardware",

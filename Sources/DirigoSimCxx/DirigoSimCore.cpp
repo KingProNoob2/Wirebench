@@ -1,0 +1,395 @@
+//
+//  DirigoSimCore.cpp
+//  DirigoSwift
+//
+//  The simulation core, in C++.
+//
+//  This is a port of `SimulationEngine` plus the block behaviours it drives, kept deliberately
+//  line-for-line comparable with the Swift so the two can be run side by side and their pin values
+//  compared. Where a rule is subtle the Swift is the reference and the comment below says which rule it
+//  mirrors, because "it compiles" is not evidence that a simulation agrees with the one it replaced.
+//
+//  Ported so far: the runtime mechanics (schedule by thread and ORDER, per-thread periods, wire
+//  propagation, the tick counter) and six block behaviours — `Not`, `And`, `Or`, `Xor`, `BoolVar` and
+//  `PulseGen`. Everything else is `UNRESOLVED`: present, holding its inputs, contributing nothing.
+//
+
+#include "DirigoSimCxx.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <map>
+#include <unordered_map>
+#include <vector>
+
+namespace {
+
+inline bool asBool(const DirigoValue &v) {
+    switch (v.kind) {
+        case DIRIGO_VALUE_BOOL:
+        case DIRIGO_VALUE_INT16:
+        case DIRIGO_VALUE_INT32: return v.i != 0;
+        case DIRIGO_VALUE_INT64: return v.i64 != 0;
+        case DIRIGO_VALUE_FLOAT: return v.f != 0.0;
+        default: return false;
+    }
+}
+
+inline int64_t asInt(const DirigoValue &v) {
+    switch (v.kind) {
+        case DIRIGO_VALUE_BOOL:
+        case DIRIGO_VALUE_INT16:
+        case DIRIGO_VALUE_INT32: return v.i;
+        case DIRIGO_VALUE_INT64: return v.i64;
+        case DIRIGO_VALUE_FLOAT: return static_cast<int64_t>(v.f);
+        default: return 0;
+    }
+}
+
+inline DirigoValue boolean(bool value) {
+    DirigoValue v{};
+    v.kind = DIRIGO_VALUE_BOOL;
+    v.i = value ? 1 : 0;
+    return v;
+}
+
+inline DirigoValue int32Value(int32_t value) {
+    DirigoValue v{};
+    v.kind = DIRIGO_VALUE_INT32;
+    v.i = value;
+    return v;
+}
+
+inline DirigoValue undefinedValue() {
+    DirigoValue v{};
+    v.kind = DIRIGO_VALUE_UNDEFINED;
+    return v;
+}
+
+struct Module {
+    int32_t id = 0;
+    int32_t order = 0;
+    int32_t threadId = 0;
+    int32_t kind = DIRIGO_BLOCK_UNRESOLVED;
+    std::vector<DirigoValue> inPins;
+    std::vector<DirigoValue> paramPins;
+    std::vector<DirigoValue> outPins;
+    int32_t cycleCounter = 0;      /* PulseGen */
+    int32_t pulseRemaining = 0;    /* BoolVar */
+};
+
+struct Connection {
+    int32_t inModule = 0;
+    int32_t inPin = 0;
+    int32_t outModule = 0;
+    int32_t outPin = 0;
+    bool inverted = false;
+    bool toParamPins = false;
+};
+
+struct Sample {
+    uint64_t tickCount = 0;
+    double deltaMs = 0;
+};
+
+}  // namespace
+
+struct DirigoSim {
+    std::vector<Module> modules;
+    std::unordered_map<int32_t, size_t> indexById;
+    std::vector<Connection> connections;
+    std::unordered_map<int32_t, std::vector<size_t>> outgoingByModule;
+    std::vector<std::vector<size_t>> schedule;   /* by thread id, in ORDER */
+    std::vector<int32_t> threadIds;              /* ascending */
+    std::map<int32_t, double> threadElapsedMs;
+    uint64_t tickCount = 0;
+    double cycleDelayMs = 1;
+    bool profileScheduling = false;
+};
+
+namespace {
+
+double intervalMs(const DirigoSim *sim, int32_t threadId) {
+    (void)threadId;                       /* no profile is loaded here; the project's cycle governs */
+    return std::max(1.0, sim->cycleDelayMs);
+}
+
+/// One module, mirroring its Swift block's `process(sample:)` exactly — including the `En = 0` rule,
+/// which holds the output rather than clearing it (docs/spec/blocks-datapath.md §0.5).
+void processModule(Module &m, const Sample &sample) {
+    (void)sample;
+    switch (m.kind) {
+        case DIRIGO_BLOCK_NOT: {
+            const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+            if (!enabled) return;                                   /* holds */
+            const bool value = m.inPins.size() > 1 ? asBool(m.inPins[1]) : false;
+            if (!m.outPins.empty()) m.outPins[0] = boolean(!value);
+            return;
+        }
+        case DIRIGO_BLOCK_AND:
+        case DIRIGO_BLOCK_OR:
+        case DIRIGO_BLOCK_XOR: {
+            if (m.inPins.empty()) return;
+            if (!asBool(m.inPins[0])) return;                        /* holds */
+            bool result = m.kind == DIRIGO_BLOCK_AND;
+            for (size_t i = 1; i < m.inPins.size(); ++i) {
+                const bool bit = asBool(m.inPins[i]);
+                if (m.kind == DIRIGO_BLOCK_AND) {
+                    result = result && bit;
+                    if (!result) break;
+                } else if (m.kind == DIRIGO_BLOCK_OR) {
+                    result = result || bit;
+                    if (result) break;
+                } else {
+                    result = result != bit;
+                }
+            }
+            if (!m.outPins.empty()) m.outPins[0] = boolean(result);
+            return;
+        }
+        case DIRIGO_BLOCK_BOOLVAR: {
+            /* A held button owns its value; only an un-held single-shot pulse expires. */
+            if (m.pulseRemaining > 0) {
+                m.pulseRemaining -= 1;
+                if (m.pulseRemaining == 0 && !m.outPins.empty()) m.outPins[0] = boolean(false);
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_PULSEGEN: {
+            const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+            const bool active = m.inPins.size() > 1 ? asBool(m.inPins[1]) : false;
+            if (!enabled || !active) {                               /* "If Act=0 both outputs are cleared" */
+                m.cycleCounter = 0;
+                if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
+                if (m.outPins.size() > 1) m.outPins[1] = boolean(false);
+                return;
+            }
+            const int64_t tOn = std::max<int64_t>(1, m.paramPins.size() > 0 ? asInt(m.paramPins[0]) : 1);
+            const int64_t tOff = std::max<int64_t>(1, m.paramPins.size() > 1 ? asInt(m.paramPins[1]) : 1);
+            const int64_t period = tOn + tOff;
+            if (m.outPins.size() > 1) m.outPins[1] = boolean(m.cycleCounter < tOn);
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(m.cycleCounter + 1));
+            m.cycleCounter += 1;
+            if (m.cycleCounter >= period) m.cycleCounter = 0;
+            return;
+        }
+        default:
+            return;                                                  /* unresolved: holds everything */
+    }
+}
+
+/// One module's outputs to whatever consumes them.
+///
+/// This is the rule that a first cut got wrong: the Swift engine pushes a block's outputs to its
+/// consumers the moment it has run (`propagateWires(from:)`), so a block later in the same pass reads
+/// the *fresh* value, not the one from the top of the pass. Propagating only at the start and end of a
+/// cycle gave a `Not` its input one step late, which the differential test caught immediately.
+void propagateFrom(DirigoSim *sim, size_t sourceIndex) {
+    const Module &from = sim->modules[sourceIndex];
+    auto found = sim->outgoingByModule.find(from.id);
+    if (found == sim->outgoingByModule.end()) return;
+    for (size_t connectionIndex : found->second) {
+        const Connection &c = sim->connections[connectionIndex];
+        auto dst = sim->indexById.find(c.inModule);
+        if (dst == sim->indexById.end()) continue;
+        Module &to = sim->modules[dst->second];
+        if (c.outPin < 0 || static_cast<size_t>(c.outPin) >= from.outPins.size()) continue;
+        DirigoValue value = from.outPins[c.outPin];
+        if (c.inverted) value = boolean(!asBool(value));
+        if (c.inPin < 0) continue;
+        if (c.toParamPins) {
+            if (static_cast<size_t>(c.inPin) < to.paramPins.size()) to.paramPins[c.inPin] = value;
+        } else if (static_cast<size_t>(c.inPin) < to.inPins.size()) {
+            to.inPins[c.inPin] = value;
+        }
+    }
+}
+
+void propagate(DirigoSim *sim) {
+    for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
+}
+
+void propagateUnused(DirigoSim *sim) {
+    for (const Connection &c : sim->connections) {
+        auto src = sim->indexById.find(c.outModule);
+        auto dst = sim->indexById.find(c.inModule);
+        if (src == sim->indexById.end() || dst == sim->indexById.end()) continue;
+        Module &from = sim->modules[src->second];
+        Module &to = sim->modules[dst->second];
+        if (c.outPin < 0 || static_cast<size_t>(c.outPin) >= from.outPins.size()) continue;
+        DirigoValue value = from.outPins[c.outPin];
+        if (c.inverted) value = boolean(!asBool(value));
+        if (c.inPin < 0) continue;
+        if (c.toParamPins) {
+            if (static_cast<size_t>(c.inPin) < to.paramPins.size()) to.paramPins[c.inPin] = value;
+        } else if (static_cast<size_t>(c.inPin) < to.inPins.size()) {
+            to.inPins[c.inPin] = value;
+        }
+    }
+}
+
+}  // namespace
+
+extern "C" {
+
+DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
+                             const DirigoConnection *connections, int32_t connectionCount,
+                             double cycleDelayMs, int32_t profileScheduling) {
+    DirigoSim *sim = new DirigoSim();
+    sim->cycleDelayMs = cycleDelayMs > 0 ? cycleDelayMs : 1;
+    sim->profileScheduling = profileScheduling != 0;
+
+    for (int32_t i = 0; i < count; ++i) {
+        const DirigoModuleDesc &d = modules[i];
+        Module m;
+        m.id = d.id;
+        m.order = d.order;
+        m.threadId = d.threadId;
+        m.kind = d.kind;
+        m.inPins.assign(static_cast<size_t>(std::max(0, d.inCount)), boolean(false));
+        m.paramPins.assign(static_cast<size_t>(std::max(0, d.paramCount)), int32Value(0));
+        m.outPins.assign(static_cast<size_t>(std::max(0, d.outCount)), boolean(false));
+        for (int32_t p = 0; p < d.inCount && d.initialIn; ++p) m.inPins[p] = d.initialIn[p];
+        for (int32_t p = 0; p < d.outCount && d.initialOut; ++p) m.outPins[p] = d.initialOut[p];
+        sim->indexById[m.id] = sim->modules.size();
+        /* A module that has never run is due immediately, and the order within a thread is ORDER. */
+        if (static_cast<int32_t>(sim->schedule.size()) <= m.threadId) {
+            sim->schedule.resize(static_cast<size_t>(m.threadId) + 1);
+        }
+        sim->schedule[m.threadId].push_back(sim->modules.size());
+        sim->modules.push_back(std::move(m));
+    }
+
+    for (size_t t = 0; t < sim->schedule.size(); ++t) {
+        std::stable_sort(sim->schedule[t].begin(), sim->schedule[t].end(),
+                         [sim](size_t a, size_t b) {
+                             return sim->modules[a].order < sim->modules[b].order;
+                         });
+        if (!sim->schedule[t].empty()) sim->threadIds.push_back(static_cast<int32_t>(t));
+    }
+
+    for (int32_t i = 0; i < connectionCount; ++i) {
+        const DirigoConnection &c = connections[i];
+        Connection conn;
+        conn.inModule = c.inModule;
+        conn.inPin = c.inPin;
+        conn.outModule = c.outModule;
+        conn.outPin = c.outPin;
+        conn.inverted = c.inverted != 0;
+        conn.toParamPins = c.toParamPins != 0;
+        sim->connections.push_back(conn);
+        sim->outgoingByModule[conn.outModule].push_back(sim->connections.size() - 1);
+    }
+    return sim;
+}
+
+void dirigo_sim_destroy(DirigoSim *sim) { delete sim; }
+
+void dirigo_sim_reset(DirigoSim *sim) {
+    if (!sim) return;
+    sim->tickCount = 0;
+    sim->threadElapsedMs.clear();
+    for (Module &m : sim->modules) {
+        m.cycleCounter = 0;
+        m.pulseRemaining = 0;
+        std::fill(m.inPins.begin(), m.inPins.end(), boolean(false));
+        std::fill(m.paramPins.begin(), m.paramPins.end(), int32Value(0));
+        std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+    }
+}
+
+double dirigo_sim_next_due_ms(const DirigoSim *sim) {
+    if (!sim || !sim->profileScheduling) return 0;
+    const double stepMs = std::max(1.0, sim->cycleDelayMs);
+    double soonest = std::numeric_limits<double>::max();
+    for (int32_t tid : sim->threadIds) {
+        const double interval = intervalMs(sim, tid);
+        auto it = sim->threadElapsedMs.find(tid);
+        const double elapsed = it == sim->threadElapsedMs.end() ? interval : it->second;
+        soonest = std::min(soonest, std::max(0.0, interval - elapsed));
+    }
+    if (soonest == std::numeric_limits<double>::max()) return 0;
+    return soonest <= stepMs ? 0 : soonest - stepMs;
+}
+
+int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
+    if (!sim) return 0;
+    sim->tickCount += 1;
+    const double stepMs = std::max(1.0, deltaMs);
+    propagate(sim);
+    bool ranAny = false;
+
+    for (int32_t tid : sim->threadIds) {
+        const double interval = intervalMs(sim, tid);
+        bool isDue = true;
+        if (sim->profileScheduling) {
+            auto it = sim->threadElapsedMs.find(tid);
+            const double elapsed = (it == sim->threadElapsedMs.end() ? interval : it->second) + stepMs;
+            if (elapsed + 1e-9 < interval) {
+                sim->threadElapsedMs[tid] = elapsed;
+                isDue = false;
+            } else {
+                sim->threadElapsedMs[tid] = std::fmod(elapsed, interval);
+            }
+        }
+        if (!isDue) continue;
+        ranAny = true;
+        Sample sample{sim->tickCount, interval};
+        for (size_t index : sim->schedule[tid]) {
+            processModule(sim->modules[index], sample);
+            propagateFrom(sim, index);       /* the Swift engine pushes after every block */
+        }
+    }
+    if (ranAny) propagate(sim);
+    return ranAny ? 1 : 0;
+}
+
+uint64_t dirigo_sim_tick_count(const DirigoSim *sim) { return sim ? sim->tickCount : 0; }
+
+DirigoValue dirigo_sim_get_in(const DirigoSim *sim, int32_t index, int32_t pin) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return undefinedValue();
+    const Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.inPins.size()) return undefinedValue();
+    return m.inPins[pin];
+}
+
+DirigoValue dirigo_sim_get_param(const DirigoSim *sim, int32_t index, int32_t pin) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return undefinedValue();
+    const Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.paramPins.size()) return undefinedValue();
+    return m.paramPins[pin];
+}
+
+DirigoValue dirigo_sim_get_out(const DirigoSim *sim, int32_t index, int32_t pin) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return undefinedValue();
+    const Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.outPins.size()) return undefinedValue();
+    return m.outPins[pin];
+}
+
+void dirigo_sim_set_in(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue value) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.inPins.size()) return;
+    m.inPins[pin] = value;
+}
+
+void dirigo_sim_set_param(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue value) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.paramPins.size()) return;
+    m.paramPins[pin] = value;
+}
+
+void dirigo_sim_set_out(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue value) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.outPins.size()) return;
+    m.outPins[pin] = value;
+    m.pulseRemaining = 0;                 /* `BoolVarBlock.setOutput` */
+}
+
+int32_t dirigo_sim_portable_kind_count(void) { return 6; }
+
+}  // extern "C"
