@@ -84,5 +84,26 @@ struct InspectorSnapshotTests {
             let name = scheme == .dark ? "/tmp/dirigo-inspector-dark.png" : "/tmp/dirigo-inspector-light.png"
             try png.write(to: URL(fileURLWithPath: name))
         }
+
+        // Row heights, measured: an editable row must be no taller than a read-only one. `ImageRenderer`
+        // draws a `TextField` as a placeholder, but the placeholder still occupies the field's frame, so
+        // the heights are comparable even though the field's appearance is not.
+        let rows: [(String, SignalRow)] = [
+            ("output  ", SignalRow(name: "Y (Count)", value: "1", isHigh: true)),
+            ("input 1 ", SignalRow(name: "En (Enabled)", value: "1", isHigh: true, onToggle: {}, number: Self.editable(1))),
+            ("input 3d", SignalRow(name: "X7 (Input 7)", value: "128", isHigh: true, onToggle: {}, number: Self.editable(128))),
+        ]
+        var heights: [(String, CGFloat)] = []
+        for (label, row) in rows {
+            let renderer = ImageRenderer(content: row.frame(width: 300))
+            renderer.scale = 2
+            heights.append((label, renderer.nsImage?.size.height ?? 0))
+        }
+        print("ROW HEIGHTS " + heights.map { "\($0.0)=\(Int($0.1))pt" }.joined(separator: " "))
+        let readOnly = heights[0].1
+        for (label, height) in heights.dropFirst() {
+            #expect(height <= readOnly + 0.5,
+                    "\(label) is \(height)pt against \(readOnly)pt for a read-only row")
+        }
     }
 }

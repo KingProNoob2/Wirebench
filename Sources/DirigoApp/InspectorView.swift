@@ -381,13 +381,17 @@ struct SignalRow: View, Equatable {
                     // sits beside the number instead of half a row away from it. Slack of a couple of
                     // characters is deliberate — the binding only commits on Enter or blur, so the text can
                     // briefly be longer than the value.
+                    // Plain, with a faint background, and no vertical padding of its own: a bordered
+                    // control pads itself and makes the row twice the height of a read-only one.
                     TextField("", value: number, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.small)
+                        .textFieldStyle(.plain)
                         .multilineTextAlignment(.trailing)
                         .font(.system(.body, design: .monospaced))
                         .monospacedDigit()
-                        .frame(width: max(34, CGFloat(value.count) * 8.5 + 22), alignment: .trailing)
+                        .frame(width: max(30, CGFloat(value.count) * 8.5 + 16), alignment: .trailing)
+                        .padding(.horizontal, 4)
+                        .background(Color.primary.opacity(0.07),
+                                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                         .help("Type a value for this input.")
                 } else {
                     Text(value)
