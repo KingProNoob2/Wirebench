@@ -12,6 +12,16 @@ public struct CanvasView: View {
     /// when the drag starts, so a gesture cannot change its mind halfway through.
     @State private var isDrawingWire = false
 
+    /// Routed wire paths, kept between frames.
+    ///
+    /// Routing is a path search around the sheet's obstacles, and it depends only on *geometry* — module
+    /// positions, the drag offsets, and a connection's own hand-drawn `POINTS`. It never depends on a
+    /// signal value, so recomputing it inside `body` meant every tick re-routed every cable, which is
+    /// where a profile put the app's main-thread time (3.99 s of 4.40 s on the main thread, against 5 ms
+    /// in SwiftUI's renderer). Only the points are cached; a wire's colour and dash still come from the
+    /// live values.
+    @State private var routeCache = WireRouteCache()
+
     public init(model: AppModel) {
         self.model = model
     }
@@ -393,6 +403,7 @@ public struct CanvasView: View {
         pageModuleIds: Set<Int>,
         modulesById: [Int: PCCModule]
     ) -> [RoutedWire] {
+        routeCache.beginFrame(key: routeKey(project: project, pageModuleIds: pageModuleIds))
         var wires: [RoutedWire] = []
         wires.reserveCapacity(project.inConnections.count)
 
@@ -430,23 +441,11 @@ public struct CanvasView: View {
             // Keep parallel runs from stacking exactly on top of one another.
             let lane = Double(index % 4) * 3.0
 
-            let points: [CGPoint]
-            if conn.points.count >= 2 {
-                points = [src]
-                    + conn.points.map { CGPoint(x: src.x + $0.x, y: src.y + $0.y) }
-                    + [dst]
-            } else {
-                let srcBottom = srcMod.y + Double(ModuleCardView.cardHeight(for: srcMod)) + srcDrag.height
-                let dstBottom = dstMod.y + Double(ModuleCardView.cardHeight(for: dstMod)) + dstDrag.height
-                let srcTop = srcMod.y + srcDrag.height
-                let dstTop = dstMod.y + dstDrag.height
-                // Route around every block except the two this cable joins.
-                let others = obstacles.filter { $0.key != conn.outModuleId && $0.key != conn.inModuleId }
-                    .map(\.value)
-                points = WireRouter.route(from: src, to: dst, lane: lane,
-                                          obstacles: others,
-                                          clearAbove: min(srcTop, dstTop) - 26,
-                                          clearBelow: max(srcBottom, dstBottom) + 26)
+            let wireKey = "\(conn.outModuleId).\(conn.outPinId)->\(conn.inModuleId).\(conn.inPinId)"
+            let points: [CGPoint] = routeCache.points(for: wireKey) {
+                routingPoints(conn: conn, src: src, dst: dst, lane: lane,
+                              srcMod: srcMod, dstMod: dstMod,
+                              srcDrag: srcDrag, dstDrag: dstDrag, obstacles: obstacles)
             }
 
             wires.append(RoutedWire(
@@ -462,6 +461,69 @@ public struct CanvasView: View {
 
         // Draw live wires last so they sit on top of the idle ones.
         return wires.sorted { !$0.isHigh && $1.isHigh }
+    }
+
+    /// The path for one cable, computed once per geometry and then cached.
+    ///
+    /// The two branches are the original rules: a connection with two or more stored `POINTS` was routed
+    /// deliberately in Dirigo and is followed exactly, while a single stored point is just the stub
+    /// Dirigo writes for a freshly drawn wire and is re-routed cleanly.
+    private func routingPoints(
+        conn: Connection,
+        src: CGPoint,
+        dst: CGPoint,
+        lane: Double,
+        srcMod: PCCModule,
+        dstMod: PCCModule,
+        srcDrag: CGSize,
+        dstDrag: CGSize,
+        obstacles: [Int: CGRect]
+    ) -> [CGPoint] {
+        if conn.points.count >= 2 {
+            return [src] + conn.points.map { CGPoint(x: src.x + $0.x, y: src.y + $0.y) } + [dst]
+        }
+        let srcBottom = srcMod.y + Double(ModuleCardView.cardHeight(for: srcMod)) + srcDrag.height
+        let dstBottom = dstMod.y + Double(ModuleCardView.cardHeight(for: dstMod)) + dstDrag.height
+        let srcTop = srcMod.y + srcDrag.height
+        let dstTop = dstMod.y + dstDrag.height
+        // Route around every block except the two this cable joins.
+        let others = obstacles.filter { $0.key != conn.outModuleId && $0.key != conn.inModuleId }
+            .map(\.value)
+        return WireRouter.route(from: src, to: dst, lane: lane,
+                               obstacles: others,
+                               clearAbove: min(srcTop, dstTop) - 26,
+                               clearBelow: max(srcBottom, dstBottom) + 26)
+    }
+
+    /// Everything routing depends on, and nothing that a tick changes.
+    ///
+    /// Hashing this costs a walk of the page's modules and a connection's stored points — arithmetic
+    /// against a path search per cable.
+    private func routeKey(project: PCCProject, pageModuleIds: Set<Int>) -> Int {
+        var hasher = Hasher()
+        hasher.combine(model.selectedPage)
+        for module in project.modules where pageModuleIds.contains(module.id) {
+            hasher.combine(module.id)
+            hasher.combine(module.x)
+            hasher.combine(module.y)
+        }
+        for (id, offset) in dragOffsets {
+            hasher.combine(id)
+            hasher.combine(offset.width)
+            hasher.combine(offset.height)
+        }
+        for conn in project.inConnections {
+            hasher.combine(conn.outModuleId)
+            hasher.combine(conn.outPinId)
+            hasher.combine(conn.inModuleId)
+            hasher.combine(conn.inPinId)
+            hasher.combine(conn.points.count)
+            for point in conn.points {
+                hasher.combine(point.x)
+                hasher.combine(point.y)
+            }
+        }
+        return hasher.finalize()
     }
 
     // MARK: - Annotations
@@ -838,5 +900,32 @@ public final class TouchpadNSView: NSView {
         } else {
             model.resetZoom()
         }
+    }
+}
+
+/// Routed wire paths, kept for as long as the sheet's geometry is unchanged.
+///
+/// A reference type on purpose: it lives in `@State` so it survives a body evaluation, and filling it
+/// during `body` does not invalidate anything — it is not observable state, just a cache.
+@MainActor
+final class WireRouteCache {
+    private var key: Int?
+    private var routes: [String: [CGPoint]] = [:]
+
+    /// Number of paths actually computed, for tests and for anyone profiling this later.
+    private(set) var routeCount = 0
+
+    func beginFrame(key: Int) {
+        guard self.key != key else { return }
+        self.key = key
+        routes.removeAll()
+    }
+
+    func points(for id: String, _ build: () -> [CGPoint]) -> [CGPoint] {
+        if let cached = routes[id] { return cached }
+        let made = build()
+        routes[id] = made
+        routeCount += 1
+        return made
     }
 }
