@@ -292,10 +292,15 @@ void resetModule(Module &m) {
 
 /// One module's outputs to whatever consumes them.
 ///
-/// This is the rule that a first cut got wrong: the Swift engine pushes a block's outputs to its
-/// consumers the moment it has run (`propagateWires(from:)`), so a block later in the same pass reads
-/// the *fresh* value, not the one from the top of the pass. Propagating only at the start and end of a
-/// cycle gave a `Not` its input one step late, which the differential test caught immediately.
+/// This is the rule that a first cut got wrong: pushing a block's outputs to its consumers the moment it
+/// has run, so that a block later in the same pass sees the *fresh* value rather than the one from the
+/// top of the pass. Propagating only at the start and end of a cycle gave a `Not` its input one step
+/// late, which the differential test caught immediately.
+///
+/// The comment here used to claim the Swift engine did this too. It did not — `propagateWires(from:)`
+/// had no call site — and the two engines disagreed on `Int2Bits1` and its `Segment1`/`8xDO1` cone until
+/// `stepNode` started calling it. The claim is true now, but it was aspirational when written, which is
+/// exactly how a port drifts: a comment describing intent reads like a description of behaviour.
 void propagateFrom(DirigoSim *sim, size_t sourceIndex) {
     const Module &from = sim->modules[sourceIndex];
     auto found = sim->outgoingByModule.find(from.id);
