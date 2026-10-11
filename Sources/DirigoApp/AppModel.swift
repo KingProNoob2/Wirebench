@@ -201,6 +201,7 @@ public final class AppModel: @unchecked Sendable {
 
     public init() {
         AppModel.shared = self
+        observeActivation()
     }
 
     /// Bumps the version that tells the canvas its live values have changed.
@@ -254,6 +255,31 @@ public final class AppModel: @unchecked Sendable {
 
     /// Whether the running project is being simulated by the C++ core. Surfaced for the UI and tests.
     public private(set) var isUsingCxxCore = false
+
+    /// Whether the app is frontmost.
+    ///
+    /// The simulation keeps running when it is not — it is wall-clock driven, so stopping it would lose
+    /// simulated time — but the *redraw* is skipped, because nothing is on screen to redraw. Measured
+    /// per-tick cost is ~21 µs of work against milliseconds of SwiftUI re-evaluation, so this is where
+    /// an idle background app's CPU actually goes.
+    public var isAppActive = true
+
+    private func observeActivation() {
+        let centre = NotificationCenter.default
+        centre.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isAppActive = true
+                // Catch up once, so the canvas shows the current state rather than the last one drawn.
+                self.simulationDidChange()
+            }
+        }
+        centre.addObserver(forName: NSApplication.willResignActiveNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isAppActive = false }
+        }
+    }
 
     private func makeCxxCore(project: PCCProject) -> CxxSimulationCore? {
         guard CxxSimulationCore.isFullyPorted(project) else { return nil }
@@ -777,7 +803,7 @@ public final class AppModel: @unchecked Sendable {
                     ? stepBackend(deltaMs: max(1, elapsedMs))
                     : engine.stepIfDue(deltaMs: max(1, elapsedMs))
                 if ran { lastStepTime = now }
-                if updatePending && !ran && now - lastUIUpdateTime >= .milliseconds(28) {
+                if updatePending && self.isAppActive && !ran && now - lastUIUpdateTime >= .milliseconds(28) {
                     self.simulationDidChange()
                     lastUIUpdateTime = now
                     updatePending = false
@@ -788,7 +814,11 @@ public final class AppModel: @unchecked Sendable {
                     // without choking — but never *drop* one. Dropping is what a rare step cannot afford:
                     // a thread that runs once a second would have its single update swallowed by the
                     // frame budget, and the canvas would show the old values until the next second.
-                    if now - lastUIUpdateTime >= .milliseconds(28) {
+                    // Only ask SwiftUI to redraw when something can see it. The step above still ran, so
+                    // no simulated time is lost — and one catch-up refresh happens on reactivation.
+                    if !self.isAppActive {
+                        updatePending = false
+                    } else if now - lastUIUpdateTime >= .milliseconds(28) {
                         self.simulationDidChange()
                         lastUIUpdateTime = now
                         updatePending = false

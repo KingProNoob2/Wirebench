@@ -219,6 +219,33 @@ struct CxxSimulationTests {
         #expect(model.isUsingCxxCore == false, "an unported `TMDiv` must keep the Swift engine in charge")
     }
 
+    /// Measured, the per-tick work is ~21 µs against milliseconds of SwiftUI re-evaluation, so an idle
+    /// background app spends its CPU redrawing a canvas nobody can see. The simulation keeps running —
+    /// it is wall-clock driven and stopping it would lose simulated time — and one refresh catches the
+    /// canvas up on reactivation.
+    @Test("An unfocused app keeps simulating and stops redrawing")
+    @MainActor
+    func inactiveAppSkipsRedraw() async throws {
+        let model = AppModel()
+        model.loadProject(url: try PlayLoopTests.temporaryProject())
+        model.isAppActive = false
+        let versionBefore = model.simulationVersion
+
+        model.play()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        let ticks = model.tickCount
+        let versionWhileHidden = model.simulationVersion
+        model.pause()
+
+        #expect(ticks > 0, "the simulation must keep running while the app is in the background")
+        #expect(versionWhileHidden == versionBefore,
+                "nothing is on screen, so nothing should be invalidated (\(versionWhileHidden))")
+
+        model.isAppActive = true
+        model.simulationDidChange()
+        #expect(model.simulationVersion > versionBefore, "reactivating must catch the canvas up")
+    }
+
     @Test("How much of a real project the core simulates")
     func corpusCoverage() throws {
         let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
