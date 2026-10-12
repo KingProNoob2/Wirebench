@@ -591,6 +591,24 @@ void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridg
         if (sim->indexById.find(bridges[i].interfaceModule) == sim->indexById.end()) continue;
         sim->macroBridges.push_back(bridges[i]);
     }
+
+    /* Deterministic order, by caller then interface then kind.
+     *
+     * This matters when **several call sites share one subpage**: they all write the same interface
+     * module, so the last one applied wins. `jk_master_slave.pcc` is exactly that — five `JK` call
+     * sites, each wired to the next (`JK2.in[0] <- JK2.out[1]`, and so on), all pointing at one
+     * `Inputs1`. The Swift engine iterates `nodes.values`, a `Dictionary`, so which of the five it
+     * applies last is not defined by its source. *(Measured: it produced the same result on four
+     * consecutive runs, so it is stable in practice — but that is hash order being stable for a fixed
+     * process, not a guarantee, and it is not a definition this engine can port.)* Picking a fixed order
+     * at least makes this engine reproducible, and the divergence is recorded rather than papered over.
+     */
+    std::sort(sim->macroBridges.begin(), sim->macroBridges.end(),
+              [](const DirigoMacroBridge &a, const DirigoMacroBridge &b) {
+                  if (a.callerModule != b.callerModule) return a.callerModule < b.callerModule;
+                  if (a.interfaceModule != b.interfaceModule) return a.interfaceModule < b.interfaceModule;
+                  return a.kind < b.kind;
+              });
 }
 
 void dirigo_sim_set_wall_clock(DirigoSim *sim, DirigoWallClock clock) {
