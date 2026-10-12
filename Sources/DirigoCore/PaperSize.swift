@@ -19,17 +19,33 @@ import Foundation
 /// gaps or collisions — which is what makes this more than a guess. (The 2023 changelog records the
 /// default for a *new* project moving to A3 Extra, i.e. 60 -> 65.)
 ///
-/// A canvas unit is 0.2 mm (5 units/mm). That is fixed by the projects themselves: A3 is 297 mm
-/// wide, and the widest module in `rulkoshaddirigo.pcc` sits at x=1120 with a 124-unit card, so the
-/// scale cannot be coarser than about 4.9 units/mm without pushing real Dirigo content off its own
-/// page.
+/// A canvas unit is 1/7 mm: **7 units per millimetre**.
 ///
-/// This value is only ever used to *draw* the sheet and to keep modules on it. It is never written
-/// to the file — `PAGESIZE` is preserved verbatim on save — so even a wrong reading here is a
-/// cosmetic difference, never a compatibility one.
+/// ## How this is pinned down, and why the earlier value was wrong
+///
+/// It used to be 5 units/mm, leaving `PAGESIZE=60` a 1485 x 2100 sheet. That is **smaller than real
+/// Dirigo content**, so it was not cosmetic after all: `prepareForDirigo` scales a layout that its
+/// sheet cannot hold, and at 5 units/mm **18 of the 24 `.pcc` files on this machine were rewritten on
+/// export** — `had.pcc`, both `kostička`s, `ruleta_kostka_had.pcc`, all three `AHOJ`s and more — moved
+/// and scaled to 82-87% for no reason a user could see. The claim that a wrong reading was harmless was
+/// wrong because the reader only feeds the *drawing*, while the exporter also uses it to decide
+/// whether a layout "fits".
+///
+/// The value comes from the content itself. Across all 24 projects the greatest extent is x=1692, and
+/// an export must leave a layout alone when `maxX + card + margin <= width`; at 297 mm wide that needs
+/// **>= 6.27 units/mm**. At 7.0 no project on disk is touched; at 6.0 one still is.
+///
+/// 7.0 is the value that also comes out exactly: Dirigo's A3 sheet is an integer number of units wide,
+/// and 7 x 297 = 2079 is the smallest multiple of 297 that clears the 1862-unit requirement — whereas
+/// 5 x 297 = 1485 is demonstrably too small to be what Dirigo uses.
+///
+/// This value is only ever used to *draw* the sheet, to keep modules on it, and to decide whether an
+/// export has to move anything. It is never written to the file — `PAGESIZE` is preserved verbatim on
+/// save — so it cannot break compatibility, but it *can* silently rearrange someone's schematic, which
+/// is what the old value did.
 public enum PaperSize {
     /// Canvas units per millimetre. See the note above on how this is pinned down.
-    public static let unitsPerMillimetre: Double = 5.0
+    public static let unitsPerMillimetre: Double = 7.0
 
     /// The sheet for a given `PAGESIZE` value, in canvas units.
     public static func sheet(forPageSize value: Int) -> CGSize {

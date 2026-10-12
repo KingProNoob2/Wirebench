@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import os
 import DirigoCore
 import DirigoLibrary
 import DirigoEngine
@@ -373,8 +374,15 @@ public final class AppModel: @unchecked Sendable {
 
     /// The simulation moved: refresh the values the canvas draws — and, only if they really moved,
     /// tell the views. A settled simulation therefore stops invalidating anything at all.
+    /// TEMPORARY: signpost logger for the tick-path measurement.
+    static let diagLog = OSLog(subsystem: "com.dirigo.DirigoApp", category: "diag")
+
     public func simulationDidChange() {
+        // TEMPORARY signpost: measures how long one tick's UI update takes.
+        let signpostID = OSSignpostID(log: Self.diagLog)
+        os_signpost(.begin, log: Self.diagLog, name: "tickUI", signpostID: signpostID)
         if refreshSnapshots() { bumpSimulationVersion() }
+        os_signpost(.end, log: Self.diagLog, name: "tickUI", signpostID: signpostID)
     }
 
     private func bumpSimulationVersion() {

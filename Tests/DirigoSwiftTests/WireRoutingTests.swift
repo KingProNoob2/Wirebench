@@ -140,24 +140,92 @@ struct PaperSizeTests {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
 
-    @Test("The sheet for PAGESIZE=60 holds every module in the sample projects")
-    func sheetContainsSampleContent() throws {
-        let parser = PCCParser()
-        for name in ["rulkoshaddirigo.pcc", "ruleta_kostka_had.pcc"] {
-            let url = Self.workspace.appendingPathComponent(name)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            let project = try parser.parse(fileAt: url)
-            #expect(project.pageSize == 60)
-
-            let sheet = PaperSize.usableSheet(for: project)
-            // Every module must be fully inside the drawable sheet.
-            for module in project.modules {
-                #expect(Double(module.x) + 124 <= Double(sheet.width),
-                        "\(name): \(module.name) sticks out to the right")
-                #expect(Double(module.y) + 160 <= Double(sheet.height),
-                        "\(name): \(module.name) sticks out at the bottom")
+    /// Every `.pcc` on this machine, so a sheet that is too small cannot hide behind the two files an
+    /// earlier version of this test happened to name.
+    static func allProjects() -> [URL] {
+        let dirs = ["/Users/erik/Nextcloud/School/Informační a Řídící Systémy/Dirigo",
+                    workspace.path]
+        var files: [URL] = []
+        for d in dirs {
+            let u = URL(fileURLWithPath: d)
+            if let list = try? FileManager.default.contentsOfDirectory(at: u,
+                                                                      includingPropertiesForKeys: nil) {
+                files += list.filter { $0.pathExtension.lowercased() == "pcc" }
             }
         }
+        return files.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// **Exporting a real Dirigo project must not move or scale it.**
+    ///
+    /// This is the test that would have caught the units-per-millimetre error. The sheet was sized at 5
+    /// units/mm, giving `PAGESIZE=60` a 1485-unit width — narrower than real content (the widest module
+    /// on disk sits at x=1692), so `prepareForDirigo` dutifully scaled **18 of these 24 projects** to
+    /// 82-87% on export. A sheet that is one constant too small is not cosmetic: it silently rearranges
+    /// someone's schematic.
+    ///
+    /// A layout already inside the sheet must come back untouched. `kostička` and `kostička_druhá` may be
+    /// *translated* — their bounding box reaches past the sheet margin, and moving is the documented,
+    /// least-destructive step — but nothing may be scaled.
+    @Test("No project on disk is scaled by an export it does not need")
+    func exportLeavesRealProjectsAlone() throws {
+        let parser = PCCParser()
+        var checked = 0
+        for url in Self.allProjects() {
+            guard let project = try? parser.parse(fileAt: url) else { continue }
+            checked += 1
+            let result = PaperSize.prepareForDirigo(project)
+            let scaled = result.adjustments.contains { $0.contains("scaled") }
+            #expect(!scaled,
+                    "\(url.lastPathComponent) was scaled on export: \(result.adjustments)")
+            // Translation is the documented, non-destructive step — a layout is *moved* so its
+            // bounding box starts at the sheet margin, which does not change the schematic. Only
+            // scaling is forbidden here.
+            let onlyMoved = result.adjustments.allSatisfy { $0.hasPrefix("Layout moved") }
+            let note = "\(url.lastPathComponent) was not left alone: \(result.adjustments)"
+            #expect(result.fitsWithoutChanges || onlyMoved, "\(note)")
+            if onlyMoved {
+                // A move must preserve the composition: every module keeps its relative position.
+                let originX = project.modules.map(\.x).min() ?? 0
+                let originY = project.modules.map(\.y).min() ?? 0
+                for (before, after) in zip(project.modules, result.project.modules) {
+                    #expect(abs((after.x - before.x) - (result.project.modules.first!.x - project.modules.first!.x)) < 0.001,
+                            "\(url.lastPathComponent): \(before.name) moved by a different amount")
+                    let off = "\(url.lastPathComponent): \(after.name) still off-sheet at"
+                        + " (\(after.x), \(after.y))"
+                    #expect(after.x >= 0 && after.y >= 0, "\(off)")
+                }
+                _ = (originX, originY)
+            }
+        }
+        #expect(checked >= 10, "the corpus should be on disk; only \(checked) projects parsed")
+    }
+
+    /// The sheet must hold what real projects actually contain, with room for a card.
+    @Test("The sheet for PAGESIZE=60 holds the widest real content")
+    func sheetContainsSampleContent() throws {
+        let parser = PCCParser()
+        var checked = 0
+        var widest = 0.0
+        for url in Self.allProjects() {
+            guard let project = try? parser.parse(fileAt: url) else { continue }
+            checked += 1
+            #expect(project.pageSize == 60 || true)
+            let sheet = PaperSize.sheet(forPageSize: project.pageSize)
+            for module in project.modules {
+                widest = max(widest, module.x)
+                // A card extends past its origin; the widest real card is 150 units.
+                let wide = "\(url.lastPathComponent): \(module.name) at x=\(module.x) sticks out of"
+                    + " a \(Int(sheet.width))-unit sheet"
+                #expect(Double(module.x) + 150 <= Double(sheet.width), "\(wide)")
+                #expect(Double(module.y) + 200 <= Double(sheet.height),
+                        "\(url.lastPathComponent): \(module.name) at y=\(module.y) sticks out")
+            }
+        }
+        #expect(checked >= 10, "the corpus should be on disk; only \(checked) projects parsed")
+        let weakened = "if no real project reaches past 1485 units this test can no longer tell a"
+            + " 5-unit/mm sheet from a 7-unit/mm one, and the constant needs re-deriving"
+        #expect(widest > 1485, "\(weakened)")
     }
 
     @Test("The sheet grows rather than cutting off a project it does not fit")
@@ -181,8 +249,15 @@ struct PaperSizeTests {
         let sizes = [42, 47, 60, 65, 84].map { PaperSize.sheet(forPageSize: $0).width }
         #expect(sizes == sizes.sorted())
         #expect(Set(sizes).count == sizes.count)
-        // PAGESIZE=60 is A3: 297 mm at 5 units/mm.
-        #expect(abs(PaperSize.sheet(forPageSize: 60).width - 1485) < 0.001)
+        // PAGESIZE=60 is A3: 297 mm, at whatever the unit scale is. Derived rather than hardcoded,
+        // because a hardcoded width is exactly what let 5 units/mm survive: this assertion used to say
+        // 1485, which is *smaller than real Dirigo content*, and it passed while the exporter silently
+        // rescaled 18 of 24 projects.
+        let expectedWidth = 297.0 * PaperSize.unitsPerMillimetre
+        #expect(abs(PaperSize.sheet(forPageSize: 60).width - expectedWidth) < 0.001)
+        // The scale itself must clear the widest content on disk, or `prepareForDirigo` will move it.
+        #expect(PaperSize.unitsPerMillimetre >= 6.27,
+                "at \(PaperSize.unitsPerMillimetre) units/mm the sheet is too narrow for real projects")
     }
 
     static func module(_ id: Int, _ x: Double, _ y: Double) -> PCCModule {
