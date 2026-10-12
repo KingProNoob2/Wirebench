@@ -437,6 +437,10 @@ public final class AppModel: @unchecked Sendable {
             let proj = try parser.parse(fileAt: url)
             isRestoringUndo = true
             self.project = proj
+            // A new document means new meanings for the same module ids, and `ModulePinCatalog`
+            // memoises a pin schema by module id. Without this a block could be labelled from the
+            // *previous* project's schema for that id — wrong names on the panel, silently.
+            ModulePinCatalog.invalidateSchemaCache()
             isRestoringUndo = false
             history.clear()
             self.currentFileURL = url

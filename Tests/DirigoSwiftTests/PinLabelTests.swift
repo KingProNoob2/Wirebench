@@ -102,4 +102,67 @@ struct PinLabelTests {
         #expect(mod.outPins.count == 16)
         #expect(ModulePinCatalog.outputPinFullName(for: mod, index: 15) == "B15 (Bit 15)")
     }
+
+    /// `pinNames(for:)` is memoised, because it is called once per inspector row per body and cost
+    /// **1.2–2.5 ms** per call — enough that selecting a block visibly lagged. A cache here is only safe
+    /// if a hit is an answer for *these* pins, so this checks the two ways it could go wrong: a hit that
+    /// differs from a fresh computation, and a hit that survives a change it should not.
+    @Test("The memoised pin schema matches a fresh one, and expires when the module changes")
+    func schemaCacheIsFaithful() {
+        var project = PCCProject(name: "cache")
+        project.pages = [ProjectPage(caption: "main")]
+        project.modules = [
+            PCCModule(id: 1, guid: UUID(), name: "And1", x: 0, y: 0, order: 10, threadId: 1, page: "main",
+                      inPins: (0..<4).map { Pin(id: $0, value: .bool(false)) },
+                      outPins: [Pin(id: 0, value: .bool(false))],
+                      rawAttributes: ["INPUT_COUNT": "3"]),
+        ]
+        let module = project.modules[0]
+
+        // A hit must equal what the uncached path would have produced. `pinNames(for:name:guid:rawAttrs:)`
+        // plus `fit` is that path, and it is what the cache is built from.
+        let cached = ModulePinCatalog.pinNames(for: module)
+        let fresh = ModulePinCatalog.pinNames(for: module.name, guid: module.guid,
+                                              rawAttrs: module.rawAttributes)
+        #expect(cached.inPins.map(\.shortcut) == fresh.inPins.map(\.shortcut),
+                "a cache hit returned different in-pin shortcuts")
+        #expect(cached.outPins.map(\.shortcut) == fresh.outPins.map(\.shortcut),
+                "a cache hit returned different out-pin shortcuts")
+        #expect(cached.inPins.map(\.name) == fresh.inPins.map(\.name),
+                "a cache hit returned different in-pin names")
+
+        // Every pin label the inspector draws agrees with the uncached computation.
+        for index in 0..<module.inPins.count {
+            let label = ModulePinCatalog.inputPinFullName(for: module, index: index)
+            let expected: String = {
+                guard index < fresh.inPins.count else { return "Input \(index)" }
+                return "\(fresh.inPins[index].shortcut) (\(fresh.inPins[index].name))"
+            }()
+            #expect(label == expected, "in[\(index)] label \"\(label)\" != \"\(expected)\"")
+        }
+
+        // **Invalidation on an attribute the table reads.** `INPUT_COUNT` decides the `X<n>` run, so the
+        // same module id under a different value is a different schema. Asserted against the *uncached*
+        // path rather than a hand-computed count: `fit` trims a schema when its run disagrees with the
+        // sheet, and predicting that here is how the first two versions of this test were wrong.
+        for (count, pins) in [("1", 2), ("3", 4), ("6", 7)] {
+            project.modules[0].rawAttributes["INPUT_COUNT"] = count
+            project.modules[0].inPins = (0..<pins).map { Pin(id: $0, value: .bool(false)) }
+            let cached = ModulePinCatalog.pinNames(for: project.modules[0])
+            let fresh = ModulePinCatalog.pinNames(for: project.modules[0].name,
+                                                  guid: project.modules[0].guid,
+                                                  rawAttrs: project.modules[0].rawAttributes)
+            let stale = "INPUT_COUNT=\(count) with \(pins) pins served a stale schema:"
+                + " \(cached.inPins.map(\.shortcut)) vs \(fresh.inPins.map(\.shortcut))"
+            #expect(cached.inPins.map(\.shortcut) == fresh.inPins.map(\.shortcut), "\(stale)")
+            #expect(cached.inPins.map(\.name) == fresh.inPins.map(\.name),
+                    "INPUT_COUNT=\(count) served stale pin names")
+        }
+
+        // A load clears the cache, so a module id cannot carry answers into another document.
+        ModulePinCatalog.invalidateSchemaCache()
+        let afterReset = ModulePinCatalog.pinNames(for: project.modules[0])
+        #expect(afterReset.inPins.count > 0,
+                "the schema came back empty after an explicit invalidation")
+    }
 }

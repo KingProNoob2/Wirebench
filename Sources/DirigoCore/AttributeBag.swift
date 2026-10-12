@@ -10,7 +10,10 @@ import Foundation
 /// `AttributeBag` keeps insertion order while still offering dictionary-style lookup, so it is
 /// a drop-in replacement for the `[String: String]` it replaces: `bag["KEY"]` reads,
 /// `bag["KEY"] = v` appends-or-replaces, and `bag.removeValue(forKey:)` deletes.
-public struct AttributeBag: Sendable, Equatable {
+/// `Hashable` as well as `Equatable` so the bag can be part of a cache key — `ModulePinCatalog` keys a
+/// memoised pin schema on the attributes it was built from, and synthesised conformance is correct here
+/// because `order` and `storage` together already define equality.
+public struct AttributeBag: Sendable, Equatable, Hashable {
     private var order: [String]
     private var storage: [String: String]
 
