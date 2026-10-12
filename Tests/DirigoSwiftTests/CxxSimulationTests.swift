@@ -279,13 +279,41 @@ struct CxxSimulationTests {
         var compared: [String] = []
         var skipped: [String] = []
 
-        // `zelznice` is the project with a macro and a wall-clock block, and it is the reason this list
-        // grew: for a long time it was skipped, so its modules were never compared at all.
-        for name in ["had.pcc", "kostička.pcc", "had+1block.pcc", "ehhhhhh zelznice.pcc"] {
-            let url = name.hasPrefix("had+") ? Self.root.appendingPathComponent(name)
-                                              : school.appendingPathComponent(name)
-            guard FileManager.default.fileExists(atPath: url.path),
-                  let project = try? PCCParser().parse(fileAt: url) else { continue }
+        // **Every** project on disk, not a hand-kept list. The list was the problem: `zelznice` was
+        // absent from it, so its ported modules were never compared by anything and the coverage
+        // *number* climbed while the comparison said nothing about it. `had.pcc` and `had+1block.pcc` are
+        // in the workspace root; everything else is in the Dirigo school folder.
+        let rootFiles = (try? FileManager.default.contentsOfDirectory(
+            at: Self.root, includingPropertiesForKeys: nil)) ?? []
+        let schoolFiles = (try? FileManager.default.contentsOfDirectory(
+            at: school, includingPropertiesForKeys: nil)) ?? []
+        let sources = (rootFiles + schoolFiles)
+            .filter { $0.pathExtension.lowercased() == "pcc" }
+            // Sorted so a failure names the same project on every run, and a new file changes the list.
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        // A sweep that finds nothing must not look like a sweep that found everything correct.
+        #expect(sources.count >= 10, "the corpus should be on disk; found \(sources.count)")
+
+        // Projects that are fully ported but where the two engines are **known to disagree**. Listed by
+        // name so the sweep still asserts on everything else, and so a *new* disagreement cannot hide
+        // behind a blanket skip. Each entry is a bug, not a policy: see `performance.md` §8.
+        //
+        // `SSemafor(1).pcc` — `Int2Bits1 out[0]` differs from step 61 (`cxx 0 vs swift 1`), which shows
+        // up downstream as `8xDO1 in[3]`. When it diverges, both engines agree on `Int2Bits1`'s *input*
+        // (1) but not its *output*, and reading an input pin after the pass reports the value a later
+        // producer pushed into it rather than the one the block read when it ran — so the comparison
+        // alone cannot say which engine is right. It was never reached before this sweep: the four
+        // hand-listed projects do not include it.
+        let knownDivergence: Set<String> = ["SSemafor(1).pcc"]
+
+        for url in sources {
+            let name = url.lastPathComponent
+            guard !knownDivergence.contains(name) else {
+                skipped.append(name + " (known divergence)")
+                continue
+            }
+            guard let project = try? PCCParser().parse(fileAt: url) else { continue }
             guard CxxSimulationCore.isFullyPorted(project) else {
                 skipped.append(name)
                 continue
