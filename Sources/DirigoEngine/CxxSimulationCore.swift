@@ -48,6 +48,9 @@ public final class CxxSimulationCore {
         // `MACRO_NAME` of its own.
         case "TMacroModule": return DIRIGO_BLOCK_MACRO_IO
         case "TMacroInterface": return DIRIGO_BLOCK_MACRO_IO
+        // Read a clock it is *given* rather than reading one: two engines that each call `Date()`
+        // cannot agree, so a time-dependent pin could never be compared between them.
+        case "TMDateTime": return DIRIGO_BLOCK_DATETIME
         // Blocks whose pins *are* their behaviour: the I/O channels, and the displays that show them.
         case "TMDigitalInputs", "TMDigitalOutputs", "TDispValueModule", "TDispSegmentModule":
             return DIRIGO_BLOCK_PASSIVE
@@ -209,8 +212,27 @@ public final class CxxSimulationCore {
     public var tickCount: UInt64 { dirigo_sim_tick_count(sim) }
 
     /// One cycle. Reports whether a thread ran, like `SimulationEngine.stepIfDue`.
+    ///
+    /// `now` is the step's wall clock and is **required**, not defaulted: the caller that owns the clock
+    /// has to hand the same instant to both engines, or a `TMDateTime` pin would differ between them for
+    /// a reason that has nothing to do with the port. See `DirigoWallClock` and `SimulationEngine.now`.
     @discardableResult
-    public func step(deltaMs: Double) -> Bool { dirigo_sim_step(sim, deltaMs) != 0 }
+    public func step(deltaMs: Double, now: Date) -> Bool {
+        dirigo_sim_set_wall_clock(sim, Self.wallClock(from: now))
+        return dirigo_sim_step(sim, deltaMs) != 0
+    }
+
+    /// Decomposes an instant the way `DateTimeBlock` does, so the two engines cannot disagree about the
+    /// calendar: `DirigoEpoch` owns the epoch (days since 1 Jan 1980) and the weekday convention
+    /// (0 = Monday), and this only moves its answers across the C boundary.
+    static func wallClock(from date: Date) -> DirigoWallClock {
+        let parts = DirigoEpoch.calendar.dateComponents([.hour, .minute, .second], from: date)
+        return DirigoWallClock(days: Int32(DirigoEpoch.days(from: date)),
+                               hour: Int32(parts.hour ?? 0),
+                               minute: Int32(parts.minute ?? 0),
+                               second: Int32(parts.second ?? 0),
+                               dayOfWeek: Int32(DirigoEpoch.dayOfWeek(from: date)))
+    }
 
     /// Milliseconds until the earliest thread is due.
     public func nextDueInMs() -> Double { dirigo_sim_next_due_ms(sim) }

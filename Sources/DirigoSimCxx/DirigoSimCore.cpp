@@ -114,6 +114,8 @@ struct DirigoSim {
     std::unordered_map<int32_t, std::vector<size_t>> incomingByModule;
     /// Macro interfaces, resolved from module attributes Swift-side. See `DirigoMacroBridge`.
     std::vector<DirigoMacroBridge> macroBridges;
+    /// The step's wall clock, decomposed by Swift. See `dirigo_sim_set_wall_clock`.
+    DirigoWallClock wallClock{0, 0, 0, 0, 0};
     std::vector<std::vector<size_t>> schedule;   /* by thread id, in ORDER */
     std::vector<int32_t> threadIds;              /* ascending */
     std::map<int32_t, double> threadElapsedMs;
@@ -131,7 +133,7 @@ double intervalMs(const DirigoSim *sim, int32_t threadId) {
 
 /// One module, mirroring its Swift block's `process(sample:)` exactly — including the `En = 0` rule,
 /// which holds the output rather than clearing it (docs/spec/blocks-datapath.md §0.5).
-void processModule(Module &m, const Sample &sample) {
+void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock) {
     (void)sample;
     switch (m.kind) {
         case DIRIGO_BLOCK_NOT: {
@@ -285,6 +287,19 @@ void processModule(Module &m, const Sample &sample) {
             if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(wt));
             return;
         }
+        case DIRIGO_BLOCK_DATETIME: {
+            /* The clock is handed in, never read here — see `DirigoWallClock`. `En` holds, as usual.
+               The output set is per-instance (a real module carries 5 out pins, the help table says 6),
+               so this writes as many of the six values as the module actually has. */
+            const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+            if (!enabled) return;
+            const int32_t values[6] = {
+                clock.days, clock.hour, clock.minute, clock.second, clock.dayOfWeek,
+                clock.hour * 3600 + clock.minute * 60 + clock.second,
+            };
+            for (size_t i = 0; i < m.outPins.size() && i < 6; ++i) m.outPins[i] = int32Value(values[i]);
+            return;
+        }
         case DIRIGO_BLOCK_PASSIVE:
         case DIRIGO_BLOCK_MACRO_IO:
             /* Both compute nothing. A macro interface's pins are written by `propagateMacroCalls`. */
@@ -319,6 +334,7 @@ void resetModule(Module &m) {
         case DIRIGO_BLOCK_INRANGE:
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             return;
+        case DIRIGO_BLOCK_DATETIME:
         case DIRIGO_BLOCK_EQUITHERM:
             /* `WT` resets to an *int* zero, not the boolean default: the kind of a pin is part of the
                value, and the differential test compares the kinds. */
@@ -509,6 +525,11 @@ void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridg
     }
 }
 
+void dirigo_sim_set_wall_clock(DirigoSim *sim, DirigoWallClock clock) {
+    if (!sim) return;
+    sim->wallClock = clock;
+}
+
 void dirigo_sim_destroy(DirigoSim *sim) { delete sim; }
 
 void dirigo_sim_reset(DirigoSim *sim) {
@@ -556,7 +577,7 @@ int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
         ranAny = true;
         Sample sample{sim->tickCount, interval};
         for (size_t index : sim->schedule[tid]) {
-            processModule(sim->modules[index], sample);
+            processModule(sim->modules[index], sample, sim->wallClock);
             propagateFrom(sim, index);       /* the Swift engine pushes after every block */
             if (sim->modules[index].kind == DIRIGO_BLOCK_SET) {
                 applySetWriteThrough(sim, index);

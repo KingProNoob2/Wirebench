@@ -362,7 +362,10 @@ public final class AppModel: @unchecked Sendable {
             return true
         }
         syncPinsIntoCore()
-        let ran = core.step(deltaMs: deltaMs)
+        // One instant for both engines. The Swift engine's clock is `SimulationEngine.now`, which a test
+        // can pin; reading it here rather than calling `Date()` again is what makes a `TMDateTime` pin
+        // agree between the two backends.
+        let ran = core.step(deltaMs: deltaMs, now: engine?.now() ?? Date())
         if ran { syncPinsFromCore() }
         tickCount = core.tickCount
         return ran

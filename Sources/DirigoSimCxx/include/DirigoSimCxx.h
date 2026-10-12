@@ -81,8 +81,26 @@ typedef enum {
     ///
     /// Note that `Inputs` and `Outputs` **share one GUID** in the block table (`3FFBEEC3-…`) and are
     /// told apart by the module's `KIND` attribute, so nothing here may assume the GUID identifies which.
-    DIRIGO_BLOCK_MACRO_IO = 16
+    DIRIGO_BLOCK_MACRO_IO = 16,
+
+    /// `TMDateTime`: decomposes a wall clock into `D, H, M, S, DOW, SOD`.
+    ///
+    /// The core does **not** read a clock of its own. Both engines have to answer the same question with
+    /// the same instant or a time-dependent pin can never be compared — and two `Date()` calls cannot
+    /// agree. So the calendar components are pushed in once per step through
+    /// `dirigo_sim_set_wall_clock`, and the Swift side is the single place the clock is read (see
+    /// `SimulationEngine.now` and `DirigoEpoch`).
+    DIRIGO_BLOCK_DATETIME = 17
 } DirigoBlockKind;
+
+/// A step's wall clock, already decomposed. `DOW` is 0 = Monday, as the help specifies.
+typedef struct {
+    int32_t days;        /* days since 1 Jan 1980 */
+    int32_t hour;
+    int32_t minute;
+    int32_t second;
+    int32_t dayOfWeek;   /* 0 = Monday */
+} DirigoWallClock;
 
 typedef struct {
     int32_t id;             /* the project's module ID */
@@ -144,6 +162,12 @@ DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
 /// present in the project file, so a caller that cannot work them out (or a project with no macros)
 /// passes none, and the core then behaves exactly as it did before macros existed.
 void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridges, int32_t count);
+
+/// Sets the wall clock every `DIRIGO_BLOCK_DATETIME` module will read until the next call.
+///
+/// Called once per step by the caller that owns the clock. A time-dependent block that read its own
+/// clock could never be checked against another engine, so this is the only way the block gets a time.
+void dirigo_sim_set_wall_clock(DirigoSim *sim, DirigoWallClock clock);
 
 void dirigo_sim_destroy(DirigoSim *sim);
 void dirigo_sim_reset(DirigoSim *sim);

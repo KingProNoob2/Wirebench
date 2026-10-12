@@ -12,6 +12,14 @@ import DirigoEngine
 /// actually reaches on real projects, because "partially ported" should be a number, not a claim.
 @Suite("C++ simulation core")
 struct CxxSimulationTests {
+    /// The instant every differential comparison pins both engines to.
+    ///
+    /// A `TMDateTime` pin is a function of the clock, and two engines that each read their own clock
+    /// disagree by milliseconds — so the comparison would fail on a pin whose difference says nothing
+    /// about the port. Pinning both to one instant is what makes the time-dependent kinds comparable at
+    /// all, and it is why `CxxSimulationCore.step` takes `now` rather than defaulting it.
+    static let fixedNow = Date(timeIntervalSince1970: 1_709_623_628)  // 2024-03-05T06:07:08Z
+
     static var root: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -44,6 +52,7 @@ struct CxxSimulationTests {
     @Test("Both engines hold the same pin values after every step")
     func enginesAgree() throws {        let project = Self.pulseIntoNot()
         let swift = SimulationEngine(project: project, scheduling: .everyTick)
+        swift.now = { Self.fixedNow }
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
 
         #expect(cxx.portedModuleCount == 2, "the fixture should be fully ported")
@@ -51,7 +60,7 @@ struct CxxSimulationTests {
         var observedValues = 0
         for step in 0..<60 {
             swift.step()
-            cxx.step(deltaMs: 10)
+            cxx.step(deltaMs: 10, now: Self.fixedNow)
 
             for module in project.modules {
                 guard let node = swift.getNode(id: module.id) else { continue }
@@ -91,13 +100,14 @@ struct CxxSimulationTests {
                       outPins: [Pin(id: 0, value: .bool(false))]),
         ]
         let swift = SimulationEngine(project: project, scheduling: .everyTick)
+        swift.now = { Self.fixedNow }
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
 
         (swift.getNode(id: 1)?.block as? BoolVarBlock)?.setOutput(true)
         cxx.setOut(moduleId: 1, pin: 0, value: .bool(true))
         for step in 0..<5 {
             swift.step()
-            cxx.step(deltaMs: 10)
+            cxx.step(deltaMs: 10, now: Self.fixedNow)
             #expect(cxx.outValue(moduleId: 1, pin: 0)?.description
                     == swift.getNode(id: 1)?.block.outPins[0].description,
                     "step \(step)")
@@ -174,10 +184,11 @@ struct CxxSimulationTests {
         #expect(CxxSimulationCore.isFullyPorted(project),
                 "\(label): the block under test must be ported, or nothing is being compared")
         let swift = SimulationEngine(project: project, scheduling: .everyTick)
+        swift.now = { Self.fixedNow }
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
         for step in 0..<60 {
             swift.step()
-            cxx.step(deltaMs: 10)
+            cxx.step(deltaMs: 10, now: Self.fixedNow)
             for module in project.modules {
                 guard let node = swift.getNode(id: module.id) else { continue }
                 for pin in node.block.outPins.indices {
@@ -268,7 +279,9 @@ struct CxxSimulationTests {
         var compared: [String] = []
         var skipped: [String] = []
 
-        for name in ["had.pcc", "kostička.pcc", "had+1block.pcc"] {
+        // `zelznice` is the project with a macro and a wall-clock block, and it is the reason this list
+        // grew: for a long time it was skipped, so its modules were never compared at all.
+        for name in ["had.pcc", "kostička.pcc", "had+1block.pcc", "ehhhhhh zelznice.pcc"] {
             let url = name.hasPrefix("had+") ? Self.root.appendingPathComponent(name)
                                               : school.appendingPathComponent(name)
             guard FileManager.default.fileExists(atPath: url.path),
@@ -278,6 +291,7 @@ struct CxxSimulationTests {
                 continue
             }
             let swift = SimulationEngine(project: project, scheduling: .everyTick)
+            swift.now = { Self.fixedNow }
             let cxx = CxxSimulationCore(project: project, profileScheduling: false)
             #expect(cxx.unresolvedModuleCount == 0)
             let delta = Double(max(1, project.appOptions.cycleDelay))
@@ -286,7 +300,7 @@ struct CxxSimulationTests {
             var firstMismatch = ""
             for step in 0..<200 {
                 swift.step()
-                cxx.step(deltaMs: delta)
+                cxx.step(deltaMs: delta, now: Self.fixedNow)
                 for module in project.modules {
                     guard let node = swift.getNode(id: module.id) else { continue }
                     for pin in 0..<node.block.outPins.count {
