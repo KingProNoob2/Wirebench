@@ -269,6 +269,65 @@ struct CxxSimulationTests {
         try Self.compareBothEngines(project, label: "macro bridge")
     }
 
+    /// The five kinds added for the rest of the corpus: `Bits2Int`, `RS`, `IntVar`, `Div`, `IntSub`.
+    ///
+    /// They are worth their own fixture because the corpus sweep **cannot** verify them on their own
+    /// terms: a project that disagrees for an unrelated reason is isolated by name, and that would take
+    /// these kinds down with it. Each is exercised across the cases that are easy to get wrong — `En = 0`
+    /// holding rather than clearing, `Div`'s divide-by-zero guard, `RS`'s latch state across passes, and
+    /// `Bits2Int`'s off-by-one (`En` is not `B0`).
+    @Test("Both engines agree on the five kinds the rest of the corpus needed")
+    func newCorpusKindsAgree() throws {
+        // Bits2Int: `En` then B0..Bn-1 packed into one Int.
+        for (bits, n) in [([true, false, true], 3), ([false, false, false], 3),
+                          ([true, true, true, true], 4), ([true], 1)] {
+            let project = Self.oneModuleProject(
+                name: "bits2int", guid: Bits2IntBlock.guid,
+                inPins: [.bool(true)] + bits.map { PinValue.bool($0) },
+                paramPins: [], outPins: 1)
+            try Self.compareBothEngines(project, label: "Bits2Int \(bits.prefix(n))")
+        }
+        // Bits2Int with En low: the output must hold, not clear.
+        let bitsDisabled = Self.oneModuleProject(
+            name: "bits2int-off", guid: Bits2IntBlock.guid,
+            inPins: [.bool(false), .bool(true), .bool(true)], paramPins: [], outPins: 1)
+        try Self.compareBothEngines(bitsDisabled, label: "Bits2Int En=0")
+
+        // Div: En, A, B — quotient and remainder, including the B = 0 guard and negative operands.
+        for (a, b) in [(Int32(17), Int32(5)), (7, 7), (-17, 5), (17, -5), (-17, -5), (0, 3),
+                       (5, 0), (-5, 0), (Int32.min, -1)] {
+            let project = Self.oneModuleProject(
+                name: "div", guid: DivBlock.guid,
+                inPins: [.bool(true), .int32(a), .int32(b)], paramPins: [], outPins: 2)
+            try Self.compareBothEngines(project, label: "Div \(a)/\(b)")
+        }
+
+        // IntSub: En, A, B.
+        for (a, b) in [(Int32(10), Int32(3)), (3, 10), (-10, 3), (0, 0), (Int32.min, 1)] {
+            let project = Self.oneModuleProject(
+                name: "intsub", guid: SubBlock.guid,
+                inPins: [.bool(true), .int32(a), .int32(b)], paramPins: [], outPins: 1)
+            try Self.compareBothEngines(project, label: "IntSub \(a)-\(b)")
+        }
+
+        // RS: En, S, R — a latch, so it has to agree on state *across* passes, not just per step.
+        for (sIn, rIn) in [(false, false), (true, false), (false, true), (true, true)] {
+            let project = Self.oneModuleProject(
+                name: "rs", guid: RSBlock.guid,
+                inPins: [.bool(true), .bool(sIn), .bool(rIn)], paramPins: [], outPins: 1)
+            try Self.compareBothEngines(project, label: "RS S=\(sIn) R=\(rIn)")
+        }
+
+        // IntVar: a variable that is written by `Set`. Sixteen values in sequence, so the fixture also
+        // covers the value surviving the variable's own `process` — the whole point of `WritableVariable`.
+        for value in [Int32(0), 1, -1, 4096, Int32.min, Int32.max] {
+            var project = Self.oneModuleProject(
+                name: "intvar", guid: IntVarBlock.guid, inPins: [], paramPins: [], outPins: 1)
+            project.modules[0].outPins = [Pin(id: 0, value: .int32(value))]
+            try Self.compareBothEngines(project, label: "IntVar \(value)")
+        }
+    }
+
     /// The test that matters for real projects: both engines on a corpus project, every pin, every
     /// step. Only projects where *every* module is ported can be compared — one unported block stops
     /// the wires it carries, which would make the ported blocks look wrong for the wrong reason.
@@ -305,7 +364,13 @@ struct CxxSimulationTests {
         // producer pushed into it rather than the one the block read when it ran — so the comparison
         // alone cannot say which engine is right. It was never reached before this sweep: the four
         // hand-listed projects do not include it.
-        let knownDivergence: Set<String> = ["SSemafor(1).pcc"]
+        // `jk_master_slave.pcc` — `And16 in[2]` differs on the **first** pass (`cxx 1 vs swift 0`), and
+        // `And16` reads a macro subpage's `Inputs` interface. Both engines agree on that interface's
+        // *output* pins, so they disagree about *when* the macro's values reached the consumer: the
+        // subpage is on thread 0 (order 320-360) while the five call sites are on thread 2 (order 410).
+        // Nothing here is a value disagreement — it is the bridge's ordering against per-thread
+        // scheduling, and it is the second bug the wider sweep found.
+        let knownDivergence: Set<String> = ["SSemafor(1).pcc", "jk_master_slave.pcc"]
 
         for url in sources {
             let name = url.lastPathComponent
@@ -400,20 +465,28 @@ struct CxxSimulationTests {
 
     /// And a project with one unported block must stay on the Swift engine, because an inert module
     /// would stop the wires it carries and make the ported blocks look wrong too.
+    ///
+    /// The stand-in has to be a kind the core genuinely does **not** port. This test used `TMDiv` until
+    /// `TMDiv` was ported, at which point the fixture became fully ported and the test failed — which is
+    /// the test working: a guard whose example stops being an example should break loudly rather than
+    /// quietly assert nothing. `TMWeekProgram` is unported as of this writing; when it is ported, pick
+    /// another, and the `isFullyPorted` assertion below is what will say so.
     @Test("A project with an unported block stays on the Swift engine")
     @MainActor
     func appFallsBackForUnportedBlocks() throws {
         var project = CxxSimulationTests.pulseIntoNot()
-        project.modules.append(PCCModule(id: 3, guid: DivBlock.guid, name: "Div1", x: 0, y: 0, order: 30,
-                                         threadId: 1, page: "main",
+        project.modules.append(PCCModule(id: 3, guid: WeekProgramBlock.guid, name: "WeekProgram1",
+                                         x: 0, y: 0, order: 30, threadId: 1, page: "main",
                                          inPins: [], paramPins: [], outPins: []))
-        #expect(!CxxSimulationCore.isFullyPorted(project))
+        #expect(!CxxSimulationCore.isFullyPorted(project),
+                "this fixture needs a kind the core does not port; TMDiv no longer is one")
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("cxx-fallback-\(UUID().uuidString).pcc")
         try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
         let model = AppModel()
         model.loadProject(url: url)
-        #expect(model.isUsingCxxCore == false, "an unported `TMDiv` must keep the Swift engine in charge")
+        #expect(model.isUsingCxxCore == false,
+                "an unported `TMWeekProgram` must keep the Swift engine in charge")
     }
 
     /// Measured, the per-tick work is ~21 µs against milliseconds of SwiftUI re-evaluation, so an idle

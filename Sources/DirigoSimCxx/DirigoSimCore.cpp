@@ -85,6 +85,7 @@ struct Module {
     int32_t cycleCounter = 0;      /* PulseGen */
     int32_t pulseRemaining = 0;    /* BoolVar */
     int32_t currentCount = 0;      /* Counter */
+    int32_t intValue = 0;          /* IntVar: the variable itself, not a pin */
     bool lastTr = false;           /* Counter: for the 0->1 edge */
 };
 
@@ -300,6 +301,55 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
             for (size_t i = 0; i < m.outPins.size() && i < 6; ++i) m.outPins[i] = int32Value(values[i]);
             return;
         }
+        case DIRIGO_BLOCK_BITS2INT: {
+            /* In 0 is `En`, then B0..Bn-1. Treating `En` as B0 shifts every bit up one place, which is
+               a bug this port would otherwise inherit. */
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;      /* holds */
+            const size_t bits = m.inPins.empty() ? 0 : m.inPins.size() - 1;
+            int32_t packed = 0;
+            for (size_t i = 0; i < bits && i < 32; ++i) {
+                if (asBool(m.inPins[i + 1])) packed |= static_cast<int32_t>(1u << i);
+            }
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(packed);
+            return;
+        }
+        case DIRIGO_BLOCK_RS: {
+            /* A latch: `En = 0` holds. Reset priority, which is the block's default; a module that
+               overrides it is not read from the file yet (see the note in `dirigo_sim_create`). */
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;      /* holds */
+            const bool setIn = m.inPins.size() > 1 ? asBool(m.inPins[1]) : false;
+            const bool resetIn = m.inPins.size() > 2 ? asBool(m.inPins[2]) : false;
+            if (resetIn) m.lastTr = false;          /* reuse of the 1-bit state field, as Counter does */
+            else if (setIn) m.lastTr = true;
+            if (!m.outPins.empty()) m.outPins[0] = boolean(m.lastTr);
+            return;
+        }
+        case DIRIGO_BLOCK_INTVAR: {
+            /* "Performs no operation; it only allocates space for a variable of type Int." The value is
+               `m.intValue`, which survives this pass and is written by `Set`/`SetIdx`. */
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(m.intValue);
+            return;
+        }
+        case DIRIGO_BLOCK_DIV: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;      /* holds */
+            const int64_t a = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t b = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            if (b == 0) {                                               /* guarded, not undefined */
+                if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
+                if (m.outPins.size() > 1) m.outPins[1] = int32Value(0);
+                return;
+            }
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(a / b));
+            if (m.outPins.size() > 1) m.outPins[1] = int32Value(static_cast<int32_t>(a % b));
+            return;
+        }
+        case DIRIGO_BLOCK_INTSUB: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;      /* holds */
+            const int64_t a = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t b = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(a - b));
+            return;
+        }
         case DIRIGO_BLOCK_PASSIVE:
         case DIRIGO_BLOCK_MACRO_IO:
             /* Both compute nothing. A macro interface's pins are written by `propagateMacroCalls`. */
@@ -316,6 +366,8 @@ void resetModule(Module &m) {
     m.pulseRemaining = 0;
     m.currentCount = 0;
     m.lastTr = false;
+    /* `m.intValue` is deliberately *not* cleared: `IntVar.reset` restores its stored value, because a
+       variable is data, not transient state. */
     std::fill(m.inPins.begin(), m.inPins.end(), boolean(false));
     std::fill(m.paramPins.begin(), m.paramPins.end(), int32Value(0));
     switch (m.kind) {
@@ -334,7 +386,14 @@ void resetModule(Module &m) {
         case DIRIGO_BLOCK_INRANGE:
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             return;
+        case DIRIGO_BLOCK_INTVAR:
+            /* `IntVar.reset` restores its *stored* value, not zero — the variable keeps what it holds. */
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(m.intValue);
+            return;
         case DIRIGO_BLOCK_DATETIME:
+        case DIRIGO_BLOCK_BITS2INT:
+        case DIRIGO_BLOCK_DIV:
+        case DIRIGO_BLOCK_INTSUB:
         case DIRIGO_BLOCK_EQUITHERM:
             /* `WT` resets to an *int* zero, not the boolean default: the kind of a pin is part of the
                value, and the differential test compares the kinds. */
@@ -387,6 +446,15 @@ void writeThroughConnection(DirigoSim *sim, const Connection &c, const DirigoVal
     auto source = sim->indexById.find(c.outModule);
     if (source == sim->indexById.end()) return;
     Module &producer = sim->modules[source->second];
+
+    /* A variable stores state, so the write has to reach the *variable*, not only its output pin:
+       writing the pin alone is undone the next time the variable runs. This mirrors the Swift
+       `WritableVariable` path, and `IntVar` is the one such kind ported so far. */
+    if (producer.kind == DIRIGO_BLOCK_INTVAR) {
+        producer.intValue = static_cast<int32_t>(asInt(value));
+        if (!producer.outPins.empty()) producer.outPins[0] = int32Value(producer.intValue);
+        return;
+    }
 
     /* The Swift writes through `WritableVariable` when the producer conforms to it — which only
        `IntVar` and `FloatVar` do (`BoolVar` deliberately does not, so a written pin is simply not

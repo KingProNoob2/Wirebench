@@ -51,6 +51,11 @@ public final class CxxSimulationCore {
         // Read a clock it is *given* rather than reading one: two engines that each call `Date()`
         // cannot agree, so a time-dependent pin could never be compared between them.
         case "TMDateTime": return DIRIGO_BLOCK_DATETIME
+        case "TMBits2Int": return DIRIGO_BLOCK_BITS2INT
+        case "TMRS": return DIRIGO_BLOCK_RS
+        case "TMIntVar": return DIRIGO_BLOCK_INTVAR
+        case "TMDiv": return DIRIGO_BLOCK_DIV
+        case "TMIntSub": return DIRIGO_BLOCK_INTSUB
         // Blocks whose pins *are* their behaviour: the I/O channels, and the displays that show them.
         case "TMDigitalInputs", "TMDigitalOutputs", "TDispValueModule", "TDispSegmentModule":
             return DIRIGO_BLOCK_PASSIVE

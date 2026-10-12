@@ -90,7 +90,20 @@ typedef enum {
     /// agree. So the calendar components are pushed in once per step through
     /// `dirigo_sim_set_wall_clock`, and the Swift side is the single place the clock is read (see
     /// `SimulationEngine.now` and `DirigoEpoch`).
-    DIRIGO_BLOCK_DATETIME = 17
+    DIRIGO_BLOCK_DATETIME = 17,
+
+    /// `TMBits2Int`: packs `B0..Bn-1` into one Int. The five kinds below this one are what the rest of
+    /// the corpus needs — measured from the projects, not from the module documentation.
+    DIRIGO_BLOCK_BITS2INT = 18,
+    /// `TMRS`: a set/reset latch that **holds its state**, so it has a field rather than reading a pin.
+    DIRIGO_BLOCK_RS = 19,
+    /// `TMIntVar`: "performs no operation; it only allocates space for a variable of type Int". Its
+    /// value lives in a field, and `Set`/`SetIdx` write it through — see `writeThroughConnection`.
+    DIRIGO_BLOCK_INTVAR = 20,
+    /// `TMDiv`: quotient and remainder, with a guard for `B = 0`.
+    DIRIGO_BLOCK_DIV = 21,
+    /// `TMIntSub`: `Y = A - B`.
+    DIRIGO_BLOCK_INTSUB = 22
 } DirigoBlockKind;
 
 /// A step's wall clock, already decomposed. `DOW` is 0 = Monday, as the help specifies.
