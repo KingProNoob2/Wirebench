@@ -309,7 +309,9 @@ public final class InputsBlock: FunctionBlock, @unchecked Sendable {
     }
 
     public func togglePin(_ index: Int = 0) {
-        guard index < outPins.count else { return }
+        // Both ends: the sibling `InputsBlock.togglePin` above already checked `index >= 0`, and this
+        // one did not, so a negative index trapped here.
+        guard index >= 0, index < outPins.count else { return }
         outPins[index] = .bool(!outPins[index].asBool)
     }
 

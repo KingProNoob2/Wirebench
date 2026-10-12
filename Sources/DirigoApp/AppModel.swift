@@ -955,6 +955,10 @@ public final class AppModel: @unchecked Sendable {
     /// on whichever backend is running — while paused that means one step, and while playing the value is
     /// simply pushed into the core for the next one.
     public func setModuleInput(moduleId: Int, pinIndex: Int, value: PinValue) {
+        // `pinIndex >= 0` is not decoration: every one of these guards used to check only the upper
+        // bound, so a negative index passed it and subscripted the arrays out of bounds — a trap, not a
+        // wrong value. See `rejectsOutOfRangePinIndices`.
+        guard pinIndex >= 0 else { return }
         guard let idx = project?.modules.firstIndex(where: { $0.id == moduleId }) else { return }
         if pinIndex < (project?.modules[idx].inPins.count ?? 0) {
             project?.modules[idx].inPins[pinIndex].value = value
@@ -968,7 +972,8 @@ public final class AppModel: @unchecked Sendable {
 
     /// The same for an **output** pin a person drives directly: a `BoolVar`'s switch, an `8xDI` channel.
     public func setModuleOutput(moduleId: Int, pinIndex: Int, value: PinValue) {
-        guard let node = getNode(id: moduleId), pinIndex < node.block.outPins.count else { return }
+        guard pinIndex >= 0, let node = getNode(id: moduleId),
+              pinIndex < node.block.outPins.count else { return }
         node.block.outPins[pinIndex] = value
         if let boolVar = node.block as? BoolVarBlock {
             boolVar.setOutput(value.asBool)
@@ -1408,7 +1413,9 @@ public final class AppModel: @unchecked Sendable {
     }
 
     public func toggleModuleInput(moduleId: Int, pinIndex: Int) {
-        guard let node = getNode(id: moduleId) else { return }
+        // A negative index used to reach `inPins[pinIndex]` below and trap; the `togglePin` helpers it
+        // delegates to check both ends, this method did not.
+        guard pinIndex >= 0, let node = getNode(id: moduleId) else { return }
         if let boolVar = node.block as? BoolVarBlock {
             boolVar.trigger()
         } else if let inputs = node.block as? InputsBlock {

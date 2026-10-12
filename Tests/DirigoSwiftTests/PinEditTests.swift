@@ -37,6 +37,79 @@ struct PinEditTests {
         return model
     }
 
+    /// An index from outside must be **rejected, not subscripted**.
+    ///
+    /// Every pin mutator here guarded only the *upper* bound — `pinIndex < count` — so a negative index
+    /// passed the check and subscripted the array out of bounds, which is a trap rather than a wrong
+    /// value. The same shape existed in `EightDIBlock.togglePin`, which is why that one is covered
+    /// through the entry point below as well as directly.
+    ///
+    /// This is the reachable half of the "unreproduced segfault" in `performance.md` §6: a negative pin
+    /// index is a way to crash the app from the inspector, and the crash was recorded without a cause.
+    /// If the guard is removed, this test does not fail an assertion — it **kills the test process**,
+    /// which is exactly the failure mode being guarded against.
+    @Test("An out-of-range pin index is rejected, not subscripted")
+    func rejectsOutOfRangePinIndices() throws {
+        let model = try Self.load(Self.switchProject())
+        let node = model.getNode(id: 1)
+        let inPinsBefore = node?.block.inPins.map(\.description) ?? []
+        let outPinsBefore = node?.block.outPins.map(\.description) ?? []
+
+        // Both ends of the range, through every mutator that takes an index.
+        for index in [-1, -100, 99, Int.min, Int.max] {
+            model.setModuleInput(moduleId: 1, pinIndex: index, value: .int32(1234))
+            model.setModuleOutput(moduleId: 1, pinIndex: index, value: .bool(true))
+            model.toggleModuleInput(moduleId: 1, pinIndex: index)
+            model.setModuleInputPressed(moduleId: 1, pinIndex: index, isPressed: true)
+            model.setModuleInputPressed(moduleId: 1, pinIndex: index, isPressed: false)
+        }
+
+        // Nothing was written *by the out-of-range index*. The input and the document must be untouched,
+        // and no output outside the range may exist.
+        #expect(model.getNode(id: 1)?.block.inPins.map(\.description) == inPinsBefore,
+                "an out-of-range index changed an input pin")
+        #expect(model.project?.modules.first?.inPins.map { $0.value.description } == inPinsBefore,
+                "an out-of-range index reached the document")
+
+        // `outPins` is *not* asserted unchanged: this fixture is an `ISwitch`, whose output is a function
+        // of its inputs, so a legitimate in-range write propagating to the output is correct. What must
+        // hold is that the writes went nowhere near an index outside the range.
+        #expect(model.getNode(id: 1)?.block.outPins.count == outPinsBefore.count,
+                "an out-of-range index changed the shape of the output pins")
+
+        // The guard must reject, not disable: the neighbouring `clickToggles` test covers the in-range
+        // behaviour, and this checks it still holds after the hostile indices above.
+        #expect(model.getNode(id: 1)?.block.inPins[3].description == "8",
+                "the in-range pin this fixture asserts on was disturbed")
+    }
+
+    /// `EightDIBlock.togglePin` took the index directly, so it needs its own case: it is reached through
+    /// `toggleModuleInput`, not through the generic in/out pin paths.
+    @Test("An out-of-range index is rejected by the 8xDI channel toggle too")
+    func eightDIToggleRejectsOutOfRange() throws {
+        var project = PCCProject(name: "8xdi")
+        project.pages = [ProjectPage(caption: "main")]
+        project.modules = [
+            PCCModule(id: 1, guid: EightDIBlock.guid, name: "8xDI1", x: 0, y: 0, order: 10,
+                      threadId: 1, page: "main",
+                      inPins: [], outPins: (0..<8).map { Pin(id: $0, value: .bool(false)) }),
+        ]
+        let model = try Self.load(project)
+        let before = model.getNode(id: 1)?.block.outPins.map(\.description) ?? []
+        #expect(!before.isEmpty, "the fixture must expose output pins to toggle")
+
+        for index in [-1, -8, 8, 99, Int.min] {
+            model.toggleModuleInput(moduleId: 1, pinIndex: index)
+        }
+        #expect(model.getNode(id: 1)?.block.outPins.map(\.description) == before,
+                "an out-of-range index toggled a channel")
+
+        // And the in-range case still works, so the guard did not disable the feature.
+        model.toggleModuleInput(moduleId: 1, pinIndex: 0)
+        #expect(model.getNode(id: 1)?.block.outPins[0].description == "1",
+                "an in-range toggle must still work")
+    }
+
     @Test("A click clears a set pin, and the next click sets it")
     func clickToggles() throws {
         let model = try Self.load(Self.switchProject())
