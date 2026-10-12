@@ -375,7 +375,10 @@ public final class DateTimeBlock: FunctionBlock, @unchecked Sendable {
 
         // A legacy param pin is still honoured if a file carries one.
         let offset = paramPins.count > 0 ? paramPins[0].asInt : offsetSeconds
-        let now = Date().addingTimeInterval(TimeInterval(offset))
+        // `sample.timestamp`, not `Date()`: the engine stamps one instant per cycle, and reading the
+        // clock here instead ignored it — so a block could not be tested against a fixed time, and two
+        // engines could never agree on a value. See `SimulationEngine.now`.
+        let now = sample.timestamp.addingTimeInterval(TimeInterval(offset))
         let parts = DirigoEpoch.calendar.dateComponents([.hour, .minute, .second], from: now)
         let hour = parts.hour ?? 0, minute = parts.minute ?? 0, second = parts.second ?? 0
 

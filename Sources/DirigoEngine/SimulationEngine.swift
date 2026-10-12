@@ -45,6 +45,15 @@ public final class SimulationEngine: @unchecked Sendable {
     public private(set) var tickCount: UInt64 = 0
     public var cycleDelayMs: Double
 
+    /// The wall clock this engine stamps a cycle with.
+    ///
+    /// It is a property rather than a `Date()` call inside `step` for two reasons. It was previously
+    /// called **once per scheduled thread**, so two blocks in the same cycle could be stamped with
+    /// different times — small, but wrong, and it made any time-dependent block's output depend on how
+    /// many threads a project happened to have. And a time-dependent block cannot be compared against
+    /// another engine at all unless both can be shown the same instant, which is what tests inject here.
+    public var now: () -> Date = { Date() }
+
     /// A digest of every pin value in the runtime, for answering "did anything change?".
     ///
     /// The app rebuilds every module's snapshot after each step and compares it with the previous one to
@@ -364,6 +373,8 @@ public final class SimulationEngine: @unchecked Sendable {
         // Propagate wires first
         propagateWires()
         var ranAny = false
+        // One instant for the whole cycle, not one per thread.
+        let stepTimestamp = now()
 
         let stepMs = max(1, deltaMs ?? cycleDelayMs)
         for (tid, list) in scheduled {
@@ -395,7 +406,7 @@ public final class SimulationEngine: @unchecked Sendable {
                 // `.profileIntervals` gives each thread its own period and every-tick callers get the
                 // project's cycle.
                 deltaMs: deltaMs ?? (scheduling == .profileIntervals ? interval : stepMs),
-                timestamp: Date()
+                timestamp: stepTimestamp
             )
             for node in list {
                 stepNode(node, sample: sample)

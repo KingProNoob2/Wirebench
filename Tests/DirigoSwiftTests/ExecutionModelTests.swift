@@ -183,4 +183,51 @@ struct SwitchConstructTests {
                 "no arm may run when the switch's own condition is false")
     }
 
+
+    /// The clock is a property of the engine, not a `Date()` call buried in the step.
+    ///
+    /// Two things depend on that. A time-dependent block must be *testable*, which means an engine can
+    /// be shown a fixed instant. And one cycle must be stamped with **one** time: the engine used to
+    /// call `Date()` once per scheduled thread, so two blocks in the same cycle could disagree — which
+    /// is invisible until a block's output is a function of the clock.
+    @Test("One cycle is stamped with one time, and the clock can be injected")
+    func oneClockPerCycle() throws {
+        var project = PCCProject(name: "clock")
+        project.pages = [ProjectPage(caption: "main")]
+        project.modules = [
+            PCCModule(id: 1, guid: DateTimeBlock.guid, name: "DateTime1", x: 0, y: 0, order: 10,
+                      threadId: 1, page: "main",
+                      inPins: [Pin(id: 0, value: .bool(true))],
+                      outPins: (0..<5).map { Pin(id: $0, value: .int32(0)) }),
+        ]
+        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+
+        // 2024-03-05 06:07:08 UTC. `SSemafor(1).pcc` shows the real shape: 1 in pin, 5 out pins.
+        let fixed = Date(timeIntervalSince1970: 1_709_623_628)
+        engine.now = { fixed }
+        engine.step()
+
+        guard let out = engine.getNode(id: 1)?.block.outPins.map(\.asInt) else {
+            Issue.record("the fixture must expose DateTime1"); return
+        }
+        // D, H, M, S, DOW — `DirigoEpoch` counts days from 1 Jan 1980 and DOW from Monday, in its own
+        // GMT calendar. The expectation is derived from that calendar rather than hardcoded: an earlier
+        // version of this test asserted 06:07:08 UTC and read 07:27:08, which was the test being wrong
+        // about the calendar, not the clock being wrong about the time.
+        let parts = DirigoEpoch.calendar.dateComponents([.hour, .minute, .second], from: fixed)
+        #expect(out.count >= 4, "the block must publish its parts")
+        #expect(out[1] == Int32(parts.hour ?? -1), "hour must come from the injected clock")
+        #expect(out[2] == Int32(parts.minute ?? -1), "minute must come from the injected clock")
+        #expect(out[3] == Int32(parts.second ?? -1), "second must come from the injected clock")
+
+        // Moving the clock moves the output, which is what makes the block testable at all: +3600 s is
+        // exactly one hour later on the same calendar, whatever the zone.
+        let later = DirigoEpoch.calendar.date(byAdding: .hour, value: 1, to: fixed) ?? fixed
+        engine.now = { later }
+        engine.step()
+        let laterHour = DirigoEpoch.calendar.dateComponents([.hour], from: later).hour ?? -1
+        let readback = engine.getNode(id: 1)?.block.outPins[1].asInt
+        #expect(readback == Int(laterHour),
+                "an hour later must read as the next hour, got \(String(describing: readback))")
+    }
 }
