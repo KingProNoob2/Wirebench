@@ -112,6 +112,8 @@ struct DirigoSim {
     /// Connections *into* a module, which is what `Set`'s write-through walks (the Swift
     /// `inConnectionMap`). Built alongside `outgoingByModule`.
     std::unordered_map<int32_t, std::vector<size_t>> incomingByModule;
+    /// Macro interfaces, resolved from module attributes Swift-side. See `DirigoMacroBridge`.
+    std::vector<DirigoMacroBridge> macroBridges;
     std::vector<std::vector<size_t>> schedule;   /* by thread id, in ORDER */
     std::vector<int32_t> threadIds;              /* ascending */
     std::map<int32_t, double> threadElapsedMs;
@@ -284,6 +286,8 @@ void processModule(Module &m, const Sample &sample) {
             return;
         }
         case DIRIGO_BLOCK_PASSIVE:
+        case DIRIGO_BLOCK_MACRO_IO:
+            /* Both compute nothing. A macro interface's pins are written by `propagateMacroCalls`. */
             return;
         default:
             return;                                                  /* unresolved: holds everything */
@@ -405,8 +409,35 @@ void applySetWriteThrough(DirigoSim *sim, size_t index) {
     }
 }
 
+/// Mirrors `SimulationEngine.propagateMacroCalls`: moves values across the caller/subpage boundary.
+///
+/// This is why the step loop calls it at the top and the bottom, as the Swift engine does — a macro's
+/// values cross *between* module lists rather than through a connection a single block could pull, so
+/// no per-block push can carry them.
+void propagateMacroCalls(DirigoSim *sim) {
+    for (const DirigoMacroBridge &bridge : sim->macroBridges) {
+        auto callerIt = sim->indexById.find(bridge.callerModule);
+        auto ifaceIt = sim->indexById.find(bridge.interfaceModule);
+        if (callerIt == sim->indexById.end() || ifaceIt == sim->indexById.end()) continue;
+        Module &caller = sim->modules[callerIt->second];
+        Module &iface = sim->modules[ifaceIt->second];
+
+        if (bridge.kind == DIRIGO_MACRO_INPUTS) {
+            /* Caller inPins -> subpage Inputs outPins. The interface module has no inPins of its own. */
+            const size_t n = std::min(caller.inPins.size(), iface.outPins.size());
+            for (size_t i = 0; i < n; ++i) iface.outPins[i] = caller.inPins[i];
+        } else if (bridge.kind == DIRIGO_MACRO_OUTPUTS) {
+            /* Subpage Outputs inPins -> caller outPins. */
+            const size_t n = std::min(iface.inPins.size(), caller.outPins.size());
+            for (size_t i = 0; i < n; ++i) caller.outPins[i] = iface.inPins[i];
+        }
+    }
+}
+
 void propagate(DirigoSim *sim) {
+    propagateMacroCalls(sim);
     for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
+    propagateMacroCalls(sim);
 }
 
 }  // namespace
@@ -464,6 +495,18 @@ DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
         sim->incomingByModule[conn.inModule].push_back(stored);
     }
     return sim;
+}
+
+void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridges, int32_t count) {
+    if (!sim) return;
+    sim->macroBridges.clear();
+    for (int32_t i = 0; i < count; ++i) {
+        /* Only keep bridges whose modules exist: a caller that guesses wrong should get no macro
+           behaviour for that bridge rather than an out-of-range index at every step. */
+        if (sim->indexById.find(bridges[i].callerModule) == sim->indexById.end()) continue;
+        if (sim->indexById.find(bridges[i].interfaceModule) == sim->indexById.end()) continue;
+        sim->macroBridges.push_back(bridges[i]);
+    }
 }
 
 void dirigo_sim_destroy(DirigoSim *sim) { delete sim; }

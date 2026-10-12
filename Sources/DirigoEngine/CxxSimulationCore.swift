@@ -43,6 +43,11 @@ public final class CxxSimulationCore {
         case "TMSetPins": return DIRIGO_BLOCK_SET
         case "TMInRange": return DIRIGO_BLOCK_INRANGE
         case "TMEquitherm": return DIRIGO_BLOCK_EQUITHERM
+        // The macro call site and the subpage interfaces. Neither computes anything: the call site's
+        // values are carried by the bridges (`macroBridges(in:)`), which is why the core needs no
+        // `MACRO_NAME` of its own.
+        case "TMacroModule": return DIRIGO_BLOCK_MACRO_IO
+        case "TMacroInterface": return DIRIGO_BLOCK_MACRO_IO
         // Blocks whose pins *are* their behaviour: the I/O channels, and the displays that show them.
         case "TMDigitalInputs", "TMDigitalOutputs", "TDispValueModule", "TDispSegmentModule":
             return DIRIGO_BLOCK_PASSIVE
@@ -135,10 +140,65 @@ public final class CxxSimulationCore {
                 dirigo_sim_set_param(created, Int32(position), Int32(idx), Self.cValue(pin.value))
             }
         }
+        // Macro interfaces. The Swift engine finds these by matching `MACRO_NAME` and `KIND`
+        // attributes and page names; doing that here rather than in C++ keeps the string matching in
+        // one place, and the core only has to copy pins between the two modules it is handed.
+        let bridges = Self.macroBridges(in: project)
+        if !bridges.isEmpty {
+            bridges.withUnsafeBufferPointer { buffer in
+                dirigo_sim_set_macro_bridges(created, buffer.baseAddress, Int32(buffer.count))
+            }
+        }
+
         self.sim = created
         self.indexByModuleId = index
         self.portedModuleCount = ported
         self.unresolvedModuleCount = descs.count - ported
+    }
+
+    /// The caller/subpage interfaces of every macro in a project, in the shape the core expects.
+    ///
+    /// Mirrors `SimulationEngine.propagateMacroCalls`: a macro is any module carrying a `MACRO_NAME`
+    /// that is not itself on a `*` subpage and is not one of the three reserved interface names. Its
+    /// subpage is `*<MACRO_NAME>`, and the interfaces are found by `KIND` or by name, as the Swift does —
+    /// `kind` here rather than a class check, because that is the mapping the rest of the engine uses
+    /// and a file with an unusual interface name still resolves.
+    public static func macroBridges(in project: PCCProject) -> [DirigoMacroBridge] {
+        var result: [DirigoMacroBridge] = []
+        let reserved: Set<String> = ["inputs", "outputs", "params"]
+
+        for macro in project.modules {
+            guard let name = macro.rawAttributes["MACRO_NAME"], !name.isEmpty,
+                  !macro.page.hasPrefix("*"),
+                  !reserved.contains(name.lowercased()) else { continue }
+            let targetPage = "*\(name)"
+            let candidates = project.modules.filter {
+                $0.page == targetPage
+                    || $0.page.lowercased() == targetPage.lowercased()
+                    || $0.page.lowercased() == name.lowercased()
+            }
+            guard !candidates.isEmpty else { continue }
+
+            if let inputs = candidates.first(where: {
+                $0.rawAttributes["KIND"] == "0"
+                    || $0.name.lowercased().hasPrefix("input")
+                    || $0.rawAttributes["MACRO_NAME"]?.lowercased() == "inputs"
+            }) {
+                result.append(DirigoMacroBridge(callerModule: Int32(macro.id),
+                                                interfaceModule: Int32(inputs.id),
+                                                kind: Int32(DIRIGO_MACRO_INPUTS.rawValue)))
+            }
+            if let outputs = candidates.first(where: {
+                $0.rawAttributes["KIND"] == "1"
+                    || $0.name.lowercased().hasPrefix("output")
+                    || $0.rawAttributes["MACRO_NAME"]?.lowercased() == "outputs"
+            }) {
+                result.append(DirigoMacroBridge(callerModule: Int32(macro.id),
+                                                interfaceModule: Int32(outputs.id),
+                                                kind: Int32(DIRIGO_MACRO_OUTPUTS.rawValue)))
+            }
+        }
+        return result
     }
 
     deinit { dirigo_sim_destroy(sim) }

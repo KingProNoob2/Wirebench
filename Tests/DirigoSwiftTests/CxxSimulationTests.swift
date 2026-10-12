@@ -194,6 +194,70 @@ struct CxxSimulationTests {
         }
     }
 
+    /// A macro's values cross the caller/subpage boundary *between* module lists, through no connection
+    /// any single block could pull — which is why the Swift engine keeps a global `propagateWires()`
+    /// sweep for macros even though ordinary blocks are pull-based, and why the core needs
+    /// `dirigo_sim_set_macro_bridges` rather than another pin kind.
+    ///
+    /// `zelznice.pcc` is the corpus project that has a macro, and it is *skipped* by the comparison
+    /// below while one of its kinds is unported — so without this fixture the bridge would ship with no
+    /// verification at all. This reproduces the shape with ported kinds only:
+    ///
+    ///   Main: PulseGen2 → And1 ← macro call site; the macro's out feeds `And1`'s second input.
+    ///   *M:   InRange1 consumes the subpage's inputs interface and drives its outputs interface.
+    ///
+    /// so the caller's argument has to reach `InRange1`, and `InRange1`'s result has to come back to the
+    /// caller's output pin, or the two engines disagree.
+    @Test("A macro's values cross the caller/subpage boundary in the core too")
+    func macroBridgeAgrees() throws {
+        var project = PCCProject(name: "macro")
+        project.pages = [ProjectPage(caption: "Main"), ProjectPage(caption: "*M")]
+        project.appOptions.cycleDelay = 10
+        project.modules = [
+            // The call site: one in pin, one out pin, on the Main page.
+            PCCModule(id: 1, guid: MacroBlock.guid, name: "M1", x: 0, y: 0, order: 10,
+                      threadId: 1, page: "Main",
+                      inPins: [Pin(id: 0, value: .bool(false))],
+                      outPins: [Pin(id: 0, value: .int32(0))],
+                      rawAttributes: ["MACRO_NAME": "M"]),
+            // The subpage's inputs interface: no in pins, one out pin driven by the bridge.
+            PCCModule(id: 2, guid: InputsBlock.guid, name: "Inputs1", x: 0, y: 0, order: 10,
+                      threadId: 1, page: "*M",
+                      inPins: [], outPins: [Pin(id: 0, value: .int32(0))],
+                      rawAttributes: ["MACRO_NAME": "Inputs", "KIND": "0"]),
+            // The subpage's work: reads the interface, tests a window.
+            PCCModule(id: 3, guid: InRangeBlock.guid, name: "InRange1", x: 0, y: 0, order: 20,
+                      threadId: 1, page: "*M",
+                      inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .int32(0))],
+                      paramPins: [Pin(id: 0, value: .int32(0)), Pin(id: 1, value: .int32(100))],
+                      outPins: [Pin(id: 0, value: .bool(false))]),
+            // The subpage's outputs interface: one in pin, no out pins; the bridge reads it back.
+            PCCModule(id: 4, guid: OutputsBlock.guid, name: "Outputs1", x: 0, y: 0, order: 30,
+                      threadId: 1, page: "*M",
+                      inPins: [Pin(id: 0, value: .bool(false))], outPins: [],
+                      rawAttributes: ["MACRO_NAME": "Outputs", "KIND": "1"]),
+            // Something on Main to read the macro's result, so a broken bridge is visible as a value.
+            PCCModule(id: 5, guid: NotBlock.guid, name: "Not1", x: 0, y: 0, order: 20,
+                      threadId: 1, page: "Main",
+                      inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .bool(false))],
+                      outPins: [Pin(id: 0, value: .bool(false))]),
+        ]
+        project.inConnections = [
+            // The subpage's inputs interface feeds the work block...
+            Connection(inModuleId: 3, inPinId: 1, outModuleId: 2, outPinId: 0, isParam: false),
+            // ...whose result drives the subpage's outputs interface...
+            Connection(inModuleId: 4, inPinId: 0, outModuleId: 3, outPinId: 0, isParam: false),
+            // ...and the caller's output pin is read by a block on Main.
+            Connection(inModuleId: 5, inPinId: 1, outModuleId: 1, outPinId: 0, isParam: false),
+        ]
+
+        #expect(CxxSimulationCore.isFullyPorted(project),
+                "the fixture must be fully ported, or nothing is being compared")
+        let bridges = CxxSimulationCore.macroBridges(in: project)
+        #expect(bridges.count == 2, "expected an inputs and an outputs bridge, got \(bridges.count)")
+        try Self.compareBothEngines(project, label: "macro bridge")
+    }
+
     /// The test that matters for real projects: both engines on a corpus project, every pin, every
     /// step. Only projects where *every* module is ported can be compared — one unported block stops
     /// the wires it carries, which would make the ported blocks look wrong for the wrong reason.

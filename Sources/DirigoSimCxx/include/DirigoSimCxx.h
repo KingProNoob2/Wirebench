@@ -71,7 +71,17 @@ typedef enum {
     DIRIGO_BLOCK_INRANGE = 14,
 
     /// `TMEquitherm`: the heating curve — the line through two configured points, extrapolated.
-    DIRIGO_BLOCK_EQUITHERM = 15
+    DIRIGO_BLOCK_EQUITHERM = 15,
+
+    /// `TMacroInterface`: the `Inputs` / `Outputs` module that carries values across a macro's
+    /// caller/subpage boundary. It computes nothing — the two blocks have empty `process` bodies and
+    /// only hold their pins — and the copying is done by `dirigo_sim_set_macro_bridges`. It needs its
+    /// own kind rather than `PASSIVE` because a `PASSIVE` module is not in the *evaluated* set, and
+    /// `isFullyPorted` gates whether a project runs on the core at all.
+    ///
+    /// Note that `Inputs` and `Outputs` **share one GUID** in the block table (`3FFBEEC3-…`) and are
+    /// told apart by the module's `KIND` attribute, so nothing here may assume the GUID identifies which.
+    DIRIGO_BLOCK_MACRO_IO = 16
 } DirigoBlockKind;
 
 typedef struct {
@@ -97,6 +107,29 @@ typedef struct {
     int32_t toParamPins;
 } DirigoConnection;
 
+/// One interface of a macro: which module on a subpage carries the caller's values across.
+///
+/// The Swift engine discovers these by reading module *attributes* (`MACRO_NAME`, `KIND`) and matching
+/// page names, which the core cannot do — `DirigoModuleDesc` carries no attributes, and doing it in
+/// Swift keeps the string matching in one place rather than in a C++ port of it.
+///
+/// The core's job is then mechanical and mirrors `SimulationEngine.propagateMacroCalls`:
+///
+/// * `DIRIGO_MACRO_INPUTS` — copy the caller's `inPins` onto this module's `outPins`, so the subpage's
+///   first block reads the caller's arguments;
+/// * `DIRIGO_MACRO_OUTPUTS` — copy this module's `inPins` back onto the caller's `outPins`, so the
+///   caller reads the subpage's results.
+typedef struct {
+    int32_t callerModule;      /* the macro call site, on a non-`*` page */
+    int32_t interfaceModule;   /* the `Inputs` / `Outputs` module on the `*` subpage */
+    int32_t kind;              /* DirigoMacroInterfaceKind */
+} DirigoMacroBridge;
+
+typedef enum {
+    DIRIGO_MACRO_INPUTS = 0,
+    DIRIGO_MACRO_OUTPUTS = 1
+} DirigoMacroInterfaceKind;
+
 typedef struct DirigoSim DirigoSim;
 
 /// Builds a runtime. `profileScheduling` is non-zero for per-thread periods (the app's mode) and zero
@@ -104,6 +137,13 @@ typedef struct DirigoSim DirigoSim;
 DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
                              const DirigoConnection *connections, int32_t connectionCount,
                              double cycleDelayMs, int32_t profileScheduling);
+
+/// Adds the macro bridges after `dirigo_sim_create`.
+///
+/// Separate from `create` deliberately: the bridges are *derived* from module attributes rather than
+/// present in the project file, so a caller that cannot work them out (or a project with no macros)
+/// passes none, and the core then behaves exactly as it did before macros existed.
+void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridges, int32_t count);
 
 void dirigo_sim_destroy(DirigoSim *sim);
 void dirigo_sim_reset(DirigoSim *sim);
