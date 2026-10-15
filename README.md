@@ -19,7 +19,8 @@ Czech manuals. The reverse-engineering record lives in [`../docs/`](../docs/PROJ
 | Block library | 147 catalogued types: 144 resolve to a block class, of which 9 are shape-only stand-ins with no behaviour. `Switch8` does not resolve |
 | Simulation | Deterministic, topological by `ORDER`; optional hardware-profile thread scheduling |
 | Hardware profiles | `Profiles.ini` fully parsed: 22 profiles, thread tables, memory models, 41 `SystemCmd` definitions |
-| Serial/hardware I/O | Duino-E subset only (`0x300`–`0x303`) |
+| Compile and upload | Compiles a project to Dirigo's program table and symbol `.csv` (byte-identical for the four captured saves, `zelznice`, `had`, `kostička`) and uploads it over serial with a live log. Not yet run against a PLC here — see [`compile-and-upload.md`](../docs/compile-and-upload.md) |
+| Serial/hardware I/O | The `DbNet` serial upload, and the Duino-E subset (`0x300`–`0x303`) |
 | Conditional execution | Implemented per block: `If`/`Else`/`EndIf`/`Switch`/`Case`/`Default`/`EndSwitch` gate the blocks they enclose. No range skipping; `Results` encoding is unattested in any sample project |
 
 Known gaps, unsupported blocks and per-module differences are catalogued in
@@ -82,7 +83,23 @@ The `Xcode project membership` test suite fails if the two ever drift apart.
 `./bundle-app.sh` runs `xcodegen generate` and an `xcodebuild` release build, then copies the
 resulting `Dirigo.app` next to the package and to the workspace root.
 
-368 tests across 94 suites, all passing, with no known issues. Measured 2026-10-15.
+376 tests across 96 suites, all passing, with no known issues. Measured 2026-10-15.
+
+---
+
+## Compiling and uploading
+
+The sidebar's *Hardware Link* block is the whole workflow:
+
+1. **Connect** — choose the serial port (`cu.usbserial-…`) and press *Connect*.
+2. **Compile Project** — compiles the open project and opens the build report (blue once connected).
+3. **Upload to PLC…** — the report's default button. The report closes, the upload runs, and the
+   **Upload Log** under the buttons shows the stage, a percentage and every frame; *Copy* puts the log on
+   the clipboard.
+
+The report can also export the symbol table (`.csv`) and the program binary (`.pbd`). From the command line,
+`dirigo-cli build project.pcc` writes both. How the table and records are built, and which parts are
+verified against Dirigo's own output, is in [`compile-and-upload.md`](../docs/compile-and-upload.md).
 
 ---
 
@@ -401,8 +418,8 @@ DirigoSwift/
 │   ├── DirigoCore/        # PCC XML model, parser, serializer, AttributeBag, Profiles.ini
 │   ├── DirigoLibrary/     # Function blocks + the recovered BlockTypeCatalog registry
 │   ├── DirigoEngine/      # Deterministic simulation and thread scheduling
-│   ├── DirigoHardware/    # POSIX serial port and Duino-E protocol
-│   ├── DirigoCLI/         # info | blocks | profile | sim | roundtrip
+│   ├── DirigoHardware/    # Serial port, DbNet upload, program-table compiler, symbol table, Duino-E
+│   ├── DirigoCLI/         # info | blocks | profile | sim | roundtrip | build | symbols | pins
 │   └── DirigoApp/         # macOS SwiftUI editor and live simulator
 ├── Tests/DirigoSwiftTests/
 └── ../../docs/            # Reverse-engineering record (see below)
@@ -417,5 +434,7 @@ DirigoSwift/
 | [`dirigo-modules.md`](../docs/dirigo-modules.md) | Every documented block, with pins and formulas |
 | [`module-coverage.md`](../docs/module-coverage.md) | Per-block gap analysis of `DirigoLibrary` |
 | [`dirigo-block-guid-table.md`](../docs/dirigo-block-guid-table.md) | The recovered block-type registry |
+| [`compile-and-upload.md`](../docs/compile-and-upload.md) | Compiling a project and uploading it: the table, the records, the symbol table, what is verified |
+| [`plc-protocol.md`](../docs/plc-protocol.md) | The serial protocol and table format, with the evidence for each finding |
 | [`profiles-and-system-commands.md`](../docs/profiles-and-system-commands.md) | Hardware profiles and the `SystemCmd` catalogue |
 | [`idp-format.md`](../docs/idp-format.md) | The `.idp` container format |
