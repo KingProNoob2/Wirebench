@@ -1569,10 +1569,10 @@ public final class AppModel: @unchecked Sendable {
             let report = BuildReport(
                 build: build,
                 templateNote: buildTemplateImage == nil
-                    ? "Header: this app's default (import a .pbd to carry Dirigo's own across). "
-                      + "Hidden-pin flags are not in the project, so every record is written with a zero flag."
-                    : "Header: taken from the imported program binary. Hidden-pin flags are not in the "
-                      + "project, so every record is written with a zero flag.",
+                    ? "Header: this app's default (import a .pbd to carry Dirigo's own across); the layout words and "
+                      + "thread table are derived from the program."
+                    : "Header: taken from the imported program binary; the layout words and thread table are "
+                      + "derived from the program.",
                 programBinary: binary)
             buildReport = report
             return report

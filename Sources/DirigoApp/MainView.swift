@@ -393,17 +393,17 @@ public struct MainView: View {
             .controlSize(.regular)
             .disabled(model.availablePorts.isEmpty)
 
-            // Uploading a table Dirigo produced. The sequence and every byte of it are the captured
-            // ones; see docs/plc-protocol.md.
+            // Compiling is what the sidebar offers; the report it opens has Upload to PLC, and the
+            // export buttons, so the compile → upload path stays two clicks.
             Button {
-                model.uploadProgramFile()
+                model.buildAndShowReport()
             } label: {
-                Text(model.isUploading ? "Uploading…" : "Upload Program…")
+                Text("Compile Project")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
-            .disabled(model.isUploading || !model.isHardwareConnected)
+            .disabled(model.project == nil)
 
             if !model.uploadStatus.isEmpty {
                 Text(model.uploadStatus)
