@@ -180,6 +180,7 @@ public final class SimulationEngine: @unchecked Sendable {
                     block.paramPins[idx] = pin.value
                 }
             }
+            (block as? SystemCmdBlock)?.applyDefinition()
 
             let node = RuntimeNode(module: mod, block: block)
             nodes[mod.id] = node

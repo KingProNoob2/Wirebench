@@ -286,8 +286,14 @@ public final class BlockRegistry: @unchecked Sendable {
         }
 
         // SystemCmd
-        register(guid: SystemCmdBlock.guid) { mod in SystemCmdBlock(inPins: mod.inPins.count, params: mod.paramPins.count, outPins: mod.outPins.count) }
-        register(typeName: "systemcmd") { mod in SystemCmdBlock(inPins: mod.inPins.count, params: mod.paramPins.count, outPins: mod.outPins.count) }
+        register(guid: SystemCmdBlock.guid) { mod in
+            SystemCmdBlock(inPins: mod.inPins.count, params: mod.paramPins.count, outPins: mod.outPins.count,
+                           definition: mod.rawAttributes["DEFINITION"].flatMap(ProfilesParser.systemCommand(fromDefinition:)))
+        }
+        register(typeName: "systemcmd") { mod in
+            SystemCmdBlock(inPins: mod.inPins.count, params: mod.paramPins.count, outPins: mod.outPins.count,
+                           definition: mod.rawAttributes["DEFINITION"].flatMap(ProfilesParser.systemCommand(fromDefinition:)))
+        }
 
         // Yes
         register(guid: YesBlock.guid) { mod in

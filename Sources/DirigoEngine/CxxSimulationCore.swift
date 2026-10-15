@@ -86,6 +86,7 @@ public final class CxxSimulationCore {
             for (idx, pin) in mod.paramPins.enumerated() where idx < block.paramPins.count {
                 block.paramPins[idx] = pin.value
             }
+            (block as? SystemCmdBlock)?.applyDefinition()
             let kind = Self.kind(forGUID: mod.guid) ?? DIRIGO_BLOCK_UNRESOLVED
             if kind != DIRIGO_BLOCK_UNRESOLVED { ported += 1 }
             index[mod.id] = Int32(position)

@@ -375,21 +375,36 @@ public final class SystemCmdBlock: FunctionBlock, @unchecked Sendable {
     public var paramPins: [PinValue]                                 // Par1, Par2
     public var outPins: [PinValue]
 
-    public init(inPins: Int, params: Int, outPins: Int) {
+    /// The variant the module was configured as (`DEFINITION=` in the project): its command word and which of
+    /// `I1`/`I2` are real parameters.
+    public var definition: SystemCommandInfo?
+
+    public init(inPins: Int, params: Int, outPins: Int, definition: SystemCommandInfo? = nil) {
         self.inPins = Array(repeating: .int32(0), count: max(1, inPins))
         self.inPins[0] = .bool(true)                                 // En
         self.paramPins = Array(repeating: .int32(0), count: params)
         self.outPins = Array(repeating: .int32(0), count: max(1, outPins))
+        self.definition = definition
+    }
+
+    /// Puts the variant's command word on the `Cmd` pin. Called after the project's pin values are laid over the
+    /// block, so the configured command wins over the stale constant the file carries (`zelznice.pcc` is
+    /// `Pwm`, command `0x0303`, with `Cmd = 770` on the pin); a wire into `Cmd` still overrides it.
+    public func applyDefinition() {
+        if let definition, inPins.count > 1 { inPins[1] = .int32(Int32(definition.command)) }
     }
 
     public func process(sample: SampleContext) {
         let enabled = inPins.count > 0 ? inPins[0].asBool : true
         guard enabled else { return }
 
-        // Every sub-function in the help (`Firmware Type`, `Firmware Version`, ...) queries the
-        // unit. There is no firmware to answer, so `Out` stays at its documented default of 0
-        // rather than inventing a plausible-looking version.
-        for index in 0..<outPins.count { outPins[index] = .int32(0) }
+        // Commands that ask the unit something read 0 (there is no firmware to answer); arithmetic is computed,
+        // and a command that sets something answers with what it set. See `SystemCommandSimulation`.
+        let command = inPins.count > 1 ? inPins[1].asInt : 0
+        let par1 = paramPins.count > 0 ? paramPins[0].asInt : 0
+        let par2 = paramPins.count > 1 ? paramPins[1].asInt : 0
+        let value = SystemCommandSimulation.result(command: command, par1: par1, par2: par2)
+        for index in 0..<outPins.count { outPins[index] = .int32(Int32(truncatingIfNeeded: value)) }
     }
 
     public func reset() {

@@ -390,6 +390,12 @@ public final class ProfilesParser: @unchecked Sendable {
         )
     }
 
+    /// A `SystemCmd` module's own `DEFINITION="TXT=Pwm, CMD=0x0303, I1=(Int)PwmCH, I2=(Int)Value, O1=(Int)Out"`:
+    /// the variant the configuration dialog chose, in the same syntax as a `[@SystemCommands]` line.
+    public static func systemCommand(fromDefinition definition: String) -> SystemCommandInfo? {
+        parseSystemCommand(mnemonic: "DEFINITION", definition: definition)
+    }
+
     /// `0x0301` or `769`.
     static func parseCommandWord(_ raw: String) -> UInt16? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -457,5 +463,41 @@ public enum ProfileRegistry {
     /// The profile a project asks for, falling back to the database default.
     public static func profile(for project: PCCProject, in database: ProfileDatabase) -> PLCProfile? {
         database.profile(named: project.profile) ?? database.defaultProfile
+    }
+}
+
+/// What a `SystemCmd` block answers in the simulation.
+///
+/// The firmware is not here, so the commands that *ask the unit something* (firmware type and version, ROM id,
+/// timers, analogue inputs) read 0, as before. The commands that are arithmetic are computed — square root,
+/// hypotenuse, perpendicular — and the ones that *set* something (DO, Tris, PWM, Vref, addresses, menu item,
+/// watchdog, thread period) answer with the value they set, the way a unit that accepted it would. The C++ core
+/// (`DirigoSimCore.cpp`) mirrors this function exactly, which `compareBothEngines` relies on.
+public enum SystemCommandSimulation {
+    /// - Parameters: `command` is the command word, `par1`/`par2` the two parameters (`I1`, `I2`).
+    public static func result(command: Int, par1: Int, par2: Int) -> Int {
+        func isqrt(_ value: UInt64) -> Int {
+            if value < 2 { return Int(value) }
+            var x = UInt64(Double(value).squareRoot())
+            while x * x > value { x -= 1 }
+            while (x + 1) * (x + 1) <= value { x += 1 }
+            return Int(x)
+        }
+        switch command {
+        case 0x0022:   // SQT: (Long)Lo, (Long)Hi → Y = floor(sqrt(Hi·2³² + Lo))
+            return isqrt((UInt64(UInt32(truncatingIfNeeded: par2)) << 32) | UInt64(UInt32(truncatingIfNeeded: par1)))
+        case 0x0023:   // HYP: C = floor(sqrt(A² + B²))
+            let a = UInt64(abs(par1)), b = UInt64(abs(par2))
+            return isqrt(a &* a &+ b &* b)
+        case 0x0024:   // PER: (Long)C, (Long)B → A = floor(sqrt(C² − B²))
+            let c = UInt64(abs(par1)), b = UInt64(abs(par2))
+            return c * c >= b * b ? isqrt(c * c - b * b) : 0
+        case 0x0101, 0x0201, 0x0301, 0x0302, 0x0400, 0x0402:
+            return par1    // Set RNet address / menu item / DO / Tris / watchdog / start thread
+        case 0x0303, 0x0304, 0x0401:
+            return par2    // PWM value / Vref / thread period
+        default:
+            return 0
+        }
     }
 }

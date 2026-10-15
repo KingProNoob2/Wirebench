@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import DirigoCore
 @testable import DirigoHardware
 
 @Suite("Project compiler")
@@ -186,22 +187,27 @@ struct ConstantEncodingTests {
 
     @Test("The compiler emits SystemCmd1's record the way had.dmp has it")
     func systemCommandCompiles() throws {
-        // TSystemCommand's shape, with its two constants in the order had.dmp shows: the second IN_PIN
-        // (770) then the first PARAM_PIN (112).
-        let shapes: [String: PLCProjectCompiler.ClassShape] = [
-            "TSystemCommand": .init(id: 81, roles: [.unassigned, .unassigned, .slot]),
-        ]
-        let compiler = PLCProjectCompiler(shapes: shapes,
+        // The shipped shape: the command (the second IN_PIN, 770 = 0x0302), `I1` (the first PARAM_PIN, 112), then
+        // the slot. `I2` is hidden in the default variant, so it is not a word and sets bit 0x20 of the flag.
+        let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
                                           classForGUID: ProjectCompilerTests.classForGUID)
         let module = PLCProjectCompiler.Module(
             name: "SystemCmd1", guid: "{060906AA-5048-4931-BE5C-714697885084}",
-            umisteni: 11, order: 100, inPinCount: 2, outPinCount: 1, constants: [770, 112])
+            umisteni: 11, order: 100, inPinCount: 2, outPinCount: 1, inValues: [1, 770], paramValues: [112, 0])
 
         let built = try compiler.records(modules: [module], wires: [], slots: ["SystemCmd1": 4])
 
-        // had.dmp at 0x9A: 51 A0 | 02 C3 70 C0 04 10. The flag is the class's 0x20 here; the 0x80 is the first
-        // in-pin's constant 1, which this hand-built module does not carry.
-        #expect(built == [0x51, 0x20, 0x02, 0xC3, 0x70, 0xC0, 0x04, 0x10], "got \(built.map { String($0, radix: 16) })")
+        // had.dmp at 0x9A: 51 A0 | 02 C3 70 C0 04 10. Flag: 0x80 from `En`'s constant 1, 0x20 from the hidden `I2`.
+        #expect(built == [0x51, 0xA0, 0x02, 0xC3, 0x70, 0xC0, 0x04, 0x10], "got \(built.map { String($0, radix: 16) })")
+
+        // A `Pwm` variant (`zelznice.pcc`) shows both parameters and carries its own command word.
+        var pwm = module
+        pwm.systemCommand = ProfilesParser.systemCommand(fromDefinition:
+            "TXT=Pwm, CMD=0x0303, I1=(Int)PwmCH,        I2=(Int)Value,        O1=(Int)Out")
+        pwm.paramValues = [2, 90]
+        let pwmBuilt = try compiler.records(modules: [pwm], wires: [], slots: ["SystemCmd1": 4])
+        #expect(pwmBuilt == [0x51, 0x80, 0x03, 0xC3, 0x02, 0xC0, 0x5A, 0xC0, 0x04, 0x10],
+                "got \(pwmBuilt.map { String($0, radix: 16) })")
         #expect(PLCProgramBuilder.Module.constant(770) == 0xC302)
         #expect(PLCProgramBuilder.Module.constant(112) == 0xC070)
         #expect(PLCProgramBuilder.Module.constant(0) == 0xC000)

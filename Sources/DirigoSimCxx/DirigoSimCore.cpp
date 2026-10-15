@@ -245,7 +245,46 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
         case DIRIGO_BLOCK_SYSTEMCMD: {
             const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
             if (!enabled) return;                                    /* holds */
-            for (DirigoValue &out : m.outPins) out = int32Value(0);
+            /* Mirrors `SystemCommandSimulation.result`: arithmetic is computed, a command that sets something
+               answers with what it set, and a query of the unit reads 0. */
+            const int64_t command = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t par1 = m.paramPins.size() > 0 ? asInt(m.paramPins[0]) : 0;
+            const int64_t par2 = m.paramPins.size() > 1 ? asInt(m.paramPins[1]) : 0;
+            auto isqrt = [](uint64_t v) -> int64_t {
+                if (v < 2) return static_cast<int64_t>(v);
+                uint64_t x = static_cast<uint64_t>(std::sqrt(static_cast<double>(v)));
+                while (x * x > v) --x;
+                while ((x + 1) * (x + 1) <= v) ++x;
+                return static_cast<int64_t>(x);
+            };
+            int64_t value = 0;
+            switch (command) {
+                case 0x0022:
+                    value = isqrt((static_cast<uint64_t>(static_cast<uint32_t>(par2)) << 32)
+                                  | static_cast<uint64_t>(static_cast<uint32_t>(par1)));
+                    break;
+                case 0x0023: {
+                    const uint64_t a = static_cast<uint64_t>(par1 < 0 ? -par1 : par1);
+                    const uint64_t b = static_cast<uint64_t>(par2 < 0 ? -par2 : par2);
+                    value = isqrt(a * a + b * b);
+                    break;
+                }
+                case 0x0024: {
+                    const uint64_t c = static_cast<uint64_t>(par1 < 0 ? -par1 : par1);
+                    const uint64_t b = static_cast<uint64_t>(par2 < 0 ? -par2 : par2);
+                    value = c * c >= b * b ? isqrt(c * c - b * b) : 0;
+                    break;
+                }
+                case 0x0101: case 0x0201: case 0x0301: case 0x0302: case 0x0400: case 0x0402:
+                    value = par1;
+                    break;
+                case 0x0303: case 0x0304: case 0x0401:
+                    value = par2;
+                    break;
+                default:
+                    value = 0;
+            }
+            for (DirigoValue &out : m.outPins) out = int32Value(static_cast<int32_t>(value));
             return;
         }
         case DIRIGO_BLOCK_SWITCH: {

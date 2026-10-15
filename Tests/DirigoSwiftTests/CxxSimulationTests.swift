@@ -163,6 +163,49 @@ struct CxxSimulationTests {
         }
     }
 
+    /// `SystemCmd` answers arithmetic and the value it set, and both engines must agree on every command that
+    /// has semantics here — including one a `DEFINITION` configures over the stale constant on the pin.
+    @Test("SystemCmd: both engines agree for each command", arguments: [
+        (0x0022, 7, 3), (0x0023, 3, 4), (0x0024, 5, 3), (0x0301, 21, 0), (0x0302, 112, 0),
+        (0x0303, 2, 90), (0x0304, 1, 33), (0x0101, 9, 0), (0x0201, 4, 0), (0x0400, 50, 0),
+        (0x0401, 2, 100), (0x0402, 3, 0), (0x0004, 8, 8), (0x0000, 1, 1),
+    ])
+    func systemCommandAgrees(command: Int, par1: Int, par2: Int) throws {
+        let project = Self.oneModuleProject(
+            name: "SystemCmd", guid: SystemCmdBlock.guid,
+            inPins: [.bool(true), .int32(Int32(command))],
+            paramPins: [.int32(Int32(par1)), .int32(Int32(par2))], outPins: 1)
+        try Self.compareBothEngines(project, label: String(format: "SystemCmd 0x%04X", command))
+        // And the engine's answer is the documented one.
+        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        engine.step()
+        let out = try #require(engine.getNode(id: 1)?.block.outPins.first?.asInt)
+        #expect(out == SystemCommandSimulation.result(command: command, par1: par1, par2: par2))
+    }
+
+    @Test("SystemCmd arithmetic: square root, hypotenuse and perpendicular")
+    func systemCommandArithmetic() {
+        #expect(SystemCommandSimulation.result(command: 0x0022, par1: 144, par2: 0) == 12)
+        #expect(SystemCommandSimulation.result(command: 0x0022, par1: 0, par2: 1) == 65536)      // 2^32 → 2^16
+        #expect(SystemCommandSimulation.result(command: 0x0023, par1: 3, par2: 4) == 5)
+        #expect(SystemCommandSimulation.result(command: 0x0024, par1: 5, par2: 3) == 4)
+        #expect(SystemCommandSimulation.result(command: 0x0024, par1: 3, par2: 5) == 0)          // no real answer
+        #expect(SystemCommandSimulation.result(command: 0x0000, par1: 9, par2: 9) == 0)          // a query of the unit
+    }
+
+    @Test("SystemCmd: a configured variant's command word replaces the pin's constant")
+    func systemCommandDefinition() throws {
+        let definition = ProfilesParser.systemCommand(fromDefinition:
+            "TXT=Pwm, CMD=0x0303, I1=(Int)PwmCH,        I2=(Int)Value,        O1=(Int)Out")
+        let block = SystemCmdBlock(inPins: 2, params: 2, outPins: 1, definition: definition)
+        block.inPins[1] = .int32(770)                  // what zelznice.pcc carries
+        block.paramPins = [.int32(2), .int32(90)]
+        block.applyDefinition()
+        #expect(block.inPins[1].asInt == 0x0303)
+        block.process(sample: SampleContext())
+        #expect(block.outPins[0].asInt == 90)          // PWM answers the value it set
+    }
+
     /// A one-module project, so a block kind can be compared in isolation.
     static func oneModuleProject(name: String, guid: UUID, inPins: [PinValue],
                                  paramPins: [PinValue], outPins: Int) -> PCCProject {

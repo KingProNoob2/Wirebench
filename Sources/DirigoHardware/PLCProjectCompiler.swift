@@ -1,4 +1,5 @@
 import Foundation
+import DirigoCore
 
 /// Compiles a Dirigo project into the program table the PLC runs.
 ///
@@ -85,6 +86,11 @@ public struct PLCProjectCompiler {
             /// pins), in channel order. A channel in `HIDDEN_PIN_MASK` is not on the sheet and writes
             /// `0xC000`; the others take the sheet's in-pins 1, 2, … in order, each its wire or `0xC000 | VALUE`.
             case digitalOutputs
+            /// A `SystemCmd`'s words: the command (its `Cmd` wire, else the configured variant's command word,
+            /// else the pin's value), then `I1` and `I2` — each only when the variant does not hide it — then the
+            /// output slot. The default variant (no `DEFINITION`) has `I1` visible and `I2` hidden, which is
+            /// the `51 A0 | C302 | C070 | slot` of `had.dmp` and the capture.
+            case systemCommand
         }
         /// The record's first byte.
         public var id: UInt8?
@@ -208,7 +214,7 @@ public struct PLCProjectCompiler {
             // quotient (`0x2000 + index`) and the int remainder.
             "TMDiv":            .init(id: 34, roles: [wire, .inPinOrValue(2), .ownTerminal(svorka: 0),
                                                       .ownTerminal(svorka: 1)]),
-            "TSystemCommand":   .init(id: 81, roles: [.unassigned, .unassigned, .slot]),
+            "TSystemCommand":   .init(id: 81, roles: [.systemCommand]),
             // Two classes compile to nothing at all: two byte-identical exports prove it.
             "TMInt2Bits":       .init(id: nil, roles: [], contributesRecord: false),
         ]
@@ -252,6 +258,8 @@ public struct PLCProjectCompiler {
         /// which of them the sheet does not show.
         public var pinCount: Int?
         public var hiddenPinMask: Int?
+        /// A `SystemCmd`'s configured variant (`DEFINITION=`), when the project carries one.
+        public var systemCommand: SystemCommandInfo?
         /// A macro call's out-pins, as the file names them (`PIN_NAME`, `TYPE`: 1 is Boolean). Empty for
         /// an ordinary block, whose out-pins come from its class.
         public var outPins: [OutPin]
@@ -267,7 +275,9 @@ public struct PLCProjectCompiler {
                     constants: [Int] = [], flag: UInt8 = 0,
                     threadId: Int = 1, page: String = "main", macroName: String? = nil,
                     inValues: [Int] = [], paramValues: [Int] = [], pinMask: Int? = nil, outPins: [OutPin] = [],
-                    pinCount: Int? = nil, hiddenPinMask: Int? = nil) {
+                    pinCount: Int? = nil, hiddenPinMask: Int? = nil,
+                    systemCommand: SystemCommandInfo? = nil) {
+            self.systemCommand = systemCommand
             self.pinCount = pinCount; self.hiddenPinMask = hiddenPinMask
             self.inValues = inValues; self.paramValues = paramValues; self.pinMask = pinMask
             self.outPins = outPins
@@ -356,7 +366,7 @@ public struct PLCProjectCompiler {
     /// (the module's first in-pin, when it is an unwired non-zero constant).
     static let classFlagBits: [String: UInt8] = [
         "TMAnd": 0x44, "TMOr": 0x44, "TMCounter": 0x20, "TMDiv": 0x40,
-        "TSystemCommand": 0x20, "TMDigitalOutputs": 0x18,
+        "TMDigitalOutputs": 0x18,
     ]
 
     public static func modules(in xml: String) -> [Module] {
@@ -366,26 +376,31 @@ public struct PLCProjectCompiler {
                   let id = attribute("ID", tag).flatMap(UInt8.init),
                   let order = attribute("ORDER", tag).flatMap(Int.init) else { return nil }
             let body = body(of: tag, in: xml)
-            return Module(name: name, guid: guid, umisteni: id, order: order,
-                          inPinCount: matches(#"<IN_PIN\b"#, in: body).count,
-                          outPinCount: matches(#"<OUT_PIN\b"#, in: body).count,
-                          fileIndex: position,
-                          constants: declaredConstants(module: id, body: body, in: xml),
-                          threadId: attribute("THREAD_ID", tag).flatMap(Int.init) ?? 0,
-                          page: attribute("PAGE", tag) ?? "",
-                          macroName: attribute("MACRO_NAME", tag),
-                          inValues: matches(#"<IN_PIN\b[^>]*>"#, in: body).map {
-                              attribute("VALUE", $0).flatMap(Int.init) ?? 0 },
-                          paramValues: matches(#"<PARAM_PIN\b[^>]*>"#, in: body).map {
-                              attribute("VALUE", $0).flatMap(Int.init) ?? 0 },
-                          pinMask: attribute("PIN_MASK", tag).flatMap {
-                              Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) },
-                          outPins: matches(#"<OUT_PIN\b[^>]*>"#, in: body).map {
-                              Module.OutPin(name: attribute("PIN_NAME", $0),
-                                            type: attribute("TYPE", $0).flatMap(Int.init)) },
-                          pinCount: attribute("PIN_COUNT", tag).flatMap(Int.init),
-                          hiddenPinMask: attribute("HIDDEN_PIN_MASK", tag).flatMap {
-                              Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) })
+            func hex(_ key: String) -> Int? {
+                attribute(key, tag).flatMap { Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) }
+            }
+            func values(_ pattern: String) -> [Int] {
+                matches(pattern, in: body).map { attribute("VALUE", $0).flatMap(Int.init) ?? 0 }
+            }
+            var module = Module(name: name, guid: guid, umisteni: id, order: order,
+                                inPinCount: matches(#"<IN_PIN\b"#, in: body).count,
+                                outPinCount: matches(#"<OUT_PIN\b"#, in: body).count,
+                                fileIndex: position,
+                                constants: declaredConstants(module: id, body: body, in: xml),
+                                threadId: attribute("THREAD_ID", tag).flatMap(Int.init) ?? 0,
+                                page: attribute("PAGE", tag) ?? "",
+                                macroName: attribute("MACRO_NAME", tag))
+            module.inValues = values(#"<IN_PIN\b[^>]*>"#)
+            module.paramValues = values(#"<PARAM_PIN\b[^>]*>"#)
+            module.pinMask = hex("PIN_MASK")
+            module.pinCount = attribute("PIN_COUNT", tag).flatMap(Int.init)
+            module.hiddenPinMask = hex("HIDDEN_PIN_MASK")
+            module.outPins = matches(#"<OUT_PIN\b[^>]*>"#, in: body).map {
+                Module.OutPin(name: attribute("PIN_NAME", $0), type: attribute("TYPE", $0).flatMap(Int.init))
+            }
+            module.systemCommand = attribute("DEFINITION", tag)
+                .flatMap(ProfilesParser.systemCommand(fromDefinition:))
+            return module
         }
         // Execution order, with a documented tie-break: `had.pcc` lists `reset` (ORDER 40, id 4) before
         // `8xDO1` (ORDER 40, id 10), and `had.dmp` has them the other way round. Ordering by `id`
@@ -555,6 +570,12 @@ public struct PLCProjectCompiler {
                 return acc
             }
             flag |= Self.classFlagBits[cls] ?? 0
+            // A `SystemCmd` hides what its variant hides: `I2` is `0x20` (the captured Tris variant), `I1`
+            // `0x10` (by the same pattern; no capture has a variant that hides it).
+            if shape.roles.contains(.systemCommand) {
+                if m.systemCommand?.input1.isHidden ?? false { flag |= 0x10 }
+                if m.systemCommand?.input2.isHidden ?? true { flag |= 0x20 }
+            }
             if feeds[0] == nil, let first = m.inValues.first, first != 0 { flag |= 0x80 }
             if shape.inPinFlagUnit != 0, m.inPinCount > 3 {
                 flag |= UInt8(truncatingIfNeeded: Int(shape.inPinFlagUnit) * (m.inPinCount - 3))
@@ -596,6 +617,17 @@ public struct PLCProjectCompiler {
                 if case .hidden = role { continue }   // a hidden pin sets the flag and writes nothing
                 if case .restOfInPins = role {
                     for i in 1..<max(1, m.inPinCount) { put(inValue(i)) }
+                    continue
+                }
+                if case .systemCommand = role {
+                    let variant = m.systemCommand
+                    put(feeds[1] ?? variant.map { PLCProgramBuilder.Module.constant(Int($0.command)) } ?? inValue(1))
+                    for (index, hidden) in [variant?.input1.isHidden ?? false, variant?.input2.isHidden ?? true].enumerated()
+                    where !hidden {
+                        put(feeds[Self.paramKeyBase + index]
+                            ?? PLCProgramBuilder.Module.constant(index < m.paramValues.count ? m.paramValues[index] : 0))
+                    }
+                    put(slots[m.name].map { 0x1000 + $0 } ?? PLCProgramBuilder.Module.constant(0))
                     continue
                 }
                 if case .digitalOutputs = role {
@@ -648,7 +680,7 @@ public struct PLCProjectCompiler {
                 case .paramPinOrValue(let index):
                     value = feeds[Self.paramKeyBase + index]
                         ?? PLCProgramBuilder.Module.constant(index < m.paramValues.count ? m.paramValues[index] : 0)
-                case .restOfInPins, .digitalOutputs:
+                case .restOfInPins, .digitalOutputs, .systemCommand:
                     continue
                 case .wire:
                     // A wire, or — when nothing feeds the pin — the pin's constant, which the encoder
