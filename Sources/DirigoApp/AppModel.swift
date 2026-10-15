@@ -125,6 +125,43 @@ public final class AppModel: @unchecked Sendable {
     /// A one-line status for the UI, updated between steps.
     public var uploadStatus: String = ""
 
+    /// One line of the upload log.
+    public struct UploadLogEntry: Identifiable, Equatable, Sendable {
+        public enum Kind: Sendable { case stage, request, reply, error, info }
+        public let id: Int
+        public let time: Date
+        public let kind: Kind
+        public let text: String
+    }
+    /// What the last upload did, newest last. Capped so a long session cannot grow it without bound.
+    public var uploadLog: [UploadLogEntry] = []
+    private var uploadLogCounter = 0
+
+    /// Appends a line to the upload log. Safe to call from the upload's background thread.
+    public func logUpload(_ text: String, kind: UploadLogEntry.Kind = .info) {
+        let time = Date()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.uploadLogCounter += 1
+            self.uploadLog.append(UploadLogEntry(id: self.uploadLogCounter, time: time, kind: kind, text: text))
+            if self.uploadLog.count > 500 { self.uploadLog.removeFirst(self.uploadLog.count - 500) }
+        }
+    }
+
+    public func clearUploadLog() { uploadLog.removeAll() }
+
+    /// The log as text, for the clipboard.
+    public var uploadLogText: String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"
+        return uploadLog.map { "\(f.string(from: $0.time))  \($0.text)" }.joined(separator: "\n")
+    }
+
+    /// A frame as a short hex string: the first 24 bytes, then how many there are.
+    nonisolated static func hexSummary(_ bytes: [UInt8]) -> String {
+        let head = bytes.prefix(24).map { String(format: "%02X", $0) }.joined(separator: " ")
+        return bytes.count > 24 ? "\(head) … (\(bytes.count) bytes)" : "\(head) (\(bytes.count) bytes)"
+    }
+
     /// Uploads a program table exported from Dirigo (a `.pbd` file) to the PLC.
     ///
     /// The sequence is the captured one: stop the PLC, write the table as matrix frames, start it.
@@ -176,18 +213,32 @@ public final class AppModel: @unchecked Sendable {
         }
         do {
             await MainActor.run { self.uploadStatus = "Stopping the PLC…" }
-            let session = DbNetSession(transport: SerialDbNetTransport(port: self.serialPort),
-                                       address: UInt32(self.plcAddress))
+            await MainActor.run { self.uploadLog.removeAll() }
+            self.logUpload("Upload: \(table.uploadedBytes.count)-byte table, PLC \(self.plcAddress), PC \(self.pcAddress), "
+                           + "port \(self.selectedPortPath)", kind: .info)
+            let logged = LoggingDbNetTransport(wrapping: SerialDbNetTransport(port: self.serialPort)) { [weak self] direction, bytes in
+                guard let self else { return }
+                if direction.hasPrefix("✗") {
+                    self.logUpload("Link error \(direction.dropFirst(2))", kind: .error)
+                } else {
+                    self.logUpload("\(direction) \(AppModel.hexSummary(bytes))",
+                                   kind: direction == "→" ? .request : .reply)
+                }
+            }
+            let session = DbNetSession(transport: logged, address: UInt32(self.plcAddress))
             let uploader = PLCUploader(session: session,
                                        destination: self.plcAddress,
                                        source: self.pcAddress)
+            uploader.onStage = { [weak self] stage in self?.logUpload(stage, kind: .stage) }
             await MainActor.run { self.uploadStatus = "Writing \(table.uploadedBytes.count) bytes…" }
             let frames = try uploader.upload(table: table)
+            self.logUpload("Done: \(frames) table frame(s) written, PLC started.", kind: .info)
             await MainActor.run {
                 self.uploadStatus = "Uploaded \(frames) frame(s). The PLC is running."
                 self.isUploading = false
             }
         } catch {
+            self.logUpload("Failed: \(error)", kind: .error)
             await MainActor.run {
                 self.uploadStatus = "Upload failed: \(error)"
                 self.isUploading = false

@@ -28,6 +28,8 @@ public final class PLCUploader {
     /// The chunk size in bytes. The captures use 128 (eight columns of 16 bytes) and send the remainder
     /// as its own frame.
     public var chunkBytes = 128
+    /// Called before each step with a short description, for a log.
+    public var onStage: ((String) -> Void)?
 
     public init(session: DbNetSession, destination: UInt8 = 1, source: UInt8 = 31) {
         self.session = session
@@ -38,15 +40,20 @@ public final class PLCUploader {
     /// Stops the PLC, writes the whole table, and starts it again. Returns the number of table frames.
     @discardableResult
     public func upload(table: PLCProgramTable) throws -> Int {
+        onStage?("GetStatus")
         try session.getStatusSerial(destination: destination, source: source)
+        onStage?("Stop the PLC")
         try session.requestStopSerial(destination: destination, source: source)
+        onStage?("Read the run/stop register")
         try session.readRunStopSerial(destination: destination, source: source)
 
         let frames = table.matrixWriteFrames(rows: rows, chunkBytes: chunkBytes)
-        for payload in frames {
+        for (index, payload) in frames.enumerated() {
+            onStage?("Table frame \(index + 1) of \(frames.count)")
             try session.writeMatrixSerial(destination: destination, source: source, payload: payload)
         }
 
+        onStage?("Start the PLC")
         try session.requestStartSerial(destination: destination, source: source)
         return frames.count
     }

@@ -1,10 +1,12 @@
 import SwiftUI
+import AppKit
 import DirigoCore
 
 public struct MainView: View {
     @Bindable var model: AppModel
     @State private var showInspector: Bool = true
     @State private var showingPalette = false
+    @State private var showingUploadLog = false
     @State private var newPageName: String = ""
     @State private var newPageIsMacro = false
     @State private var showingNewPage = false
@@ -411,6 +413,8 @@ public struct MainView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            uploadLogGroup
         }
         .padding(.vertical, 6)
         // The list has to be refreshed or it is empty forever: `refreshPorts` is the only thing that
@@ -418,6 +422,70 @@ public struct MainView: View {
         // "No serial ports found." Re-reading on appear also picks up an adapter plugged in after
         // launch, since the sidebar is rebuilt when it is shown again.
         .onAppear { model.refreshPorts() }
+    }
+
+    /// The upload's frames and stages, collapsed until wanted.
+    @ViewBuilder
+    private var uploadLogGroup: some View {
+        DisclosureGroup(isExpanded: $showingUploadLog) {
+            VStack(alignment: .leading, spacing: 4) {
+                if model.uploadLog.isEmpty {
+                    Text("Nothing uploaded yet.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(model.uploadLog) { entry in
+                                    Text(entry.text)
+                                        .font(.system(size: 9.5, design: .monospaced))
+                                        .foregroundStyle(uploadLogColor(entry.kind))
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .id(entry.id)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 180)
+                        .onChange(of: model.uploadLog.count) {
+                            if let last = model.uploadLog.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(model.uploadLogText, forType: .string)
+                        }
+                        Button("Clear") { model.clearUploadLog() }
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .font(.caption2)
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack(spacing: 6) {
+                Text("Upload Log").font(.caption.weight(.semibold))
+                if !model.uploadLog.isEmpty {
+                    Text("\(model.uploadLog.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private func uploadLogColor(_ kind: AppModel.UploadLogEntry.Kind) -> Color {
+        switch kind {
+        case .stage: return .primary
+        case .request: return .secondary
+        case .reply: return Theme.signalHigh
+        case .error: return .red
+        case .info: return .secondary
+        }
     }
 
     @ToolbarContentBuilder

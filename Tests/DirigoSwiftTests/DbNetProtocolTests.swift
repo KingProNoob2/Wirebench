@@ -813,3 +813,30 @@ struct CompiledTableCaptureTests {
         #expect(build.table == real)
     }
 }
+
+/// The upload log: the stages the uploader announces and every frame the transport carries.
+@Suite("Upload log")
+struct UploadLogTests {
+    private final class Echo: DbNetTransport {
+        func exchange(_ frame: [UInt8], timeout: TimeInterval) throws -> [UInt8] {
+            guard case .success(let request) = DbNetFrame.parseSerial(frame) else { return [] }
+            return DbNetFrame.encodeSerial(destination: request.source, source: request.destination, function: 0x00)
+        }
+    }
+
+    @Test("Stages and frames are reported in order, each request with its reply")
+    func logsStagesAndFrames() throws {
+        var frames: [String] = []
+        var stages: [String] = []
+        let logged = LoggingDbNetTransport(wrapping: Echo()) { direction, _ in frames.append(direction) }
+        let uploader = PLCUploader(session: DbNetSession(transport: logged, address: 1), destination: 1, source: 31)
+        uploader.onStage = { stages.append($0) }
+        let template = try #require(PLCProgramTable.buildTemplate())
+        let count = try uploader.upload(table: template)
+        #expect(stages.first == "GetStatus")
+        #expect(stages.last == "Start the PLC")
+        #expect(stages.filter { $0.hasPrefix("Table frame") }.count == count)
+        #expect(frames.count == 2 * (count + 4), "request and reply for GetStatus, stop, read, each frame, start")
+        #expect(frames.enumerated().allSatisfy { $0.element == ($0.offset % 2 == 0 ? "→" : "←") })
+    }
+}
