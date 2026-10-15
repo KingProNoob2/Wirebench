@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import DirigoHardware
+import DirigoLibrary
 
 /// Two kinds of test here, and the difference matters:
 ///
@@ -601,5 +602,218 @@ struct DbNetProtocolTests {
         case .success(let frame): return frame
         case .failure(let reason): throw reason
         }
+    }
+}
+
+/// The captured upload of `rulkoshaddirigo.pcc` (Dirigo v2.5.10.459) in `Serial packet capture/`. It is
+/// the reference for the serial framing, the upload sequence and the table's container: every request
+/// in it must be reproduced byte for byte, and the table it carries must be the one the uploader sends.
+@Suite("Serial capture: rulkoshaddirigo upload")
+struct SerialCaptureTests {
+    static var workspace: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+    }
+
+    /// The write frames the log records, in order, as raw bytes. A `Write (DOWN)` record's hex lines are
+    /// the frame; the ASCII column after three spaces is skipped.
+    static func requests() throws -> [[UInt8]] {
+        let url = workspace.appendingPathComponent("Serial packet capture/message.txt")
+        try #require(FileManager.default.fileExists(atPath: url.path), "needs the captured upload")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        var frames: [[UInt8]] = []
+        var current: [UInt8]?
+        for line in text.components(separatedBy: "\n") {
+            if line.range(of: #"^\d{6}: "#, options: .regularExpression) != nil {
+                if let frame = current { frames.append(frame) }
+                current = line.contains("Write (DOWN)") ? [] : nil
+                continue
+            }
+            guard current != nil else { continue }
+            let hex = line.components(separatedBy: "   ").first ?? ""
+            for token in hex.split(separator: " ") {
+                if let byte = UInt8(token, radix: 16), token.count == 2 { current! .append(byte) }
+            }
+        }
+        if let frame = current { frames.append(frame) }
+        return frames.filter { !$0.isEmpty }
+    }
+
+    @Test("Every request in the capture is reproduced byte for byte by the encoder")
+    func encoderReproducesRequests() throws {
+        let frames = try Self.requests()
+        #expect(frames.count == 9, "GetStatus, stop, read, five matrix writes, start")
+        for frame in frames {
+            guard case .success(let parsed) = DbNetFrame.parseSerial(frame) else {
+                Issue.record("a captured request does not parse: \(frame.prefix(8))")
+                continue
+            }
+            let encoded = DbNetFrame.encodeSerial(destination: parsed.destination, source: parsed.source,
+                                                  function: parsed.function, data: parsed.data)
+            #expect(encoded == frame)
+        }
+    }
+
+    @Test("The table the capture uploads is 640 bytes and carries a valid checksum")
+    func capturedTable() throws {
+        var bytes = [UInt8](repeating: 0, count: 640)
+        var written = Set<Int>()
+        for frame in try Self.requests() {
+            guard case .success(let parsed) = DbNetFrame.parseSerial(frame),
+                  parsed.function == 0x45, parsed.data.count > 12,
+                  Array(parsed.data.prefix(4)) == [0x02, 0x20, 0x0D, 0x02] else { continue }
+            let data = parsed.data
+            let col = Int(data[4]) | Int(data[5]) << 8
+            let rows = Int(data[10]) | Int(data[11]) << 8
+            let offset = col * rows * 2
+            for (i, byte) in data[12...].enumerated() {
+                bytes[offset + i] = byte
+                written.insert(offset + i)
+            }
+        }
+        #expect(written.count == 640, "five matrix frames cover the table with no gap")
+        let table = try PLCProgramTable(bytes: bytes)
+        #expect(table.checksumIsValid)
+        #expect(table.sentinelOffset == 0x244, "the records run 0x40..0x222, then 34 zeros")
+        #expect(table.profileName == "Sybas Control P3")
+    }
+
+    /// Answers each request with the short OK the capture shows, and records what was sent.
+    private final class Recorder: DbNetTransport {
+        private(set) var sent: [[UInt8]] = []
+        func exchange(_ frame: [UInt8], timeout: TimeInterval) throws -> [UInt8] {
+            sent.append(frame)
+            guard case .success(let request) = DbNetFrame.parseSerial(frame) else { return [] }
+            return DbNetFrame.encodeSerial(destination: request.source, source: request.destination,
+                                           function: 0x00)
+        }
+    }
+
+    @Test("Uploading the captured table sends exactly the captured requests, in order")
+    func uploaderReproducesCapture() throws {
+        let captured = try Self.requests()
+        // Rebuild the table the capture carried, as the previous test does.
+        var bytes = [UInt8](repeating: 0, count: 640)
+        for frame in captured {
+            guard case .success(let parsed) = DbNetFrame.parseSerial(frame),
+                  parsed.function == 0x45, parsed.data.count > 12,
+                  Array(parsed.data.prefix(4)) == [0x02, 0x20, 0x0D, 0x02] else { continue }
+            let data = parsed.data
+            let offset = (Int(data[4]) | Int(data[5]) << 8) * (Int(data[10]) | Int(data[11]) << 8) * 2
+            for (i, byte) in data[12...].enumerated() { bytes[offset + i] = byte }
+        }
+        let table = try PLCProgramTable(bytes: bytes)
+
+        let recorder = Recorder()
+        let uploader = PLCUploader(session: DbNetSession(transport: recorder, address: 1),
+                                   destination: 1, source: 31)
+        let frames = try uploader.upload(table: table)
+        #expect(frames == 5)
+        #expect(recorder.sent == captured)
+    }
+}
+
+/// The two saves in `Serial packet capture/` that differ only by edits Dirigo ignores: the `*out` sheet
+/// is deleted, and a `SystemCmd` is placed on `main` with thread 0. Both uploads were byte-identical.
+@Suite("Serial capture: edits Dirigo ignores")
+struct IgnoredEditsTests {
+    static var workspace: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+    }
+
+    static func project(_ name: String) throws -> String {
+        let url = workspace.appendingPathComponent("Serial packet capture/\(name)")
+        try #require(FileManager.default.fileExists(atPath: url.path), "needs the captured project")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    @Test("A thread-0 module on a non-macro sheet, and an uncalled sheet, are not in the program")
+    func programSelection() throws {
+        let modules = PLCProjectCompiler.modules(in: try Self.project("rulkoshaddirigo-mod.pcc"))
+        let program = PLCProjectCompiler.programModules(modules)
+        #expect(!program.contains { $0.page == "*out" }, "nothing calls *out")
+        #expect(!program.contains { $0.name == "SystemCmd2" }, "thread 0 on main is not expanded")
+        #expect(program.contains { $0.name == "SystemCmd1" }, "*rultea is called by rultea1")
+        #expect(program.contains { $0.name == "PulseGen1" }, "*kostka is called by kostka1")
+    }
+
+    @Test("The table is the same for the original and the edited save")
+    func tablesMatch() throws {
+        let template = try #require(PLCProgramTable.buildTemplate())
+        let original = try PLCProjectBuild.compile(xml: try Self.project("rulkoshaddirigo.pcc"),
+                                                   classForGUID: BlockTypeCatalog.classNamesByGUID,
+                                                   template: template)
+        let edited = try PLCProjectBuild.compile(xml: try Self.project("rulkoshaddirigo-mod.pcc"),
+                                                 classForGUID: BlockTypeCatalog.classNamesByGUID,
+                                                 template: template)
+        #expect(original.table == edited.table)
+        #expect(original.table.count == PLCProgramTable.length(records: original.records.count),
+                "the table is sized to its records")
+    }
+}
+
+/// What the compiler writes for each captured save, against the table Dirigo uploaded for it.
+///
+/// All four saves of `rulkoshaddirigo` (the original, `-mod`, `-mod2` with an AdvCounter in `*kostka`, and
+/// `-mod3` with the ISwitch moved onto the Set block's X pin) must come out with the same record region,
+/// sentinel and table length as the capture. The header's per-project fields (0x10, 0x1A, 0x26) are not
+/// derived yet and are the only bytes allowed to differ.
+@Suite("Serial capture: the compiled table")
+struct CompiledTableCaptureTests {
+    /// The table a log carries, rebuilt from its matrix writes.
+    static func capturedTable(_ log: String) throws -> [UInt8] {
+        let url = IgnoredEditsTests.workspace.appendingPathComponent("Serial packet capture/\(log)")
+        try #require(FileManager.default.fileExists(atPath: url.path), "needs \(log)")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        var frames: [[UInt8]] = []
+        var current: [UInt8]?
+        for line in text.components(separatedBy: "\n") {
+            if line.range(of: #"^\d{6}: "#, options: .regularExpression) != nil {
+                if let frame = current { frames.append(frame) }
+                current = line.contains("Write (DOWN)") ? [] : nil
+                continue
+            }
+            guard current != nil else { continue }
+            for token in (line.components(separatedBy: "   ").first ?? "").split(separator: " ") {
+                if let byte = UInt8(token, radix: 16), token.count == 2 { current!.append(byte) }
+            }
+        }
+        if let frame = current { frames.append(frame) }
+        var bytes = [UInt8](repeating: 0, count: 640)
+        for frame in frames where !frame.isEmpty {
+            guard case .success(let parsed) = DbNetFrame.parseSerial(frame),
+                  parsed.function == 0x45, parsed.data.count > 12,
+                  Array(parsed.data.prefix(4)) == [0x02, 0x20, 0x0D, 0x02] else { continue }
+            let data = parsed.data
+            let offset = (Int(data[4]) | Int(data[5]) << 8) * (Int(data[10]) | Int(data[11]) << 8) * 2
+            for (i, byte) in data[12...].enumerated() { bytes[offset + i] = byte }
+        }
+        return bytes
+    }
+
+    @Test("The records, sentinel and length match the upload", arguments: [
+        ("rulkoshaddirigo.pcc", "message.txt"),
+        ("rulkoshaddirigo-mod.pcc", "message-mod.txt"),
+        ("rulkoshaddirigo-mod2.pcc", "message-mod2.txt"),
+        ("rulkoshaddirigo-mod3.pcc", "message-mod3.txt"),
+    ])
+    func matchesUpload(project: String, log: String) throws {
+        let template = try #require(PLCProgramTable.buildTemplate())
+        let build = try PLCProjectBuild.compile(xml: try IgnoredEditsTests.project(project),
+                                                classForGUID: BlockTypeCatalog.classNamesByGUID,
+                                                template: template)
+        let real = try Self.capturedTable(log)
+        #expect(build.table.count == real.count)
+        let regionEnd = real.count - PLCProgramTable.trailerLength
+        #expect(Array(build.table[PLCProgramTable.bodyOffset..<regionEnd])
+                == Array(real[PLCProgramTable.bodyOffset..<regionEnd]),
+                "the records and the zeros before the sentinel")
+        #expect(Array(build.table[0x40...]) == Array(real[0x40...]), "records, sentinel and trailer")
+        // The header: only the project-specific words, and the checksum that covers them, may differ.
+        let differing = (0..<0x40).filter { build.table[$0] != real[$0] }
+        #expect(Set(differing).isSubset(of: [0x10, 0x1A, 0x1C, 0x1D, 0x26]), "header bytes: \(differing)")
     }
 }

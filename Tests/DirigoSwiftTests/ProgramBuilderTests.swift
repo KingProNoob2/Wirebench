@@ -76,13 +76,13 @@ struct ProgramBuilderTests {
         let template = try PLCProgramTable(bytes: real)
         let rebuilt = PLCProgramBuilder(modules: Self.headModules).table(fromTemplate: template)
 
-        // Same size, same header, same trailer, different program.
-        #expect(rebuilt.count == 256)
+        // Sized to its own records, with the same header and trailer as the template.
+        #expect(rebuilt.count == PLCProgramTable.length(records: PLCProgramBuilder(modules: Self.headModules).recordsLength))
         // The header is the template's, except for the checksum, which is recomputed for the new program.
         #expect(Array(rebuilt[0..<PLCProgramTable.checksumOffset]) == Array(real[0..<PLCProgramTable.checksumOffset]))
         #expect(Array(rebuilt[(PLCProgramTable.checksumOffset + 2)..<0x40])
                 == Array(real[(PLCProgramTable.checksumOffset + 2)..<0x40]))
-        #expect(Array(rebuilt[PLCProgramTable.sentinelOffset...]) == Array(real[PLCProgramTable.sentinelOffset...]))
+        #expect(Array(rebuilt.suffix(PLCProgramTable.trailerLength)) == Array(real.suffix(PLCProgramTable.trailerLength)))
         // And the checksum it wrote is the one its own bytes produce.
         let rebuiltTable = try PLCProgramTable(bytes: rebuilt)
         #expect(rebuiltTable.checksumIsValid)
@@ -156,7 +156,7 @@ struct ProgramBuilderTests {
             offset += 2 + 2 * step.n
         }
         #expect(offset == 0xA2, "the records end at 0xA2")
-        #expect(Set(real[offset..<PLCProgramTable.sentinelOffset]) == [0])
+        #expect(Set(real[offset..<(real.count - PLCProgramTable.trailerLength)]) == [0])
     }
 
     @Test("The discovered shapes tile the real table exactly")
@@ -187,7 +187,7 @@ struct ProgramBuilderTests {
         }
         // 98 bytes of records, then zeros to the sentinel.
         #expect(offset == 0xA2, "the records must end at 0xA2")
-        #expect(Set(real[offset..<PLCProgramTable.sentinelOffset]) == [0],
+        #expect(Set(real[offset..<(real.count - PLCProgramTable.trailerLength)]) == [0],
                 "the padding between the records and the sentinel is zeros")
         #expect(offset - PLCProgramTable.bodyOffset == 98)
     }

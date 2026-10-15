@@ -199,9 +199,9 @@ struct ConstantEncodingTests {
 
         let built = try compiler.records(modules: [module], wires: [], slots: ["SystemCmd1": 4])
 
-        // had.dmp at 0x9A: 51 A0 | 02 C3 70 C0 04 10 — the values match; the second byte is the class's
-        // hidden-pin mask (0xA0), which the compiler carries as 0 because it is not computed yet.
-        #expect(built == [0x51, 0x00, 0x02, 0xC3, 0x70, 0xC0, 0x04, 0x10], "got \(built.map { String($0, radix: 16) })")
+        // had.dmp at 0x9A: 51 A0 | 02 C3 70 C0 04 10. The flag is the class's 0x20 here; the 0x80 is the first
+        // in-pin's constant 1, which this hand-built module does not carry.
+        #expect(built == [0x51, 0x20, 0x02, 0xC3, 0x70, 0xC0, 0x04, 0x10], "got \(built.map { String($0, radix: 16) })")
         #expect(PLCProgramBuilder.Module.constant(770) == 0xC302)
         #expect(PLCProgramBuilder.Module.constant(112) == 0xC070)
         #expect(PLCProgramBuilder.Module.constant(0) == 0xC000)
@@ -371,39 +371,69 @@ struct RecordReproductionTests {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
 
-    /// (module name, GUID, umisteni, table offset, record byte count, the flag byte had.dmp has)
+    /// (module name, GUID, umisteni, table offset, record byte count, the flag byte had.dmp has).
+    ///
+    /// The two `TMBoolVar`s write no record: the `00 00` that follows `PulseGen1`'s slot is its Out terminal
+    /// (bit 0, row 0), as the capture's four PulseGens show. `8xDO1` is fourteen words and `ISwitch1` seven
+    /// in-pin words and the slot.
     static let real: [(String, String, UInt8, Int, Int, UInt8)] = [
-        ("PulseGen1",   "74F92168-F67B-4364-8AC0-B735DAA400A3", 1, 0x040, 10, 0x80),
-        ("zapnuti",     "4139463D-8956-4642-BE4E-8A02E95392D3", 2, 0x04A, 2, 0x00),
+        ("PulseGen1",   "74F92168-F67B-4364-8AC0-B735DAA400A3", 1, 0x040, 12, 0x80),
         ("Counter1",    "E37509F9-7693-49D7-977E-BAA796F92265", 3, 0x04C, 10, 0xA0),
-        ("8xDO1",       "0F50AC33-F61E-4009-9C60-FDE664DA0ABC", 10, 0x056, 18, 0x98),
-        ("reset",       "4139463D-8956-4642-BE4E-8A02E95392D3", 4, 0x068, 2, 0xC0),
-        ("ISwitch1",    "0FAE4998-FD44-4CA1-B55F-7E148FDFF20A", 5, 0x06A, 28, 0xC0),
+        ("8xDO1",       "0F50AC33-F61E-4009-9C60-FDE664DA0ABC", 10, 0x056, 30, 0x98),
+        ("ISwitch1",    "0FAE4998-FD44-4CA1-B55F-7E148FDFF20A", 5, 0x074, 18, 0x94),
         ("Comparator1", "8942245A-7E82-43FF-94E8-E7BCF69FDEE9", 6, 0x086, 12, 0x80),
         ("Or1",         "5745AE44-2B47-4828-AEFA-B96375DA31C4", 7, 0x092, 8, 0xC4),
         ("SystemCmd1",  "060906AA-5048-4931-BE5C-714697885084", 11, 0x09A, 8, 0xA0),
     ]
 
+    /// The pin counts and values the sheet has for each of them (`had+1block.pcc`): what the generic roles read.
+    static let pins: [String: (inCount: Int, inValues: [Int], params: [Int])] = [
+        "PulseGen1": (2, [1, 0], [3, 3]),
+        "Counter1": (3, [1, 0, 0], [1]),
+        "8xDO1": (7, [1, 0, 0, 0, 0, 0, 0], [0]),
+        "ISwitch1": (8, [1, 0, 1, 2, 4, 8, 16, 32], []),
+        "Comparator1": (3, [1, 0, 6], []),
+        "Or1": (3, [1, 0, 0], []),
+        "SystemCmd1": (2, [1, 770], [112, 0]),
+    ]
+
+    /// `real` as compiler modules, with their pin values.
+    static func hadModules(declared: [String: [Int]] = [
+        "PulseGen1": [3, 3], "Comparator1": [6], "SystemCmd1": [770, 112], "ISwitch1": [1, 2, 4, 8, 16, 32],
+    ]) -> [PLCProjectCompiler.Module] {
+        var out: [PLCProjectCompiler.Module] = real.map { name, guid, umisteni, _, _, flag in
+            let p = pins[name]
+            return .init(name: name, guid: "{\(guid)}", umisteni: umisteni, order: 0,
+                         inPinCount: p?.inCount ?? 0, outPinCount: 0, constants: declared[name] ?? [],
+                         flag: flag, inValues: p?.inValues ?? [], paramValues: p?.params ?? [])
+        }
+        // The two boolean variables write no record, but they hold bits 1 and 3 of the allocation.
+        for (name, id) in [("zapnuti", UInt8(2)), ("reset", UInt8(4))] {
+            out.append(.init(name: name, guid: "{4139463D-8956-4642-BE4E-8A02E95392D3}", umisteni: id,
+                             order: 0, inPinCount: 2, outPinCount: 1, inValues: [1, 0]))
+        }
+        return out
+    }
+
     /// The role lists the compiler ships, taken from the source rather than restated here.
     static let shapes = PLCProjectCompiler.hadProjectShapes
 
     /// The module's in-pin sources. These are the values `had.dmp` carries; the attribution to pins is
-    /// what the role lists assert. A `.wire` whose `outModule` is 0 has no terminal, which is how the
-    /// one unnamed value (`0x0001`) and `0x0000` get through.
+    /// what the role lists assert. A `.wire` whose `outModule` is 0 has no terminal, which is how
+    /// `0x0000` gets through.
     static let wires: [PLCProjectCompiler.Wire] = {
         func w(_ m: UInt8, _ pin: Int, _ value: UInt16) -> PLCProjectCompiler.Wire {
             PLCProjectCompiler.Wire(inModule: m, inPin: pin,
                                     outModule: UInt8(value >> 8), outPin: Int(value & 0xFF))
         }
         return [
-            w(1, 1, 0x0100),                                        // PulseGen1: its own Cnt terminal
-            w(3, 1, 0x0000), w(3, 2, 0x0700), w(3, 3, 0x0200),      // Counter1
-            w(10, 1, 0xC000), w(10, 2, 0xC000), w(10, 3, 0x0301), w(10, 4, 0x0401),
-            w(10, 5, 0xC000), w(10, 6, 0xC000), w(10, 7, 0xC000), w(10, 8, 0x0501),
-            // ISwitch1's six source words, in the order had.dmp has them. Its six masks are not wires:
-            // they are the sheet's declared values, so they come from `constants` and are supplied there.
-            w(5, 1, 0xC000), w(5, 2, 0x0001), w(5, 3, 0x0101), w(5, 4, 0x0201),
-            w(5, 5, 0x941E), w(5, 6, 0x1003),
+            w(1, 1, 0x0100),                                        // PulseGen1: `zapnuti`'s terminal
+            w(3, 1, 0x0000), w(3, 2, 0x0700),                       // Counter1: PulseGen1.Out, Or1.Y
+            // 8xDO1's six wired channels: Int2Bits1 bits 3, 4, 5, 0, 1, 2 (bit, row 1).
+            w(10, 1, 0x0301), w(10, 2, 0x0401), w(10, 3, 0x0501),
+            w(10, 4, 0x0001), w(10, 5, 0x0101), w(10, 6, 0x0201),
+            // ISwitch1's source is Counter1.Y; its masks are the sheet's declared values.
+            w(5, 1, 0x1003),
             w(6, 1, 0x1003), w(6, 2, 0x0400), w(6, 3, 0x0500),      // Comparator1 (the 6 is a constant)
             w(7, 1, 0x0400), w(7, 2, 0x0300),                       // Or1
         ]
@@ -455,12 +485,7 @@ struct RecordReproductionTests {
         let compiler = PLCProjectCompiler(shapes: Self.shapes,
                                           classForGUID: ProjectCompilerTests.classForGUID)
 
-        var modules: [PLCProjectCompiler.Module] = []
-        for (name, guid, umisteni, _, _, flag) in Self.real {
-            modules.append(.init(name: name, guid: "{\(guid)}", umisteni: umisteni, order: 0,
-                                 inPinCount: 0, outPinCount: 0, constants: declared[name] ?? [],
-                                 flag: flag))
-        }
+        let modules = Self.hadModules(declared: declared)
         let built = try compiler.records(modules: modules, wires: Self.wires, slots: slots)
 
         // The real region, record by record.
@@ -487,10 +512,7 @@ struct RecordReproductionTests {
         // `PLCProjectCompiler.declaredConstants` reads out of the project.
         let declared: [String: [Int]] = ["PulseGen1": [3, 3], "Comparator1": [6],
                                          "SystemCmd1": [770, 112], "ISwitch1": [1, 2, 4, 8, 16, 32]]
-        let modules: [PLCProjectCompiler.Module] = Self.real.map { name, guid, umisteni, _, _, flag in
-            .init(name: name, guid: "{\(guid)}", umisteni: umisteni, order: 0,
-                  inPinCount: 0, outPinCount: 0, constants: declared[name] ?? [], flag: flag)
-        }
+        let modules = Self.hadModules(declared: declared)
         let compiler = PLCProjectCompiler(shapes: Self.shapes,
                                           classForGUID: ProjectCompilerTests.classForGUID)
         let rebuilt = try compiler.table(fromTemplate: PLCProgramTable(bytes: table),
@@ -543,17 +565,12 @@ struct RecordReproductionTests {
         var cursor = 0
         for (name, _, umisteni, _, count, _) in Self.real {
             guard let m = modules.first(where: { $0.name == name }) else { continue }
-            let cls = SymbolTableGenerationTests.allClasses()[PLCProjectCompiler.normaliseGUID(m.guid)] ?? "?"
-            guard let shape = Self.shapes[cls] else { continue }
-            let words = shape.roles.compactMap { role -> Int? in
-                if case .hidden = role { return nil }
-                return 1
-            }.count
-            let built = 2 + words * 2
+            let built = try compiler.records(modules: [m], wires: wires, allocation: allocation).count
             #expect(built == count, "\(name) (module \(umisteni)): \(built) bytes, had.dmp has \(count)")
             cursor += built
         }
         #expect(cursor > 0)
+        _ = region
     }
 
     @Test("A hidden pin sets the flag and writes no word")
@@ -707,6 +724,32 @@ struct SymbolTableGenerationTests {
         await withKnownIssue("module-row rule, TMDateTime, and non-unique bit indices") {
             try compare(pcc: "ehhhhhh zelznice.pcc", csv: "ehhhhhh zelznice.csv")
         }
+    }
+
+    /// The captured `rulkoshaddirigo` saves: every INDEX and ROWINDEX Dirigo wrote is reproduced. The one row
+    /// not produced is `Comparator2`'s module row, which Dirigo writes as the owner of row 0 (an open item).
+    @Test("rulkoshaddirigo captures: every captured INDEX and ROWINDEX is reproduced",
+          arguments: ["rulkoshaddirigo", "rulkoshaddirigo-mod", "rulkoshaddirigo-mod2", "rulkoshaddirigo-mod3"])
+    func capturedAllocation(name: String) throws {
+        let dir = Self.url("Serial packet capture")
+        let pcc = dir.appendingPathComponent(name + ".pcc")
+        let csv = dir.appendingPathComponent(name + ".csv")
+        try #require(FileManager.default.fileExists(atPath: pcc.path))
+        try #require(FileManager.default.fileExists(atPath: csv.path))
+        let xml = try String(contentsOf: pcc, encoding: .utf8)
+        let real = PLCProjectCompiler.symbols(fromSymbolCSV: try String(contentsOf: csv, encoding: .utf8))
+        let table = PLCSymbolTable(modules: PLCProjectCompiler.programModules(PLCProjectCompiler.modules(in: xml)),
+                                   wires: PLCProjectCompiler.wires(in: xml),
+                                   classForGUID: Self.allClasses(), shapes: PLCProjectCompiler.hadProjectShapes)
+        let mine = Dictionary(table.rows.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        var wrong: [String] = []
+        for row in real where row.name != "Comparator2" {
+            guard let got = mine[row.name] else { wrong.append("missing \(row.name)"); continue }
+            if got.index != row.index || got.rowIndex != row.rowIndex {
+                wrong.append("\(row.name): \(got.index),\(got.rowIndex) ≠ \(row.index),\(row.rowIndex)")
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong)")
     }
 
     private func compareBytes(pcc pccName: String, csv csvName: String) throws {
@@ -1037,14 +1080,18 @@ struct ClassShapesFromP1Tests {
         // `GetOutputValue` to `RegisterOutPin` (verified against eight records, including two isolated ones
         // in the variant dumps). `TMComparator` reaches the same **word count** — 5 — but splits it
         // differently (its constant pin is not identified), so it is not asserted equal here.
-        let mustAgree = ["TMPulseGenerator", "TMBoolVar", "TMDigitalOutputs", "TMOr"]
+        // `TMPulseGenerator`, `TMBoolVar` and `TMDigitalOutputs` are kept from the capture below: the
+        // decomp's derivation does not have the Out terminal, the generic in-pin words or the fourteen
+        // channel words that `Serial packet capture/` shows.
+        let mustAgree = ["TMOr"]
         for cls in mustAgree {
             let a = PLCProjectCompiler.classShapesFromP1[cls]
             let b = PLCProjectCompiler.hadProjectShapes[cls]
             #expect(a == b, "\(cls): decomp \(String(describing: a)), verified \(String(describing: b))")
         }
         // And the three the decomp is known to miss are *kept* from the verified set, not overwritten.
-        for cls in ["TMCounter", "TMComparator", "TMIntSwitch", "TMInt2Bits"] {
+        for cls in ["TMCounter", "TMComparator", "TMIntSwitch", "TMInt2Bits", "TMPulseGenerator",
+                    "TMBoolVar", "TMDigitalOutputs", "TMDiv"] {
             #expect(PLCProjectCompiler.classShapes[cls] == PLCProjectCompiler.hadProjectShapes[cls],
                     "\(cls) must stay the verified entry")
         }
@@ -1058,11 +1105,7 @@ struct ClassShapesFromP1Tests {
         // `PLCProjectCompiler.declaredConstants` reads out of the project.
         let declared: [String: [Int]] = ["PulseGen1": [3, 3], "Comparator1": [6],
                                          "SystemCmd1": [770, 112], "ISwitch1": [1, 2, 4, 8, 16, 32]]
-        let modules: [PLCProjectCompiler.Module] = RecordReproductionTests.real.map {
-            name, guid, umisteni, _, _, flag in
-            .init(name: name, guid: "{\(guid)}", umisteni: umisteni, order: 0,
-                  inPinCount: 0, outPinCount: 0, constants: declared[name] ?? [], flag: flag)
-        }
+        let modules = RecordReproductionTests.hadModules(declared: declared)
         let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
                                           classForGUID: ProjectCompilerTests.classForGUID)
         let built = try compiler.records(modules: modules, wires: RecordReproductionTests.wires,
@@ -1122,22 +1165,11 @@ struct HadProjectAgainstDumpTests {
         // `LastState` out-pin — and the file has no connection for that pin at all, so where it comes from
         // is still open. `HadProjectWiringTests.recordsFromTheProject` records the gap rather than hiding
         // it.
-        #expect(built.prefix(19) == want.prefix(19), "the wired prefix must match byte for byte")
-        // Five of the nine modules match byte for byte — `PulseGen1`, `zapnuti`, `Counter1`, `Or1` and
-        // `SystemCmd1` — including `Counter1`'s third word, which `Role.feedback` supplies as the module's
-        // own hidden `LastState` out-pin (allocated `(INDEX 2, ROWINDEX 0)`, exactly the `0200` the dump
-        // carries).
-        //
-        // The three that do not are a **corpus mismatch, not a model one**: this `had.pcc` and this
-        // `had.dmp` were not made from the same wiring. The dump's `ISwitch1` is fed from
-        // `Int2Bits1.B0/B1/B2` and `Counter1.Y`, while the file feeds those same three bits to `8xDO1` and
-        // gives the switch one wire; `Comparator1` is fed `Counter1.Y` in the dump and `Counter1`'s out-pin
-        // *0* — its hidden `LastState` — in the file. The counter's out-pin order is not in doubt: `Y` at
-        // svorka 1 and `LastState` at 0 is what the byte-exact `had.csv` and `kostička.csv` require, and
-        // swapping them breaks both.
-        await withKnownIssue("this had.pcc and had.dmp do not carry the same wiring") {
-            #expect(built == want)
-        }
+        // The whole region matches. It used to be a "corpus mismatch" known issue, because `had.dmp` was read
+        // as holding two 2-byte `TMBoolVar` records, an 18-byte `8xDO1` and a 28-byte `ISwitch1`; the capture
+        // in `Serial packet capture/` shows it holds `PulseGen1`'s Out terminal, a 30-byte `8xDO1` and an
+        // 18-byte `ISwitch1`, and the project then rebuilds the dump byte for byte.
+        #expect(built == want)
     }
 }
 
@@ -1196,21 +1228,18 @@ struct RecordAddressConsistencyTests {
         }
         // Walk the region in the order the compiler wrote it — the module list as handed over — with the
         // same roles.
-        var i = 0
         var unresolved: [String] = []
         var words = 0
         for m in modules {
-            let cls = SymbolTableGenerationTests.allClasses()[PLCProjectCompiler.normaliseGUID(m.guid)] ?? "?"
-            guard let shape = PLCProjectCompiler.classShapes[cls], shape.contributesRecord else { continue }
-            let count = shape.roles.filter { $0 != .hidden(0) }.count
-            i += 2
-            for _ in 0..<count {
-                guard i + 1 < region.count else { break }
-                let w = UInt16(region[i]) | (UInt16(region[i + 1]) << 8)
+            let record = try compiler.records(modules: [m], wires: wires, allocation: allocation)
+            guard record.count > 2 else { continue }
+            var i = 2
+            while i + 1 < record.count {
+                let w = UInt16(record[i]) | (UInt16(record[i + 1]) << 8)
                 i += 2
                 words += 1
                 if w & 0xF000 == 0xC000 { continue }                      // a constant
-                if w & 0xF000 == 0x1000 {                                  // a data slot
+                if w & 0xF000 == 0x1000 || w & 0xF000 == 0x2000 {         // an int or long slot
                     if Int(w & 0x0FFF) > maxSlot { unresolved.append("\(m.name): slot \(String(format: "%04X", w))") }
                     continue
                 }
@@ -1259,16 +1288,11 @@ struct OverrideShapeTests {
         let eight = try #require(modules.first { $0.name == "8xDI1" })
         #expect(eight.outPinCount == 8)
         let region = try compiler.records(modules: [eight], wires: [], allocation: allocation)
-        // Two header bytes and eight words, one per out-pin.
-        #expect(region.count == 2 + 8 * 2)
-        let words = stride(from: 2, to: region.count, by: 2).map {
-            UInt16(region[$0]) | (UInt16(region[$0 + 1]) << 8)
-        }
-        // Each word is the address the allocation gave that pin: `(INDEX << 8) | container`.
-        for (i, w) in words.enumerated() {
-            let want = allocation.addresses[UInt16(eight.umisteni) << 8 | UInt16(i)]?.word
-            #expect(w == want, "pin \(i): \(String(format: "%04X", w)) vs \(String(describing: want))")
-        }
+        // The capture (`09 80 | 1001`): two header bytes and one word, the module's slot, however many
+        // out-pins the sheet has.
+        #expect(region.count == 2 + 2)
+        let slot = try #require(allocation.slots["8xDI1"])
+        #expect(UInt16(region[2]) | (UInt16(region[3]) << 8) == 0x1000 + slot)
         // And the PIN names in the symbol table are the class's `DI0..DI7`.
         let rows = PLCProjectCompiler.symbols(fromSymbolCSV:
             try String(contentsOf: Self.school.appendingPathComponent("kostička.csv"), encoding: .utf8))
@@ -1358,11 +1382,13 @@ struct DynamicShapeTests {
         // walks — not the sheet's `<IN_PIN>` elements. `8xDO1` is the case that separates them: seven
         // pins in the file, eight words in the record (`had.dmp`), which is why the shape table carries
         // the class's count rather than reading it from the project.
-        let words = PLCProjectCompiler.classShapes["TMDigitalOutputs"]?.roles.count
-        #expect(words == 8)
+        // The capture and `had.dmp` both have fourteen channel words, plus the first in-pin's word when
+        // that pin is wired (`8xDO4` in the capture: 32 bytes; `8xDO1` in `had.dmp`: 30).
+        #expect(PLCProjectCompiler.classShapes["TMDigitalOutputs"]?.roles == [.digitalOutputs])
         for m in outputs {
             let region = try compiler.records(modules: [m], wires: wires, allocation: allocation)
-            #expect(region.count == 2 + 8 * 2, "\(m.name): \(region.count) bytes")
+            let wired = wires.contains { $0.inModule == m.umisteni && $0.inPin == 0 && !$0.isParam }
+            #expect(region.count == 2 + (14 + (wired ? 1 : 0)) * 2, "\(m.name): \(region.count) bytes")
         }
     }
 }

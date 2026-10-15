@@ -62,6 +62,7 @@ struct BuildExportTests {
         // The table's body is the record region, and it round-trips through the checksum.
         #expect(table.checksumIsValid)
         #expect(table.moduleTable.contains { $0 != 0 }, "the records should not be empty")
-        #expect(table.realLength <= 256)
+        #expect(table.bytes.count == table.sentinelOffset + PLCProgramTable.trailerLength,
+                "the table ends a trailer after its sentinel")
     }
 }

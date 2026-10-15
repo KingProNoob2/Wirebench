@@ -62,6 +62,29 @@ public struct PLCProjectCompiler {
             /// Not fed by a wire: the pin's **constant**, `0xC000 | value`, which is `0xC000` when the
             /// project gives no value. It is not an "unassigned" state — the encoder has none.
             case unassigned
+            /// A pin whose constant is always `0`: the word is `0xC000` and it does not take the next value
+            /// from `constants`. `unassigned` would, and it skips zero values, so a zero pin cannot use it.
+            case zero
+            /// The in-pin at `index`, read by its index rather than by position in the record. A wire, or the
+            /// constant 0 when unwired.
+            case inPin(Int)
+            /// The in-pin at `index`: its wire, or — when unwired — the next declared constant.
+            case inPinOrConstant(Int)
+            /// The parameter at `index`: its wire from `PARAM_CONNECTIONS`, or — when unwired — the next
+            /// declared constant.
+            case paramPinOrConstant(Int)
+            /// The in-pin at `index`: its wire, or — when unwired — `0xC000 | its own VALUE`, whatever its
+            /// value (zero included). Read from the module's own pin list, not from `constants`.
+            case inPinOrValue(Int)
+            /// The parameter at `index`: its wire, or `0xC000 | its own VALUE`.
+            case paramPinOrValue(Int)
+            /// Every in-pin after the first, one word each: its wire, or `0xC000 | VALUE`. The class's pin
+            /// count is the sheet's (`TMIntSwitch` has 4, 8, 11 or 12 in the capture).
+            case restOfInPins
+            /// `TMDigitalOutputs`' fourteen channel words. The in-pins after the first fill positions
+            /// 2, 3 | 7…10 | 11, 12, 13 of fourteen — the first two and the last three pins, and the ones
+            /// between in the middle block — and every other position is `0xC000`.
+            case digitalOutputs
         }
         /// The record's first byte.
         public var id: UInt8?
@@ -74,12 +97,15 @@ public struct PLCProjectCompiler {
         /// pointers and sets `pin[0x64] = i`, `pin[0x60] = pin[0x68]` — so the record's length follows the
         /// project's configured pin count rather than a fixed role list.
         public var dynamicOutPins: Bool
+        /// The flag byte gains `inPinFlagUnit` for each in-pin past the third (`TMIntSwitch`: 4, 8, 11 and 12
+        /// pins give `0x04`, `0x14`, `0x20`, `0x24` in the capture).
+        public var inPinFlagUnit: UInt8
         /// The words the record carries: every role except `.hidden`.
         public var valueCount: Int { roles.filter { $0 != .hidden(0) }.count }
         public init(id: UInt8?, roles: [Role], contributesRecord: Bool = true,
-                    dynamicOutPins: Bool = false) {
+                    dynamicOutPins: Bool = false, inPinFlagUnit: UInt8 = 0) {
             self.id = id; self.roles = roles; self.contributesRecord = contributesRecord
-            self.dynamicOutPins = dynamicOutPins
+            self.dynamicOutPins = dynamicOutPins; self.inPinFlagUnit = inPinFlagUnit
         }
         /// A class whose positions are all fed by wires.
         public init(id: UInt8?, valueCount: Int, contributesRecord: Bool = true) {
@@ -108,7 +134,8 @@ public struct PLCProjectCompiler {
     /// pointers and gives each one `pin[0x64] = i` and `pin[0x60] = pin[0x68]`, so the class's record is
     /// one word per out-pin — its own terminal — for however many the project configures.
     public static let classShapesFromOverrides: [String: ClassShape] = [
-        "TMDigitalInputs": .init(id: 9, roles: [], dynamicOutPins: true),
+        // The capture shows one word, the slot: `09 80 | 1001`.
+        "TMDigitalInputs": .init(id: 9, roles: [.slot]),
         // The display classes are modules in the sheet but not part of the program: `had.pcc` holds a
         // `Segment1` whose module is present, and `had.dmp`'s record walk accounts for the other nine
         // modules and neither of the two displays. Saying so explicitly is what lets a build report tell
@@ -127,21 +154,44 @@ public struct PLCProjectCompiler {
         let wire = ClassShape.Role.wire
         return [
             // PulseGen1: its own Cnt terminal as a wire, then its two declared constants, then the slot.
-            "TMPulseGenerator": .init(id: 16, roles: [wire, .unassigned, .unassigned, .slot]),
-            "TMBoolVar":        .init(id: nil, roles: []),
+            // `[IN1][P0][P1][slot][Out]` — IN0 is a word only when wired (see `records`), and the Out terminal
+            // follows the slot: `10 00 | 0600 0401 C001 C001 | 1007 | 0700` in the capture, `10 80 | 0100 C003
+            // C003 | 1002 | 0000` in `had.dmp`, whose trailing `00 00` is that terminal and not a record.
+            "TMPulseGenerator": .init(id: 16, roles: [.inPinOrValue(1), .paramPinOrValue(0), .paramPinOrValue(1),
+                                                      .slot, .ownTerminal(svorka: 1)]),
+            // A boolean variable writes no record: the two 2-byte records `had.dmp` was read as having are
+            // the PulseGen's Out terminal and a constant.
+            "TMBoolVar":        .init(id: nil, roles: [], contributesRecord: false),
             // Its third input is fed by its own hidden `LastState` out-pin — see `Role.feedback`. With a
             // plain `wire` there, an unconnected pin wrote constant 0 and the record differed from
             // `had.dmp` in exactly that word.
             "TMCounter":        .init(id: 15, roles: [wire, wire, .feedback(svorka: 0), .slot]),
-            "TMDigitalOutputs": .init(id: 10, roles: Array(repeating: wire, count: 8)),
+            // `TMSetPins`: the constructor sets its id to 0x52 (`movl $0x52, 0xa4(%ebx)`, P1.bpl 0x415A47),
+            // and the captured records start `52 04`. The record is `[En][X][P]`: the in-pins in order, then the
+            // parameter. Each is its wire's terminal or, when unwired, its constant. The captured `*kostka`
+            // record is `52 04 | 00 08 | 7F C0 | 03 10` (En from And5, X unwired at 127, P from ISwitch1), and
+            // the `-mod3` save, with ISwitch1 moved to X, is `52 04 | 00 08 | 03 10 | 00 C0`.
+            "TMSetPins":        .init(id: 82, roles: [.inPin(0), .inPinOrConstant(1),
+                                                      .paramPinOrConstant(0), .hidden(0x04)]),
+
+            // Captured in `Serial packet capture/` (2026-10-15). Both instances are 26 bytes, flag `0xA4`:
+            // `*had`  0F A4 | 04 01 | 04 03 | 00 C0 | 00 C0 | 00 C0 | 00 C0 | 08 C0 | 00 C0 | 04 02 | 0A 10 | 04 03 | 04 04
+            // `*kostka` 0F A4 | 00 07 | 08 10 | 00 C0 | 00 C0 | 00 C0 | 00 C0 | 05 C0 | 00 C0 | 00 09 | 08 10 | 00 0A | 00 0B
+            // Inputs Tr, Rst, Pres, EnH, EnL are the five wires (`En` is not in the record); PV is the zero
+            // parameter, Max the project's value (8 or 5), Min the zero parameter. Then the hidden Boolean
+            // that holds the previous Tr (allocated before H and L), the Y word (a slot), H and L.
+            // `St` (1) is not written. The `*kostka` Rst is wired from Y, a word, so it is a slot.
+            "TMAdvCounter":     .init(id: 15, roles: [wire, wire, wire, wire, wire, .zero, .unassigned,
+                                                      .zero, .ownTerminal(svorka: 3), .slot,
+                                                      .ownTerminal(svorka: 1), .ownTerminal(svorka: 2),
+                                                      .hidden(0xA4)]),
+            "TMDigitalOutputs": .init(id: 10, roles: [.digitalOutputs]),
             // Six source wires, then its six **masks** as declared constants, then the slot. The masks
             // were `wire`s here because the dump test fed their values in as wires; a real build has no
             // wire for them at all and takes them from the project's `IN_PIN` values (`1, 2, 4, 8, 16,
             // 32`), which is what `had.dmp` carries as `C001 C002 C004 C008 C010 C020`. A build that
             // treated them as wires wrote `C000` six times.
-            "TMIntSwitch":      .init(id: nil,
-                                      roles: Array(repeating: wire, count: 6)
-                                          + Array(repeating: .unassigned, count: 6) + [.slot]),
+            "TMIntSwitch":      .init(id: 30, roles: [.restOfInPins, .slot], inPinFlagUnit: 0x04),
             // Comparator1: a slot from elsewhere, its constant, two terminals, then its own output.
             // The out-pin writes its *own allocated* terminal. `had.dmp` alone made it look like a fixed
             // pair — `Comparator1` is module 6 and `Or1` module 7 there — but in `kostička` the same
@@ -154,6 +204,10 @@ public struct PLCProjectCompiler {
             "TMComparator":     .init(id: 6, roles: [wire, .unassigned, .ownTerminal(svorka: 0),
                                                      .ownTerminal(svorka: 1), .ownTerminal(svorka: 2)]),
             "TMOr":             .init(id: 20, roles: [wire, wire, .ownTerminal(svorka: 0)]),
+            // `22 C0 | 100E | C00A | 2000 | 100F`: the dividend's wire, the divisor (a constant 10), the Long
+            // quotient (`0x2000 + index`) and the int remainder.
+            "TMDiv":            .init(id: 34, roles: [wire, .inPinOrValue(2), .ownTerminal(svorka: 0),
+                                                      .ownTerminal(svorka: 1)]),
             "TSystemCommand":   .init(id: 81, roles: [.unassigned, .unassigned, .slot]),
             // Two classes compile to nothing at all: two byte-identical exports prove it.
             "TMInt2Bits":       .init(id: nil, roles: [], contributesRecord: false),
@@ -183,18 +237,36 @@ public struct PLCProjectCompiler {
         /// `TMBoolVar`s in `had.pcc` carry `0x00` (`zapnuti`) and `0xC0` (`reset`). The class's shape can
         /// also contribute bits through `.hidden`, and the two are OR-ed.
         public var flag: UInt8
+        /// The module's `THREAD_ID` and sheet (`PAGE`). A sheet whose name starts with `*` is a macro
+        /// sub-sheet, and `macroName` is the `MACRO_NAME` of a module that calls one.
+        public var threadId: Int
+        public var page: String
+        public var macroName: String?
+        /// Every `IN_PIN` and `PARAM_PIN` `VALUE`, in order — the constant an unwired pin carries.
+        public var inValues: [Int]
+        public var paramValues: [Int]
+        /// `PIN_MASK` (`"$0030"`): which of a block's sixteen bit channels have a pin. `8xDI1` with `$0030`
+        /// has `DI4` and `DI5`, and its out-pin `k` is the `k`-th set bit.
+        public var pinMask: Int?
 
         public init(name: String, guid: String, umisteni: UInt8, order: Int,
                     inPinCount: Int, outPinCount: Int, fileIndex: Int = 0,
-                    constants: [Int] = [], flag: UInt8 = 0) {
+                    constants: [Int] = [], flag: UInt8 = 0,
+                    threadId: Int = 1, page: String = "main", macroName: String? = nil,
+                    inValues: [Int] = [], paramValues: [Int] = [], pinMask: Int? = nil) {
+            self.inValues = inValues; self.paramValues = paramValues; self.pinMask = pinMask
             self.name = name; self.guid = guid; self.umisteni = umisteni; self.order = order
             self.inPinCount = inPinCount; self.outPinCount = outPinCount
             self.fileIndex = fileIndex; self.constants = constants; self.flag = flag
+            self.threadId = threadId; self.page = page; self.macroName = macroName
         }
     }
 
     public struct Wire: Equatable, Sendable {
         public var inModule: UInt8, inPin: Int, outModule: UInt8, outPin: Int
+        /// `true` for a `<PARAM_CONNECTIONS>` entry. Its `inPin` is a parameter index, which must not be
+        /// read as an in-pin index.
+        public var isParam: Bool = false
         /// The value this wire contributes to the destination module's record.
         public var value: UInt16 { (UInt16(outModule) << 8) | UInt16(outPin) }
     }
@@ -208,6 +280,69 @@ public struct PLCProjectCompiler {
 
     // MARK: - Parsing
 
+    /// The class GUID of a macro call (`Macro`, 848C8ACE-…), as the project file writes it.
+    static let macroCallGUID = "848C8ACE-58B9-48D8-9CAC-DE5DB5055674"
+
+    /// The modules that go into the program, as Dirigo's `TModuleList.ExpandModules` selects them
+    /// (`docs/spec/execution-model.md` §2.2):
+    ///
+    /// - a top-level module is skipped when its thread is 0 or below, or when its sheet starts with `*`;
+    /// - a macro call on a top-level sheet expands the `*` sheet whose name is its `MACRO_NAME`;
+    /// - a `*` sheet that nothing calls is never expanded, so its modules are left out.
+    ///
+    /// The capture that motivated this (`Serial packet capture/`) shows both cases: a `SystemCmd` moved onto
+    /// `main` with thread 0 and an uncalled `*out` sheet leave the uploaded table byte-identical.
+    public static func programModules(_ modules: [Module]) -> [Module] {
+        let calls = Set(modules.filter { m in
+            normaliseGUID(m.guid) == macroCallGUID && m.threadId > 0 && !m.page.hasPrefix("*")
+        }.compactMap { $0.macroName })
+        return modules.filter { m in
+            if m.page.hasPrefix("*") { return calls.contains(String(m.page.dropFirst())) }
+            return m.threadId > 0
+        }
+    }
+
+    /// The program's modules in the order Dirigo allocates in: `ExpandModules` (`docs/spec/execution-model.md`
+    /// §2.2). Top-level modules by `(ORDER, ID)`, and a macro call's sheet expanded at the call's position.
+    public static func expansionOrder(_ modules: [Module]) -> [Module] {
+        let program = programModules(modules)
+        var out: [Module] = []
+        for m in program.filter({ !$0.page.hasPrefix("*") }).sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
+            out.append(m)
+            if normaliseGUID(m.guid) == macroCallGUID, let name = m.macroName {
+                out += program.filter { $0.page == "*" + name }.sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) })
+            }
+        }
+        return out
+    }
+
+    /// The order the records are written in: expansion order, grouped by thread, a macro's sheet taking the
+    /// thread of its call (the sheet's own modules say 0). The capture has `Not3`, `Not4` (thread 2) first
+    /// and everything else (thread 4) after, though `8xDI1` comes first by `ORDER`.
+    public static func recordOrder(_ modules: [Module]) -> [Module] {
+        let program = programModules(modules)
+        var groups: [Int: [Module]] = [:]
+        for m in program.filter({ !$0.page.hasPrefix("*") })
+                        .sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
+            groups[m.threadId, default: []].append(m)
+            if normaliseGUID(m.guid) == macroCallGUID, let name = m.macroName {
+                for var inner in program.filter({ $0.page == "*" + name })
+                        .sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
+                    inner.threadId = m.threadId
+                    groups[m.threadId, default: []].append(inner)
+                }
+            }
+        }
+        return groups.keys.sorted().flatMap { groups[$0]! }
+    }
+
+    /// Per-class flag bits the capture shows, OR-ed into the record's second byte beside bit `0x80`
+    /// (the module's first in-pin, when it is an unwired non-zero constant).
+    static let classFlagBits: [String: UInt8] = [
+        "TMAnd": 0x44, "TMOr": 0x44, "TMCounter": 0x20, "TMDiv": 0x40,
+        "TSystemCommand": 0x20, "TMDigitalOutputs": 0x18,
+    ]
+
     public static func modules(in xml: String) -> [Module] {
         matches(#"<MODULE\b[^>]*>"#, in: xml).enumerated().compactMap { position, tag in
             guard let guid = attribute("GUID", tag)?.uppercased(),
@@ -219,7 +354,16 @@ public struct PLCProjectCompiler {
                           inPinCount: matches(#"<IN_PIN\b"#, in: body).count,
                           outPinCount: matches(#"<OUT_PIN\b"#, in: body).count,
                           fileIndex: position,
-                          constants: declaredConstants(module: id, body: body, in: xml))
+                          constants: declaredConstants(module: id, body: body, in: xml),
+                          threadId: attribute("THREAD_ID", tag).flatMap(Int.init) ?? 0,
+                          page: attribute("PAGE", tag) ?? "",
+                          macroName: attribute("MACRO_NAME", tag),
+                          inValues: matches(#"<IN_PIN\b[^>]*>"#, in: body).map {
+                              attribute("VALUE", $0).flatMap(Int.init) ?? 0 },
+                          paramValues: matches(#"<PARAM_PIN\b[^>]*>"#, in: body).map {
+                              attribute("VALUE", $0).flatMap(Int.init) ?? 0 },
+                          pinMask: attribute("PIN_MASK", tag).flatMap {
+                              Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) })
         }
         // Execution order, with a documented tie-break: `had.pcc` lists `reset` (ORDER 40, id 4) before
         // `8xDO1` (ORDER 40, id 10), and `had.dmp` has them the other way round. Ordering by `id`
@@ -254,13 +398,56 @@ public struct PLCProjectCompiler {
         return out
     }
 
+    /// Parameter wires are keyed this far past the in-pins.
+    static let paramKeyBase = 1000
+
     public static func wires(in xml: String) -> [Wire] {
-        matches(#"<CONNECTION\b[^>]*>"#, in: xml).compactMap { tag in
-            guard let i = attribute("IN_MODULE_ID", tag).flatMap(UInt8.init),
-                  let ip = attribute("IN_PIN_ID", tag).flatMap(Int.init),
-                  let o = attribute("OUT_MODULE_ID", tag).flatMap(UInt8.init),
-                  let op = attribute("OUT_PIN_ID", tag).flatMap(Int.init) else { return nil }
-            return Wire(inModule: i, inPin: ip, outModule: o, outPin: op)
+        var out: [Wire] = []
+        for (section, isParam) in [("IN_CONNECTIONS", false), ("PARAM_CONNECTIONS", true)] {
+            for body in matches(#"<\#(section)>[\s\S]*?</\#(section)>"#, in: xml) {
+                for tag in matches(#"<CONNECTION\b[^>]*>"#, in: body) {
+                    guard let i = attribute("IN_MODULE_ID", tag).flatMap(UInt8.init),
+                          let ip = attribute("IN_PIN_ID", tag).flatMap(Int.init),
+                          let o = attribute("OUT_MODULE_ID", tag).flatMap(UInt8.init),
+                          let op = attribute("OUT_PIN_ID", tag).flatMap(Int.init) else { continue }
+                    out.append(Wire(inModule: i, inPin: ip, outModule: o, outPin: op, isParam: isParam))
+                }
+            }
+        }
+        return out
+    }
+
+    /// `Macro IO` (`TMacroInterface`): the module a macro sheet reads its arguments from.
+    static let macroInterfaceGUID = "3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC"
+
+    /// Wires that read a macro sheet's `Macro IO` input are redirected to what feeds the call:
+    /// `PulseGen1` inside `*kostka` reads `Inputs2.0`, and `Inputs2.0` is whatever is wired to the call
+    /// module's in-pin 0 on the sheet that calls it. Dirigo expands the sheet in place, so the record
+    /// carries the source's terminal. A source that is itself an interface is followed outwards.
+    public static func resolvingMacroInterfaces(modules: [Module], wires: [Wire]) -> [Wire] {
+        var byID: [UInt8: Module] = [:]
+        for m in modules { byID[m.umisteni] = m }
+        func isInterface(_ m: Module) -> Bool { normaliseGUID(m.guid) == macroInterfaceGUID }
+        func feedingCall(of interface: Module, pin: Int) -> (UInt8, Int)? {
+            guard interface.page.hasPrefix("*") else { return nil }
+            let name = String(interface.page.dropFirst())
+            guard let call = modules.first(where: {
+                normaliseGUID($0.guid) == macroCallGUID && $0.macroName == name && !$0.page.hasPrefix("*")
+            }) else { return nil }
+            guard let w = wires.first(where: { !$0.isParam && $0.inModule == call.umisteni && $0.inPin == pin })
+            else { return nil }
+            return (w.outModule, w.outPin)
+        }
+        return wires.map { w in
+            var out = w
+            var hops = 0
+            while hops < 8, let source = byID[out.outModule], isInterface(source),
+                  let next = feedingCall(of: source, pin: out.outPin) {
+                out.outModule = next.0
+                out.outPin = next.1
+                hops += 1
+            }
+            return out
         }
     }
 
@@ -306,24 +493,56 @@ public struct PLCProjectCompiler {
                          wireValue: (Wire) -> UInt16,
                          allocation: PLCSymbolTable? = nil) throws -> [UInt8] {
         var byInput: [UInt8: [Int: UInt16]] = [:]
-        for w in wires { byInput[w.inModule, default: [:]][w.inPin] = wireValue(w) }
+        for w in wires {
+            // A parameter wire is keyed past the in-pins, so the two never share a slot.
+            byInput[w.inModule, default: [:]][w.isParam ? Self.paramKeyBase + w.inPin : w.inPin] = wireValue(w)
+        }
 
         var out: [UInt8] = []
+        var lastThread: Int?
         for m in modules {
             // Brace-insensitive: the project writes `{ABC}`, the id table stores `ABC`.
             let cls = classForGUID[Self.normaliseGUID(m.guid)] ?? classForGUID[m.guid] ?? "?"
             guard let shape = shapes[cls] else { continue }
             guard shape.contributesRecord else { continue }
+            // A thread's records start on a 64-byte boundary of the record region: the capture has thread 2's
+            // twelve bytes, 52 zeros, then thread 4 at 0x80.
+            if let last = lastThread, last != m.threadId, out.count % 64 != 0 {
+                out.append(contentsOf: [UInt8](repeating: 0, count: 64 - out.count % 64))
+            }
+            lastThread = m.threadId
             // The record's second byte is not a flag of the program's: it is the OR of the hidden
             // in-pins' `pin[0x70]` values (`InPinToStream`, P1.bpl 0x40DE0E), so it comes out of the
             // class's own shape before any word is written.
-            let flag = m.flag | shape.roles.reduce(UInt8(0)) { acc, role in
+            let feeds = byInput[m.umisteni] ?? [:]
+            // Bit 0x80 is the first in-pin's constant when nothing is wired to it; the class adds its own
+            // bits, and a class with an in-pin count in its flag (`TMIntSwitch`) adds those.
+            var flag = m.flag | shape.roles.reduce(UInt8(0)) { acc, role in
                 if case .hidden(let bits) = role { return acc | bits }
                 return acc
             }
+            flag |= Self.classFlagBits[cls] ?? 0
+            if feeds[0] == nil, let first = m.inValues.first, first != 0 { flag |= 0x80 }
+            if shape.inPinFlagUnit != 0, m.inPinCount > 3 {
+                flag |= UInt8(truncatingIfNeeded: Int(shape.inPinFlagUnit) * (m.inPinCount - 3))
+            }
             out.append(shape.id ?? 0)
             out.append(flag)
-            let feeds = byInput[m.umisteni] ?? [:]
+            func put(_ value: UInt16) {
+                out.append(UInt8(truncatingIfNeeded: value))
+                out.append(UInt8(truncatingIfNeeded: value >> 8))
+            }
+            // The first in-pin is a word only when it is wired; unwired it is the flag bit above.
+            let readsInPinZero = shape.roles.contains { role in
+                switch role {
+                case .inPin(0), .inPinOrConstant(0), .inPinOrValue(0): return true
+                default: return false
+                }
+            }
+            if !readsInPinZero, let wired = feeds[0] { put(wired) }
+            func inValue(_ i: Int) -> UInt16 {
+                feeds[i] ?? PLCProgramBuilder.Module.constant(i < m.inValues.count ? m.inValues[i] : 0)
+            }
             var pin = 1
             var next = 0
             /// The next constant the class would place, or constant 0 when the adapter supplied none.
@@ -342,6 +561,25 @@ public struct PLCProjectCompiler {
                 : shape.roles
             for role in roles {
                 if case .hidden = role { continue }   // a hidden pin sets the flag and writes nothing
+                if case .restOfInPins = role {
+                    for i in 1..<max(1, m.inPinCount) { put(inValue(i)) }
+                    continue
+                }
+                if case .digitalOutputs = role {
+                    // 14 positions; the data pins are in-pins 1…d. Pins 1 and 2 go to positions 2 and 3, the
+                    // last three to 11, 12 and 13, and the ones between to 7…10; the rest are constants 0.
+                    var words = [UInt16](repeating: PLCProgramBuilder.Module.constant(0), count: 14)
+                    let d = max(0, m.inPinCount - 1)
+                    var positions: [Int] = []
+                    if d >= 1 { positions.append(2) }
+                    if d >= 2 { positions.append(3) }
+                    let middle = max(0, d - 5)
+                    for k in 0..<min(middle, 4) { positions.append(7 + k) }
+                    for k in 0..<min(3, max(0, d - 2)) { positions.append(11 + k) }
+                    for (i, position) in positions.enumerated() { words[position] = inValue(i + 1) }
+                    for w in words { put(w) }
+                    continue
+                }
                 let value: UInt16
                 switch role {
                 case .slot:
@@ -364,6 +602,19 @@ public struct PLCProjectCompiler {
                     // as `had.pcc`'s do.
                     value = allocation?.addresses[UInt16(m.umisteni) << 8 | UInt16(svorka)]?.word
                         ?? PLCProgramBuilder.Module.terminal(umisteni: m.umisteni, svorka: UInt8(svorka))
+                case .inPin(let index):
+                    value = feeds[index] ?? PLCProgramBuilder.Module.constant(0)
+                case .inPinOrConstant(let index):
+                    value = feeds[index] ?? constant()
+                case .paramPinOrConstant(let index):
+                    value = feeds[Self.paramKeyBase + index] ?? constant()
+                case .inPinOrValue(let index):
+                    value = inValue(index)
+                case .paramPinOrValue(let index):
+                    value = feeds[Self.paramKeyBase + index]
+                        ?? PLCProgramBuilder.Module.constant(index < m.paramValues.count ? m.paramValues[index] : 0)
+                case .restOfInPins, .digitalOutputs:
+                    continue
                 case .wire:
                     // A wire, or — when nothing feeds the pin — the pin's constant, which the encoder
                     // gives as 0 for an unset value. Only `.unassigned` positions consume `constants`,
@@ -371,6 +622,8 @@ public struct PLCProjectCompiler {
                     // sheet leaves open is a pin the class still treats as a wire.
                     value = feeds[pin] ?? PLCProgramBuilder.Module.constant(0)
                     pin += 1
+                case .zero:
+                    value = PLCProgramBuilder.Module.constant(0)
                 case .unassigned:
                     // A class-declared constant pin is not one of the sheet's pins, so it does not
                     // advance the wire index — the same rule `.hidden` follows.
@@ -400,24 +653,11 @@ public struct PLCProjectCompiler {
                   region: records(modules: modules, wires: wires, allocation: allocation))
     }
 
+    /// Header from the template, then the records, the gap, and the trailer from the template. The
+    /// table's length follows the records; nothing is padded to a fixed size.
     private func table(fromTemplate template: PLCProgramTable, modules: [Module], wires: [Wire],
                        region: [UInt8]) throws -> [UInt8] {
-        var copy = template.bytes
-        let capacity = PLCProgramTable.sentinelOffset - PLCProgramTable.bodyOffset
-        guard region.count <= capacity else { throw CompileError.recordsDoNotFit(region.count, capacity) }
-        for i in 0..<capacity {
-            copy[PLCProgramTable.bodyOffset + i] = i < region.count ? region[i] : 0
-        }
-        copy[PLCProgramTable.checksumOffset] = 0
-        copy[PLCProgramTable.checksumOffset + 1] = 0
-        let sum = PLCProgramTable.computeChecksum(copy)
-        copy[PLCProgramTable.checksumOffset] = UInt8(truncatingIfNeeded: sum)
-        copy[PLCProgramTable.checksumOffset + 1] = UInt8(truncatingIfNeeded: sum >> 8)
-        return copy
-    }
-
-    public enum CompileError: Error, Equatable {
-        case recordsDoNotFit(Int, Int)
+        PLCProgramTable.assemble(template: template, records: region)
     }
 
     /// `{ABC}` and `ABC` are the same GUID; the project file and the id table differ in brace style.

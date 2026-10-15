@@ -157,11 +157,17 @@ public struct PLCProgramImage: Equatable, Sendable {
         return header
     }
 
-    /// Wraps a compiled 256-byte program table as the `.pbd` Dirigo's *Program Binary* export writes:
+    /// Wraps a compiled program table as the `.pbd` Dirigo's *Program Binary* export writes:
     /// a header, the table's section, and the trailer — zlib-framed.
+    ///
+    /// The table is variable length. The eight-byte sub-header is the constant `had.pbd` carries, which is
+    /// known only for a 256-byte table; a `.pbd` for another size is written with the same sub-header and
+    /// is not verified against a Dirigo export.
     public static func programBinary(table: [UInt8], projectName: String,
                                      header: [UInt8]? = nil) throws -> [UInt8] {
-        guard table.count == 256 else { throw ParseError.tooShort }
+        guard table.count >= PLCProgramTable.bodyOffset + PLCProgramTable.trailerLength else {
+            throw ParseError.tooShort
+        }
         let head = header ?? defaultHeader(projectName: projectName)
         guard head.count == headerSize else { throw ParseError.tooShort }
         var image = PLCProgramImage(header: head, projectName: projectName, blocks: [

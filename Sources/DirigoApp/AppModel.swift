@@ -181,7 +181,7 @@ public final class AppModel: @unchecked Sendable {
             let uploader = PLCUploader(session: session,
                                        destination: self.plcAddress,
                                        source: self.pcAddress)
-            await MainActor.run { self.uploadStatus = "Writing \(table.realLength) bytes…" }
+            await MainActor.run { self.uploadStatus = "Writing \(table.uploadedBytes.count) bytes…" }
             let frames = try uploader.upload(table: table)
             await MainActor.run {
                 self.uploadStatus = "Uploaded \(frames) frame(s). The PLC is running."

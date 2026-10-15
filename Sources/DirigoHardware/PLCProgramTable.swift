@@ -1,40 +1,46 @@
 import Foundation
 
-/// The 256-byte program table — the 525 section the uploader sends.
+/// The program table — the 525 section the uploader sends.
 ///
-/// Recovered from `TPCCProject.Compile` (the 64-byte definition record), from a controlled export
-/// diff (`had.dmp` vs `had+1block.dmp`, which showed one 16-bit address per pin), and from a captured
-/// upload (`message.txt`, which shows the table's bytes travelling inside the `WriteVariable` matrix
-/// frames for WID 525).
+/// Recovered from `TPCCProject.Compile` (the 64-byte definition record), from controlled export diffs
+/// (`had.dmp` vs `had+1block.dmp`), and from captured uploads (`message.txt`, and
+/// `Serial packet capture/message.txt`, a 640-byte upload of a larger project).
 ///
-/// The layout, as far as it is established:
+/// The table is **variable length**. Its size follows the module records it holds:
 ///
 /// ```
 /// 0x00  header, 64 bytes
 ///         +0x02  version = 1
 ///         +0x04  a project flag
 ///         +0x06, +0x07  two more project flags
-///         +0x1C  checksum (16-bit, little-endian)
-/// 0x40  per-module entries: a small header then one 16-bit address per pin
-/// 0xC4  0xFFFF sentinel
-/// 0xD0  the data length, twice
-/// 0xD4  the profile name, space-padded to 32 bytes
+///         +0x1C  checksum (16-bit, little-endian), CRC-16 — see the extension below
+/// 0x40  per-module records, back to back, as many bytes as the modules need
+/// S     0xFFFF sentinel, where S = 0x40 + records + 0x22   (34 zero bytes sit before it)
+/// S+12  0xD0 0x00 0xD0 0x00 — a constant, not the table length
+/// S+16  the profile name, space-padded to 32 bytes
+/// S+48  12 zero bytes; the table ends at S+60
 /// ```
 ///
-/// **The checksum is not computable here.** `sub_004AFBA4` is called twice — over the 64-byte record,
-/// then over a stream the compiler holds — and no standard CRC-16 over anything present in the exports
-/// reproduces it (see the protocol document; the search covered fourteen variants across seven ranges,
-/// plus the two-stage form). So the field is carried verbatim: parsing and re-emitting a real table is
-/// byte-identical, and generating a *new* one needs that algorithm.
+/// Every trailer field is measured from the sentinel, so the trailer is the same 60 bytes whatever the
+/// size of the records. The upload sends the whole table: the captured 192-byte table of one project,
+/// the 640-byte table of another, and the 256-byte `had.dmp` all follow `length = S + 60`.
 public struct PLCProgramTable: Equatable, Sendable {
-    public static let size = 256
     public static let headerSize = 0x40
     public static let versionOffset = 0x02
     public static let checksumOffset = 0x1C
     public static let bodyOffset = 0x40
-    public static let sentinelOffset = 0xC4
-    public static let lengthOffset = 0xD0
-    public static let profileOffset = 0xD4
+    /// The sentinel sits at the end of the records rounded up to a 0x20 boundary, plus four. The captured
+    /// tables fix it: 482 record bytes → `0x244`, 486 → `0x244` (the `-mod2` save), `had.dmp`'s 98 → `0xC4`,
+    /// and the 192-byte table's `0x84`.
+    public static let sentinelAlignment = 0x20
+    public static let sentinelPad = 4
+    /// The sentinel's offset for a table whose records take `records` bytes.
+    public static func sentinelOffset(records: Int) -> Int {
+        let end = bodyOffset + records
+        return (end + sentinelAlignment - 1) / sentinelAlignment * sentinelAlignment + sentinelPad
+    }
+    /// Bytes from the sentinel to the end of the table.
+    public static let trailerLength = 60
     public static let profileLength = 32
 
     /// The whole table, verbatim. The header and trailer fields below are *views* onto this, so a
@@ -43,13 +49,46 @@ public struct PLCProgramTable: Equatable, Sendable {
     public var bytes: [UInt8]
 
     public enum ParseError: Error, Equatable {
-        case wrongSize(Int)
+        case tooShort(Int)
     }
 
     public init(bytes: [UInt8]) throws {
-        guard bytes.count == Self.size else { throw ParseError.wrongSize(bytes.count) }
+        guard bytes.count >= Self.bodyOffset + Self.trailerLength else {
+            throw ParseError.tooShort(bytes.count)
+        }
         self.bytes = bytes
     }
+
+    /// The length of a table whose records take `records` bytes.
+    public static func length(records: Int) -> Int {
+        sentinelOffset(records: records) + trailerLength
+    }
+
+    /// A table built from `records`: the header and trailer of `template`, the records between them,
+    /// the gap, and the checksum recomputed. Its length follows the records.
+    public static func assemble(template: PLCProgramTable, records: [UInt8]) -> [UInt8] {
+        var out = Array(template.bytes[0..<bodyOffset])
+        out += records
+        out += [UInt8](repeating: 0, count: sentinelOffset(records: records.count) - out.count)
+        out += template.bytes[template.sentinelOffset...]
+        out[checksumOffset] = 0
+        out[checksumOffset + 1] = 0
+        let sum = computeChecksum(out)
+        out[checksumOffset] = UInt8(truncatingIfNeeded: sum)
+        out[checksumOffset + 1] = UInt8(truncatingIfNeeded: sum >> 8)
+        return out
+    }
+
+    // MARK: - Trailer, measured from the sentinel
+
+    /// The `0xFFFF` sentinel that ends the module records.
+    public var sentinelOffset: Int { bytes.count - Self.trailerLength }
+
+    /// The constant `0xD0 0x00 0xD0 0x00` that opens the trailer's name block.
+    public var lengthOffset: Int { sentinelOffset + 12 }
+
+    /// The profile name, space-padded to `profileLength` bytes.
+    public var profileOffset: Int { sentinelOffset + 16 }
 
     // MARK: - The fields that are established
 
@@ -62,34 +101,28 @@ public struct PLCProgramTable: Equatable, Sendable {
         (bytes[0x04], bytes[0x06], bytes[0x07])
     }
 
-    /// The 16-bit checksum at `+0x1C`, carried verbatim.
+    /// The 16-bit checksum at `+0x1C`.
     public var checksum: UInt16 { read16(Self.checksumOffset) }
 
-    /// The `0xFFFF` sentinel that ends the module table (`movw $0xffff, %ax` feeding the record's tail).
-    public var sentinel: UInt16 { read16(Self.sentinelOffset) }
+    /// The `0xFFFF` sentinel word.
+    public var sentinel: UInt16 { read16(sentinelOffset) }
 
-    /// The data length, recorded twice at `0xD0`, which equals `0xD0` in the real table.
-    public var dataLength: (UInt16, UInt16) { (read16(Self.lengthOffset), read16(Self.lengthOffset + 2)) }
+    /// The constant that opens the name block, recorded twice. It is `0xD0` in every table seen, at
+    /// every size, so it is a constant of the format and not the table length.
+    public var nameBlockConstant: (UInt16, UInt16) { (read16(lengthOffset), read16(lengthOffset + 2)) }
 
-    /// The profile name at `0xD4`, space-padded to 32 bytes — `"Sybas Control P3"` in the real table,
-    /// which is the platform the projects select with `PROFILE="Sybas P3"`.
+    /// The profile name, space-padded to 32 bytes — `"Sybas Control P3"` in every table seen, which is
+    /// the platform the projects select with `PROFILE="Sybas P3"`.
     public var profileName: String {
-        let slice = bytes[Self.profileOffset..<(Self.profileOffset + Self.profileLength)]
+        let slice = bytes[profileOffset..<(profileOffset + Self.profileLength)]
         return String(decoding: slice, as: UTF8.self).trimmingCharacters(in: .whitespaces)
     }
 
-    /// The module table's bytes, verbatim, between the header and the sentinel.
-    public var moduleTable: [UInt8] { Array(bytes[Self.bodyOffset..<Self.sentinelOffset]) }
+    /// The module records' bytes, between the header and the sentinel's gap.
+    public var moduleTable: [UInt8] { Array(bytes[Self.bodyOffset..<sentinelOffset]) }
 
-    /// The table's real length: the `0xD0` field records it (`0xD0` = 208 in the real export, which
-    /// is why a 256-byte file is a padded one).
-    public var realLength: Int {
-        let recorded = Int(dataLength.0)
-        return recorded > 0 && recorded <= bytes.count ? recorded : bytes.count
-    }
-
-    /// The table's bytes as they are actually uploaded — `realLength` of them, not the padding.
-    public var uploadedBytes: [UInt8] { Array(bytes.prefix(realLength)) }
+    /// The bytes that are uploaded: the whole table. Every capture sends all of it.
+    public var uploadedBytes: [UInt8] { bytes }
 
     /// The payload `sub_00431F30` builds for one matrix frame.
     ///
@@ -100,9 +133,8 @@ public struct PLCProgramTable: Equatable, Sendable {
     /// ```
     ///
     /// `Col` is the byte offset **divided by** the row stride — `idivl 0x20(%ebp)` at 0x432118, where
-    /// the divisor is `NRows x 2` — so the mapping is linear: with the captured `NRows = 8` a column is
-    /// 16 bytes, and the capture's second frame at `Col = 8` is byte 128. `NCols` is how many columns
-    /// this frame carries.
+    /// the divisor is `NRows x 2` — so the mapping is linear: with `NRows = 8` a column is 16 bytes, and
+    /// `Col = 8` is byte 128. `NCols` is how many columns this frame carries.
     public func matrixWritePayload(byteOffset: Int, columns: UInt16, rows: UInt16 = 8,
                                    data: [UInt8]) -> [UInt8] {
         let stride = Int(rows) * 2
@@ -119,9 +151,9 @@ public struct PLCProgramTable: Equatable, Sendable {
 
     /// The whole table as the sequence of matrix payloads the uploader sends.
     ///
-    /// The grant is split into columns of `rows` 16-bit values, and sent in chunks of `chunkBytes`
-    /// (the uploader clamps `compilation[0x70]` into 64…240, and the captured upload used 128 — eight
-    /// columns — then a 64-byte remainder, exactly as splitting 192 bytes that way gives).
+    /// The table is split into chunks of `chunkBytes`, each of whole columns of `rows` 16-bit values.
+    /// The captures use 128 bytes (eight columns) and send the remainder as its own frame: 640 bytes is
+    /// five frames, 192 is two (128 and 64).
     public func matrixWriteFrames(rows: UInt16 = 8, chunkBytes: Int = 128) -> [[UInt8]] {
         let body = uploadedBytes
         let stride = Int(rows) * 2
@@ -154,11 +186,8 @@ extension PLCProgramTable {
     ///
     /// The inversion is the `notw %ax` at 0x4B0F4B; the seed is `movw $0xFFFF, %ax` at 0x4B0F2C.
     ///
-    /// **How this was found.** Three rounds of testing named CRC-16 variants and the ones'-complement
-    /// sum from the user's files matched nothing. Searching **every** reflected polynomial against two
-    /// real exports, with the field zeroed, produced exactly one candidate — this one — matching both
-    /// files. A single survivor across 65 536 candidates and two independent datasets is as close to
-    /// proof as this exercise gets.
+    /// Checked against three real tables: `had.dmp` (256 bytes), the 192-byte upload in
+    /// `message.txt`, and the 640-byte upload in `Serial packet capture/message.txt`. All three match.
     public static func computeChecksum(_ bytes: [UInt8]) -> UInt16 {
         var crc: UInt16 = 0xFFFF
         for byte in bytes {

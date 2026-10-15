@@ -103,6 +103,6 @@ struct RecordShapeTests {
         let d = [UInt8](try Data(contentsOf: url))
         let total = try Self.records().reduce(0) { $0 + 2 + 2 * $1.roles.count }
         #expect(total == 98, "the records occupy 0x40..0xA2")
-        #expect(Set(d[(0x40 + total)..<PLCProgramTable.sentinelOffset]) == [0])
+        #expect(Set(d[(0x40 + total)..<(d.count - PLCProgramTable.trailerLength)]) == [0])
     }
 }

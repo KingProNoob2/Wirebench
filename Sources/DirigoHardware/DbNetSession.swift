@@ -363,6 +363,24 @@ extension DbNetSession {
                                 id: Self.runStopVariable, value: [0x00, 0x00])
     }
 
+    /// `GetStatus` — the alive check the capture opens with. A short frame with no data: `10 01 1F 49 69 16`.
+    /// The reply is the three-byte ACK, `10 1F 01 00 20 16`.
+    @discardableResult
+    public func getStatusSerial(destination: UInt8 = 1, source: UInt8) throws -> [UInt8] {
+        try performSerial(destination: destination, source: source, function: 0x49, data: [])
+    }
+
+    /// `ReadVariable` on the run/stop register, sent after the stop write. The capture shows
+    /// `4D 01 00 C0 03`, and the reply `08 81 02 00`, whose data is the register's value, 2. What 2 means
+    /// is not established; the uploader sends the read and does not branch on it.
+    @discardableResult
+    public func readRunStopSerial(destination: UInt8 = 1, source: UInt8) throws -> [UInt8] {
+        try performSerial(destination: destination, source: source, function: 0x4D,
+                          data: [0x01, 0x00,
+                                 UInt8(truncatingIfNeeded: Self.runStopVariable),
+                                 UInt8(truncatingIfNeeded: Self.runStopVariable >> 8)])
+    }
+
     /// A table frame: the captured second frame is `Col = 8, NCols = 4, NRows = 8`, byte 128 at a
     /// 16-byte stride.
     @discardableResult

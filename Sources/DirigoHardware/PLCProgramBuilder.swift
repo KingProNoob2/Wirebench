@@ -84,27 +84,16 @@ public struct PLCProgramBuilder: Sendable {
         return out
     }
 
-    /// How many bytes the records occupy. The real tables use 98 (`0x40..0xA2`).
+    /// How many bytes the records occupy. The real tables use 98 (`0x40..0xA2`) for `had.pcc` and 482 for
+    /// the captured 640-byte upload.
     public var recordsLength: Int { modules.reduce(0) { $0 + 2 + 2 * $1.values.count } }
 
-    /// Places the records into a table template, padding to the sentinel and recomputing the checksum.
+    /// Places the records into a table template, sized to the records, and recomputes the checksum.
     ///
     /// The header and trailer come from the template because their fields are project metadata
     /// (version, the three project flags, the profile name) rather than program content. Only the
     /// records and the checksum are the program.
     public func table(fromTemplate template: PLCProgramTable) -> [UInt8] {
-        var out = template.bytes
-        let region = records()
-        let capacity = PLCProgramTable.sentinelOffset - PLCProgramTable.bodyOffset
-        precondition(region.count <= capacity, "records do not fit before the sentinel")
-        for i in 0..<capacity {
-            out[PLCProgramTable.bodyOffset + i] = i < region.count ? region[i] : 0
-        }
-        out[PLCProgramTable.checksumOffset] = 0
-        out[PLCProgramTable.checksumOffset + 1] = 0
-        let sum = PLCProgramTable.computeChecksum(out)
-        out[PLCProgramTable.checksumOffset] = UInt8(truncatingIfNeeded: sum)
-        out[PLCProgramTable.checksumOffset + 1] = UInt8(truncatingIfNeeded: sum >> 8)
-        return out
+        PLCProgramTable.assemble(template: template, records: records())
     }
 }

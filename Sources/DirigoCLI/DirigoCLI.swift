@@ -470,7 +470,7 @@ struct DirigoCLI {
             try build.symbolCSV.write(to: csvURL, atomically: true, encoding: .utf8)
 
             if showModules || !build.report.isComplete {
-                print("\nRecords by module (\(build.records.count) bytes of \(PLCProgramTable.sentinelOffset - PLCProgramTable.bodyOffset) available)")
+                print("\nRecords by module (\(build.records.count) bytes, table \(build.table.count) bytes)")
                 print(String(repeating: "-", count: 72))
                 for record in build.moduleRecords {
                     let cls = record.className ?? "macro"

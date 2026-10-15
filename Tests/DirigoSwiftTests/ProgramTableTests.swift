@@ -31,19 +31,21 @@ struct ProgramTableTests {
         #expect(table.version == 1, "movw $0x1 at 0x4B0A07")
         #expect(table.projectFlags == (7, 1, 1), "the three project bytes from Compile")
         #expect(table.sentinel == 0xFFFF, "the module table's terminator")
-        #expect(table.dataLength == (0xD0, 0xD0), "recorded twice, and equal to its own offset")
+        #expect(table.nameBlockConstant == (0xD0, 0xD0), "recorded twice; a constant of the format, not a length")
         #expect(table.profileName == "Sybas Control P3", "the padded 32-byte profile name")
         // The checksum is carried, not computed. Pinned so a change to the file is noticed.
         #expect(table.checksum == 0xD5E0)
     }
 
-    @Test("The real length is the recorded one, not the file's padding")
-    func realLength() throws {
+    @Test("The upload is the whole table: a 256-byte table ends a trailer after its sentinel")
+    func wholeTable() throws {
         let table = try Self.realTable()
-        // 0xD0 = 208 is recorded twice at 0xD0, so the 256-byte file is padded.
-        #expect(table.realLength == 208)
-        #expect(table.uploadedBytes.count == 208)
-        #expect(table.uploadedBytes == Array(table.bytes.prefix(208)))
+        // The captured uploads send the whole table (192 bytes, and 640 in a newer capture), and the
+        // sentinel sits 60 bytes before the end. An earlier reading took a 208-byte prefix instead; the
+        // captured 192-byte upload refutes it.
+        #expect(table.sentinelOffset == 0xC4)
+        #expect(table.bytes.count == table.sentinelOffset + PLCProgramTable.trailerLength)
+        #expect(table.uploadedBytes == table.bytes)
     }
 
     @Test("A matrix payload matches what the captured upload carried")
@@ -67,21 +69,21 @@ struct ProgramTableTests {
     func framesSplit() throws {
         let table = try Self.realTable()
         let frames = table.matrixWriteFrames(rows: 8, chunkBytes: 128)
-        // 208 bytes: 128 then 80, i.e. 8 columns then 5.
+        // 256 bytes: 128 then 128, i.e. 8 columns then 8.
         #expect(frames.count == 2)
         #expect(frames[0].count == 12 + 128)
-        #expect(frames[1].count == 12 + 80)
-        #expect(Array(frames[1][4..<12]) == [UInt8](arrayLiteral: 0x08, 0x00, 0x00, 0x00, 0x05, 0x00, 0x08, 0x00),
-                "Col 8, Row 0, NCols 5, NRows 8")
+        #expect(frames[1].count == 12 + 128)
+        #expect(Array(frames[1][4..<12]) == [UInt8](arrayLiteral: 0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x08, 0x00),
+                "Col 8, Row 0, NCols 8, NRows 8")
         // Concatenated, the frames' data is the table and nothing else.
         let data = frames.map { Array($0[12...]) }.flatMap { $0 }
         #expect(data == table.uploadedBytes)
     }
 
-    @Test("A table of the wrong size is refused")
-    func wrongSize() {
-        #expect(throws: PLCProgramTable.ParseError.wrongSize(255)) {
-            try PLCProgramTable(bytes: [UInt8](repeating: 0, count: 255))
+    @Test("A table too short to hold a header and trailer is refused")
+    func tooShort() {
+        #expect(throws: PLCProgramTable.ParseError.tooShort(10)) {
+            try PLCProgramTable(bytes: [UInt8](repeating: 0, count: 10))
         }
     }
 
@@ -106,29 +108,32 @@ struct ProgramTableTests {
         let recorder = Recorder()
         let session = DbNetSession(transport: recorder, address: 1)
         let uploader = PLCUploader(session: session, destination: 1, source: 31)
-        uploader.stopWait = 0
-        uploader.startWait = 0
-
         let frames = try uploader.upload(table: table)
         #expect(frames == 2)
 
-        // stop, two matrix frames, start — and each is a serial frame with the recovered layout.
-        try #require(recorder.sent.count == 4)
+        // GetStatus, stop, read back, two matrix frames, start — each a serial frame with the layout the
+        // capture shows.
+        try #require(recorder.sent.count == 6)
         let parsed = try recorder.sent.map { bytes -> DbNetFrame.SerialFrame in
             switch DbNetFrame.parseSerial(bytes) {
             case .success(let f): return f
             case .failure(let why): throw why
             }
         }
-        // The stop write: type, station, 0x45, then 02 00 C0 03 01 00 — 960 = 1.
-        #expect(parsed[0].function == 0x45)
-        #expect(Array(parsed[0].data.prefix(6)) == [UInt8](arrayLiteral: 0x02, 0x00, 0xC0, 0x03, 0x01, 0x00))
-        // The start write: the same, with the value 0.
-        #expect(Array(parsed[3].data.prefix(6)) == [UInt8](arrayLiteral: 0x02, 0x00, 0xC0, 0x03, 0x00, 0x00))
-        // And the middle two carry the table.
-        #expect(parsed[1].destination == 1 && parsed[1].source == 31)
-        #expect(Array(parsed[1].data.prefix(4)) == [UInt8](arrayLiteral: 0x02, 0x20, 0x0D, 0x02),
+        // GetStatus is the short form with no data (10 01 1F 49 69 16 in the capture).
+        #expect(parsed[0].function == 0x49 && parsed[0].data.isEmpty)
+        // The stop write: 02 00 C0 03 01 00 — 960 = 1.
+        #expect(parsed[1].function == 0x45)
+        #expect(Array(parsed[1].data.prefix(6)) == [UInt8](arrayLiteral: 0x02, 0x00, 0xC0, 0x03, 0x01, 0x00))
+        // The read back of the same register: 4D 01 00 C0 03.
+        #expect(parsed[2].function == 0x4D)
+        #expect(Array(parsed[2].data) == [UInt8](arrayLiteral: 0x01, 0x00, 0xC0, 0x03))
+        // The two matrix frames carry the table.
+        #expect(parsed[3].destination == 1 && parsed[3].source == 31)
+        #expect(Array(parsed[3].data.prefix(4)) == [UInt8](arrayLiteral: 0x02, 0x20, 0x0D, 0x02),
                 "the matrix payload names WID 525")
+        // The start write: the same, with the value 0.
+        #expect(Array(parsed[5].data.prefix(6)) == [UInt8](arrayLiteral: 0x02, 0x00, 0xC0, 0x03, 0x00, 0x00))
     }
 
     @Test("The computed checksum matches the real exports")

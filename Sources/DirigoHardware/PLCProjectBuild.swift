@@ -80,17 +80,20 @@ public struct PLCProjectBuild: Equatable, Sendable {
     public static func compile(xml: String, classForGUID: [String: String],
                                template: PLCProgramTable) throws -> PLCProjectBuild {
         let modules = PLCProjectCompiler.modules(in: xml)
-        let wires = PLCProjectCompiler.wires(in: xml)
+        let wires = PLCProjectCompiler.resolvingMacroInterfaces(
+            modules: modules, wires: PLCProjectCompiler.wires(in: xml))
         let normalised = Dictionary(uniqueKeysWithValues: classForGUID.map {
             (PLCProjectCompiler.normaliseGUID($0.key), $0.value)
         })
-        let allocation = PLCSymbolTable(modules: modules, wires: wires,
+        let inProgram = PLCProjectCompiler.programModules(modules)
+        let allocation = PLCSymbolTable(modules: inProgram, wires: wires,
                                         classForGUID: normalised,
                                         shapes: PLCProjectCompiler.classShapes)
         let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
                                           classForGUID: normalised)
-        let records = try compiler.records(modules: modules, wires: wires, allocation: allocation)
-        let table = try compiler.table(fromTemplate: template, modules: modules, wires: wires,
+        let ordered = PLCProjectCompiler.recordOrder(modules)
+        let records = try compiler.records(modules: ordered, wires: wires, allocation: allocation)
+        let table = try compiler.table(fromTemplate: template, modules: ordered, wires: wires,
                                        allocation: allocation)
 
         var compiled = 0, displays = 0
@@ -140,25 +143,37 @@ public struct PLCProjectBuild: Equatable, Sendable {
 public extension PLCProgramTable {
     /// The table a build starts from when no `.pbd` was imported.
     ///
-    /// Only the two fields that are established are filled: the version, which is `1` in every real table
-    /// (`movw $0x1`, 0x4B0A07), and the real length at `0xD0`, which equals `0xD0` itself. Everything else
-    /// is left zero rather than guessed — a header that matters should come from a program binary Dirigo
-    /// wrote, which carries the profile name and the project flags too.
+    /// Only the established fields are filled: the version (`1` in every real table, `movw $0x1`,
+    /// 0x4B0A07), the trailer's constant and its profile name, and the rest is left zero. The trailer
+    /// is what the captures show for `Sybas Control P3`, at the sentinel of a 256-byte table. Its records
+    /// are replaced by the build, so only its trailer is used. A header that matters should come from a
+    /// program binary Dirigo wrote, which carries the project flags too.
     static func buildTemplate() -> PLCProgramTable? {
-        var bytes = [UInt8](repeating: 0, count: PLCProgramTable.size)
+        let size = 256
+        var bytes = [UInt8](repeating: 0, count: size)
         bytes[PLCProgramTable.versionOffset] = 1
-        let length = UInt16(PLCProgramTable.lengthOffset)
-        for i in 0..<2 {
-            bytes[PLCProgramTable.lengthOffset + i] = UInt8(truncatingIfNeeded: length >> (8 * i))
-            bytes[PLCProgramTable.lengthOffset + 2 + i] = UInt8(truncatingIfNeeded: length >> (8 * i))
+        // `07 00 01 01` at 0x04 and `04` at 0x22 are the same in all four tables seen (640, 640, 256, 192 bytes).
+        // 0x10, 0x1A and 0x26 differ per project and are not yet derived; the table's checksum covers them.
+        bytes[0x04] = 7; bytes[0x06] = 1; bytes[0x07] = 1; bytes[0x22] = 4
+        let sentinel = size - PLCProgramTable.trailerLength
+        bytes[sentinel] = 0xFF
+        bytes[sentinel + 1] = 0xFF
+        bytes[sentinel + 11] = 0x01
+        for (i, byte) in [UInt8(0xD0), 0x00, 0xD0, 0x00].enumerated() {
+            bytes[sentinel + 12 + i] = byte
+        }
+        let name = Array("Sybas Control P3".utf8)
+        for i in 0..<PLCProgramTable.profileLength {
+            bytes[sentinel + 16 + i] = i < name.count ? name[i] : 0x20
         }
         return try? PLCProgramTable(bytes: bytes)
     }
 
-    /// The table inside a program binary, if the file has one.
+    /// The table inside a program binary, if the file has one. The table is the section's payload after
+    /// its eight-byte sub-header, and it runs to the end of the payload.
     static func from(image: PLCProgramImage) -> PLCProgramTable? {
         guard let section = image.blocks.first(where: { $0.id == PLCProgramImage.programTableSection }),
-              section.payload.count >= 8 + PLCProgramTable.size else { return nil }
-        return try? PLCProgramTable(bytes: Array(section.payload[8..<(8 + PLCProgramTable.size)]))
+              section.payload.count > 8 else { return nil }
+        return try? PLCProgramTable(bytes: Array(section.payload[8...]))
     }
 }

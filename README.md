@@ -16,11 +16,11 @@ Czech manuals. The reverse-engineering record lives in [`../docs/`](../docs/PROJ
 | `.pcc` project loading | Complete. Reads every element and attribute of a real project |
 | `.pcc` project saving | **Byte-for-byte lossless** for current-format projects, verified against Dirigo's own output |
 | Block-type dispatch | Driven by the 144-entry registry recovered from `P1.idp` |
-| Block library | 77 block classes; 26 match the documentation fully, 53 partially |
+| Block library | 147 catalogued types: 144 resolve to a block class, of which 9 are shape-only stand-ins with no behaviour. `Switch8` does not resolve |
 | Simulation | Deterministic, topological by `ORDER`; optional hardware-profile thread scheduling |
 | Hardware profiles | `Profiles.ini` fully parsed: 22 profiles, thread tables, memory models, 41 `SystemCmd` definitions |
 | Serial/hardware I/O | Duino-E subset only (`0x300`–`0x303`) |
-| Conditional execution | **Not implemented** — `If`/`Else`/`EndIf`/`Switch`/`Case`/`Default`/`EndSwitch` are value blocks, not execution gates |
+| Conditional execution | Implemented per block: `If`/`Else`/`EndIf`/`Switch`/`Case`/`Default`/`EndSwitch` gate the blocks they enclose. No range skipping; `Results` encoding is unattested in any sample project |
 
 Known gaps, unsupported blocks and per-module differences are catalogued in
 [`../docs/module-coverage.md`](../docs/module-coverage.md).
@@ -82,7 +82,7 @@ The `Xcode project membership` test suite fails if the two ever drift apart.
 `./bundle-app.sh` runs `xcodegen generate` and an `xcodebuild` release build, then copies the
 resulting `Dirigo.app` next to the package and to the workspace root.
 
-44 tests across 7 suites, all passing.
+367 tests across 94 suites, all passing, with 4 known issues. Measured 2026-10-15.
 
 ---
 
@@ -255,12 +255,15 @@ along with the modules.
 #### How `PAGESIZE` is decoded
 
 `PAGESIZE` is a single integer — `60` in every project here — which is only possible because all
-five sizes share the ISO aspect ratio, so the number encodes the width. It is the width in **5 mm
-units**, rounded up: A4 = 42, A4 Extra = 47, **A3 = ceil(297/5) = 60**, A3 Extra = 65, A2 = 84 —
-five values with no gaps or collisions, which is what makes this more than a guess. A canvas unit
-is 0.2 mm (5 units/mm), pinned by the projects themselves: A3 is 297 mm wide, and the widest module
-in `rulkoshaddirigo.pcc` sits at x=1120 with a 124-unit card, so the scale cannot be coarser than
-about 4.9 units/mm without pushing real Dirigo content off its own page.
+five sizes share the ISO aspect ratio, so the number encodes the width. It is the width in
+**5 mm units**, rounded up: A4 = 42, A4 Extra = 47, **A3 = ceil(297/5) = 60**, A3 Extra = 65, A2 = 84.
+That reading of the unit is the Dirigo file format's, and it is what the stored value means.
+
+The canvas scale is a separate question. `PaperSize.unitsPerMillimetre` is **7.0** canvas units per
+millimetre. An earlier value of 5.0 made the A3 sheet 1485 units wide, narrower than real content (the
+widest module in `AHOJ - JEDNOSEGMENT.pcc` sits at x=1692), so export rescaled 18 of 24 projects on disk.
+7.0 is the smallest whole-unit multiple of 297 mm that clears the content, and no project on disk is
+scaled by export at this value.
 
 The value is never written by this editor — it is preserved verbatim on save, and the export pins it
 to `60`. A wrong reading here would therefore be cosmetic only.
@@ -314,10 +317,10 @@ Fourteen blocks were fixed and two guards added:
 `dirigo-cli audit-blocks` reproduces the mechanical half at any time: it instantiates every type in
 the catalog, steps it, and reports placeholders, pin-count mismatches and non-finite outputs.
 
-Still open, in priority order: **conditional execution is not implemented at all** (the engine runs
-every node unconditionally, so both branches of an `If`/`Else` always execute), several blocks read
-documented *parameters* out of input pins, and the Long and float families plus most Communication
-blocks are placeholders. See §6 of the audit.
+Still open, as of 2026-10-15: the nine shape-only blocks are inert; `LLimiter`, `LComparator`, `LDemux`
+and `LongVar` reuse 32-bit Int implementations; `PulseGen` clears its outputs on `En = 0`, where the
+library's convention is to hold; and `Switch8` is unresolved. `dirigo-cli audit-blocks` reports the
+mechanical part of this. The fuller list is in §6 of the audit.
 
 ### Canvas performance
 
