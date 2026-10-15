@@ -143,11 +143,9 @@ struct PaperSizeTests {
     /// Every `.pcc` on this machine, so a sheet that is too small cannot hide behind the two files an
     /// earlier version of this test happened to name.
     static func allProjects() -> [URL] {
-        let dirs = ["/Users/erik/Nextcloud/School/Informační a Řídící Systémy/Dirigo",
-                    workspace.path]
+        // `TestCorpus` already ends with the workspace, so no duplicate entry.
         var files: [URL] = []
-        for d in dirs {
-            let u = URL(fileURLWithPath: d)
+        for u in TestCorpus.directories {
             if let list = try? FileManager.default.contentsOfDirectory(at: u,
                                                                       includingPropertiesForKeys: nil) {
                 files += list.filter { $0.pathExtension.lowercased() == "pcc" }

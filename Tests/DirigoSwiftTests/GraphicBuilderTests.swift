@@ -8,8 +8,8 @@ import DirigoCore
 @Suite("Graphic objects")
 struct GraphicBuilderTests {
 
-    private static let autoplexer = URL(fileURLWithPath:
-        "/Users/erik/Nextcloud/School/Informační a Řídící Systémy/Dirigo/autoplexer.pcc")
+    private static let autoplexer = TestCorpus.project(named: "autoplexer.pcc")
+            ?? TestCorpus.directories[0].appendingPathComponent("autoplexer.pcc")
 
     /// Collapses whitespace so markup can be compared regardless of indentation.
     private func normalized(_ text: String) -> String {

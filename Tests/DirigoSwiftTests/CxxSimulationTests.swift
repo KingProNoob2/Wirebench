@@ -333,8 +333,7 @@ struct CxxSimulationTests {
     /// the wires it carries, which would make the ported blocks look wrong for the wrong reason.
     @Test("Both engines agree on a whole real project, pin for pin")
     func corpusProjectAgrees() throws {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         var compared: [String] = []
         var skipped: [String] = []
 
@@ -518,8 +517,7 @@ struct CxxSimulationTests {
 
     @Test("How much of a real project the core simulates")
     func corpusCoverage() throws {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         var report: [String] = []
         for name in ["had.pcc", "kostička.pcc", "ehhhhhh zelznice.pcc"] {
             let url = school.appendingPathComponent(name)

@@ -427,8 +427,7 @@ struct RecordReproductionTests {
             #expect(parsed[name] == [], "\(name) should declare no constant: \(parsed[name] ?? [])")
         }
         // `ISwitch1`'s masks are the six non-zero unconnected values past its first pin.
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         if let had = try? String(contentsOf: school.appendingPathComponent("had.pcc"), encoding: .utf8) {
             let mods = Dictionary(uniqueKeysWithValues: PLCProjectCompiler.modules(in: had).map { ($0.name, $0.constants) })
             #expect(mods["ISwitch1"] == [1, 2, 4, 8, 16, 32])
@@ -595,8 +594,7 @@ struct SymbolTableWriterTests {
     static func realFiles() -> [URL] {
         var out: [URL] = []
         let here = root
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         for dir in [here, school] {
             if let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
                 for n in names.sorted() where n.lowercased().hasSuffix(".csv") {
@@ -712,8 +710,7 @@ struct SymbolTableGenerationTests {
     }
 
     private func compareBytes(pcc pccName: String, csv csvName: String) throws {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         let pccURL = FileManager.default.fileExists(atPath: Self.url(pccName).path)
             ? Self.url(pccName) : school.appendingPathComponent(pccName)
         let csvURL = FileManager.default.fileExists(atPath: Self.url(csvName).path)
@@ -739,8 +736,7 @@ struct SymbolTableGenerationTests {
     }
 
     private func compare(pcc pccName: String, csv csvName: String) throws {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         let pccURL = FileManager.default.fileExists(atPath: Self.url(pccName).path)
             ? Self.url(pccName) : school.appendingPathComponent(pccName)
         let csvURL = FileManager.default.fileExists(atPath: Self.url(csvName).path)
@@ -802,8 +798,7 @@ struct ClassTableCoverageTests {
     }
 
     static func projects() -> [(pcc: URL, csv: URL)] {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         var out: [(URL, URL)] = []
         for dir in [root, school] {
             for pcc in (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.sorted() ?? []
@@ -879,8 +874,7 @@ struct ClassTableCoverageTests {
         // type is one GUID carrying many module names across the corpus. A GUID that carried a single
         // name would be an unnamed *class*, and this test would say so.
         let classes2 = SymbolTableGenerationTests.allClasses()
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         for dir in [Self.root, school] {
             for file in (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.sorted() ?? []
             where file.lowercased().hasSuffix(".pcc") {
@@ -1096,8 +1090,7 @@ struct ClassShapesFromP1Tests {
 @Suite("had.pcc against had.dmp")
 struct HadProjectAgainstDumpTests {
     static var projects: URL {
-        URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        TestCorpus.directories[0]
     }
     static var root: URL {
         URL(fileURLWithPath: #filePath)
@@ -1163,8 +1156,7 @@ struct RecordAddressConsistencyTests {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
     static var school: URL {
-        URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        TestCorpus.directories[0]
     }
 
     @Test("had and kostička: every record word resolves against the generated table")
@@ -1249,8 +1241,7 @@ struct OverrideShapeTests {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
     static var school: URL {
-        URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        TestCorpus.directories[0]
     }
 
     @Test("8xDI1 writes one word per out-pin, each its own terminal")
@@ -1342,8 +1333,7 @@ struct DynamicShapeTests {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
     static var school: URL {
-        URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        TestCorpus.directories[0]
     }
 
     @Test("Digital outputs: one word per configured channel", arguments: ["had.pcc", "kostička.pcc"])
@@ -1392,8 +1382,7 @@ struct CorpusCoverageTests {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
     static var school: URL {
-        URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        TestCorpus.directories[0]
     }
 
     /// The literal claim: of the classes `docs/block-ids.json` names, every one is shaped *except* the

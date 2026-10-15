@@ -141,8 +141,7 @@ struct PinEditTests {
 
     @Test("On the C++ core, a hand edit takes effect without waiting for a tick")
     func editReachesTheCore() throws {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         let url = school.appendingPathComponent("had.pcc")
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
@@ -162,8 +161,7 @@ struct PinEditTests {
 
     @Test("A wire still wins over a value typed into a wired pin")
     func wireBeatsHandEdit() throws {
-        let school = URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        let school = TestCorpus.directories[0]
         let url = school.appendingPathComponent("had.pcc")
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 

@@ -409,6 +409,13 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
+    /// Re-reads the serial adapters attached to this machine.
+    ///
+    /// **This was dead code.** It was defined and never called from anywhere, so `availablePorts` stayed
+    /// empty for the life of the process and the Hardware Link section always said "No serial ports
+    /// found." — the list is only ever populated here. `MainView.hardwareSection` now calls it on
+    /// appear; it is idempotent, and it only picks a default when nothing is selected, so a port loaded
+    /// from a project is never overwritten.
     public func refreshPorts() {
         availablePorts = SerialPort.availablePorts()
         if let first = availablePorts.first, selectedPortPath.isEmpty {

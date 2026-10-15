@@ -23,8 +23,7 @@ struct PinLabelTests {
     }
 
     static var school: URL {
-        URL(fileURLWithPath: "/Users/erik/Nextcloud/School")
-            .appendingPathComponent("Informační a Řídící Systémy").appendingPathComponent("Dirigo")
+        TestCorpus.directories[0]
     }
 
     static var projects: [URL] {

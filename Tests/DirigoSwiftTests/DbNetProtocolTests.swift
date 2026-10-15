@@ -20,7 +20,7 @@ struct DbNetProtocolTests {
         // The workspace's own projects, then the user's Dirigo folder when it is there.
         let here = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        for dir in [here, URL(fileURLWithPath: "/Users/erik/Nextcloud/School/Informační a Řídící Systémy/Dirigo")] {
+        for dir in [here] + TestCorpus.directories {
             let contents = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
             files.append(contentsOf: contents.filter { $0.pathExtension.lowercased() == "pcc" })
         }

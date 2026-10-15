@@ -11,9 +11,33 @@ public final class SerialPort: @unchecked Sendable {
     public static func availablePorts() -> [PortInfo] {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: "/dev") else { return [] }
-        return items
-            .filter { $0.hasPrefix("cu.usb") || $0.hasPrefix("cu.SLAB") || $0.hasPrefix("cu.wch") }
+        return serialDeviceNames(in: items)
+            .sorted()
             .map { PortInfo(path: "/dev/\($0)", name: $0) }
+    }
+
+    /// Which of the names in `/dev` are serial adapters, in the order given.
+    ///
+    /// Takes the directory listing rather than reading `/dev` itself so the rule can be tested against
+    /// a fixed list — the one thing a test cannot do is plug in a USB adapter.
+    ///
+    /// **Every** `cu.*` device is a candidate rather than a hand-written prefix list. The list this
+    /// replaces recognised only `cu.usb*`, `cu.SLAB*` and `cu.wch*`, which misses most adapters in
+    /// practice: an FTDI is `cu.usbserial-*`, a CH340 is `cu.wchusbserial*`, a CDC board is
+    /// `cu.usbmodem*`, and a Prolific is `cu.PL2303*`. (`cu.wch*` did not even match
+    /// `cu.wchusbserial*`; it happened to be saved by the `cu.usb*` arm.) A user's own adapter was
+    /// `cu.usbserial-110`, which the list *would* have matched — the picker was empty because nothing
+    /// ever called `refreshPorts`, and both defects are fixed here.
+    public static func serialDeviceNames(in deviceNames: [String]) -> [String] {
+        deviceNames.filter { name in
+            // `cu.` itself, and `cu.` with an empty suffix, are not devices — a bare prefix would
+            // otherwise be offered as a port with no name. (`DevicesTests` caught exactly that.)
+            guard name.hasPrefix("cu."), name.count > 3 else { return false }
+            // macOS ships three `cu.` pseudo-ports that are not adapters. Offering them would let a
+            // user "connect" to something that cannot carry D3Net traffic.
+            let builtIn = ["cu.Bluetooth-Incoming-Port", "cu.debug-console", "cu.SerialPort"]
+            return !builtIn.contains(name)
+        }
     }
 
     private var fileDescriptor: Int32 = -1

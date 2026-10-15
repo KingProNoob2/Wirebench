@@ -342,21 +342,33 @@ public struct MainView: View {
                 }
             }
 
-            // An empty picker is a dead control; say what is wrong instead.
-            if model.availablePorts.isEmpty {
-                Text("No serial ports found.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Picker("Serial Port", selection: $model.selectedPortPath) {
-                    ForEach(model.availablePorts) { port in
-                        Text(port.name).tag(port.path)
+            // An empty picker is a dead control; say what is wrong instead — and offer a rescan, so
+            // plugging an adapter in after launch does not need the sidebar to be toggled to be seen.
+            HStack(spacing: 6) {
+                if model.availablePorts.isEmpty {
+                    Text("No serial ports found.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Picker("Serial Port", selection: $model.selectedPortPath) {
+                        ForEach(model.availablePorts) { port in
+                            Text(port.name).tag(port.path)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
+                Spacer(minLength: 2)
+                Button {
+                    model.refreshPorts()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
                 .controlSize(.small)
+                .help("Rescan for serial adapters")
             }
 
             // A standard macOS push button — no bolt glyph, no custom glass style. A ternary cannot
@@ -401,6 +413,11 @@ public struct MainView: View {
             }
         }
         .padding(.vertical, 6)
+        // The list has to be refreshed or it is empty forever: `refreshPorts` is the only thing that
+        // populates `availablePorts`, and nothing called it — so the Hardware Link section always read
+        // "No serial ports found." Re-reading on appear also picks up an adapter plugged in after
+        // launch, since the sidebar is rebuilt when it is shown again.
+        .onAppear { model.refreshPorts() }
     }
 
     @ToolbarContentBuilder
