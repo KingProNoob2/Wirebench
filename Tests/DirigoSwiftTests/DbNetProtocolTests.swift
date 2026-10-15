@@ -759,8 +759,8 @@ struct IgnoredEditsTests {
 ///
 /// All four saves of `rulkoshaddirigo` (the original, `-mod`, `-mod2` with an AdvCounter in `*kostka`, and
 /// `-mod3` with the ISwitch moved onto the Set block's X pin) must come out with the same record region,
-/// sentinel and table length as the capture. The header's per-project fields (0x10, 0x1A, 0x26) are not
-/// derived yet and are the only bytes allowed to differ.
+/// sentinel and table length as the capture, and the header words that follow from the layout (the end of the
+/// records, the table length and the thread table) are derived the way `TPCCProject.Compile` does.
 @Suite("Serial capture: the compiled table")
 struct CompiledTableCaptureTests {
     /// The table a log carries, rebuilt from its matrix writes.
@@ -807,13 +807,9 @@ struct CompiledTableCaptureTests {
                                                 template: template)
         let real = try Self.capturedTable(log)
         #expect(build.table.count == real.count)
-        let regionEnd = real.count - PLCProgramTable.trailerLength
-        #expect(Array(build.table[PLCProgramTable.bodyOffset..<regionEnd])
-                == Array(real[PLCProgramTable.bodyOffset..<regionEnd]),
-                "the records and the zeros before the sentinel")
-        #expect(Array(build.table[0x40...]) == Array(real[0x40...]), "records, sentinel and trailer")
-        // The header: only the project-specific words, and the checksum that covers them, may differ.
-        let differing = (0..<0x40).filter { build.table[$0] != real[$0] }
-        #expect(Set(differing).isSubset(of: [0x10, 0x1A, 0x1C, 0x1D, 0x26]), "header bytes: \(differing)")
+        // The whole table: header words (layout-derived and the project flags), records, sentinel, trailer.
+        let differing = (0..<real.count).filter { build.table[$0] != real[$0] }
+        #expect(differing.isEmpty, "differing bytes: \(differing.prefix(16).map { String($0, radix: 16) })")
+        #expect(build.table == real)
     }
 }

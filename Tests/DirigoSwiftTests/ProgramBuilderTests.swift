@@ -78,10 +78,16 @@ struct ProgramBuilderTests {
 
         // Sized to its own records, with the same header and trailer as the template.
         #expect(rebuilt.count == PLCProgramTable.length(records: PLCProgramBuilder(modules: Self.headModules).recordsLength))
-        // The header is the template's, except for the checksum, which is recomputed for the new program.
-        #expect(Array(rebuilt[0..<PLCProgramTable.checksumOffset]) == Array(real[0..<PLCProgramTable.checksumOffset]))
-        #expect(Array(rebuilt[(PLCProgramTable.checksumOffset + 2)..<0x40])
-                == Array(real[(PLCProgramTable.checksumOffset + 2)..<0x40]))
+        // The header is the template's, except for the checksum, which is recomputed for the new program, and
+        // the two words that follow from the layout — the end of the records at +0x10 and the table length at
+        // +0x1A — which are derived from the new program's size.
+        let derived: Set<Int> = [0x10, 0x11, 0x1A, 0x1B, PLCProgramTable.checksumOffset,
+                                 PLCProgramTable.checksumOffset + 1]
+        let changed = (0..<0x40).filter { rebuilt[$0] != real[$0] }
+        #expect(Set(changed).isSubset(of: derived), "header bytes changed: \(changed)")
+        let table = try PLCProgramTable(bytes: rebuilt)
+        #expect(Int(rebuilt[0x10]) | Int(rebuilt[0x11]) << 8 == (table.sentinelOffset - 4) / 16)
+        #expect(Int(rebuilt[0x1A]) | Int(rebuilt[0x1B]) << 8 == rebuilt.count / 64)
         #expect(Array(rebuilt.suffix(PLCProgramTable.trailerLength)) == Array(real.suffix(PLCProgramTable.trailerLength)))
         // And the checksum it wrote is the one its own bytes produce.
         let rebuiltTable = try PLCProgramTable(bytes: rebuilt)

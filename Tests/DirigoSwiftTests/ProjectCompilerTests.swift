@@ -403,9 +403,11 @@ struct RecordReproductionTests {
     ]) -> [PLCProjectCompiler.Module] {
         var out: [PLCProjectCompiler.Module] = real.map { name, guid, umisteni, _, _, flag in
             let p = pins[name]
+            // `8xDO1` is `PIN_COUNT="14" HIDDEN_PIN_MASK="$0773"` in `had+1block.pcc`.
             return .init(name: name, guid: "{\(guid)}", umisteni: umisteni, order: 0,
                          inPinCount: p?.inCount ?? 0, outPinCount: 0, constants: declared[name] ?? [],
-                         flag: flag, inValues: p?.inValues ?? [], paramValues: p?.params ?? [])
+                         flag: flag, threadId: 2, inValues: p?.inValues ?? [], paramValues: p?.params ?? [],
+                         pinCount: name == "8xDO1" ? 14 : nil, hiddenPinMask: name == "8xDO1" ? 0x773 : nil)
         }
         // The two boolean variables write no record, but they hold bits 1 and 3 of the allocation.
         for (name, id) in [("zapnuti", UInt8(2)), ("reset", UInt8(4))] {
@@ -1343,6 +1345,36 @@ struct DynamicShapeTests {
     }
     static var school: URL {
         TestCorpus.directories[0]
+    }
+
+    @Test("Digital outputs follow PIN_COUNT and HIDDEN_PIN_MASK: hidden channels are constant 0")
+    func digitalOutputChannels() throws {
+        let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
+                                          classForGUID: SymbolTableGenerationTests.allClasses())
+        func words(count: Int, mask: Int, inPins: Int, wires: [PLCProjectCompiler.Wire] = []) throws -> [UInt16] {
+            let m = PLCProjectCompiler.Module(
+                name: "8xDO1", guid: "{0F50AC33-F61E-4009-9C60-FDE664DA0ABC}", umisteni: 6, order: 0,
+                inPinCount: inPins, outPinCount: 0, threadId: 2,
+                inValues: [Int](repeating: 0, count: inPins), pinCount: count, hiddenPinMask: mask)
+            let bytes = try compiler.records(modules: [m], wires: wires, slots: [:])
+            return stride(from: 2, to: bytes.count, by: 2).map { UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8 }
+        }
+        // `LEDky.pcc`: PIN_COUNT 8, HIDDEN_PIN_MASK $008F → channels 4, 5, 6 visible, so in-pins 1…3.
+        let led = try words(count: 8, mask: 0x8F, inPins: 4, wires: [
+            .init(inModule: 6, inPin: 1, outModule: 3, outPin: 1),   // channel 4 ← terminal 0x0301
+            .init(inModule: 6, inPin: 3, outModule: 9, outPin: 2),   // channel 6 ← terminal 0x0902
+        ])
+        #expect(led.count == 8)
+        #expect(led == [0xC000, 0xC000, 0xC000, 0xC000, 0x0301, 0xC000, 0x0902, 0xC000])
+        // `ehhhhhh zelznice.pcc`: PIN_COUNT 13, mask $0F7B → channels 2, 7, 12 visible.
+        let zel = try words(count: 13, mask: 0x0F7B, inPins: 4, wires: [
+            .init(inModule: 6, inPin: 2, outModule: 4, outPin: 0),   // channel 7 ← 0x0400
+        ])
+        #expect(zel.count == 13)
+        #expect(zel[7] == 0x0400)
+        #expect(zel.enumerated().filter { $0.offset != 7 }.allSatisfy { $0.element == 0xC000 })
+        // No mask: every channel is visible and takes the next in-pin.
+        #expect(try words(count: 14, mask: 0, inPins: 15).count == 14)
     }
 
     @Test("Digital outputs: one word per configured channel", arguments: ["had.pcc", "kostička.pcc"])

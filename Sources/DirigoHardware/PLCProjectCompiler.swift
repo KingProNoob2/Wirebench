@@ -81,9 +81,9 @@ public struct PLCProjectCompiler {
             /// Every in-pin after the first, one word each: its wire, or `0xC000 | VALUE`. The class's pin
             /// count is the sheet's (`TMIntSwitch` has 4, 8, 11 or 12 in the capture).
             case restOfInPins
-            /// `TMDigitalOutputs`' fourteen channel words. The in-pins after the first fill positions
-            /// 2, 3 | 7…10 | 11, 12, 13 of fourteen — the first two and the last three pins, and the ones
-            /// between in the middle block — and every other position is `0xC000`.
+            /// `TMDigitalOutputs`' channel words: one per registered channel (`PIN_COUNT`, default the sheet's
+            /// pins), in channel order. A channel in `HIDDEN_PIN_MASK` is not on the sheet and writes
+            /// `0xC000`; the others take the sheet's in-pins 1, 2, … in order, each its wire or `0xC000 | VALUE`.
             case digitalOutputs
         }
         /// The record's first byte.
@@ -248,6 +248,10 @@ public struct PLCProjectCompiler {
         /// `PIN_MASK` (`"$0030"`): which of a block's sixteen bit channels have a pin. `8xDI1` with `$0030`
         /// has `DI4` and `DI5`, and its out-pin `k` is the `k`-th set bit.
         public var pinMask: Int?
+        /// `PIN_COUNT` and `HIDDEN_PIN_MASK` of a digital-output block: how many channels it registers and
+        /// which of them the sheet does not show.
+        public var pinCount: Int?
+        public var hiddenPinMask: Int?
         /// A macro call's out-pins, as the file names them (`PIN_NAME`, `TYPE`: 1 is Boolean). Empty for
         /// an ordinary block, whose out-pins come from its class.
         public var outPins: [OutPin]
@@ -262,7 +266,9 @@ public struct PLCProjectCompiler {
                     inPinCount: Int, outPinCount: Int, fileIndex: Int = 0,
                     constants: [Int] = [], flag: UInt8 = 0,
                     threadId: Int = 1, page: String = "main", macroName: String? = nil,
-                    inValues: [Int] = [], paramValues: [Int] = [], pinMask: Int? = nil, outPins: [OutPin] = []) {
+                    inValues: [Int] = [], paramValues: [Int] = [], pinMask: Int? = nil, outPins: [OutPin] = [],
+                    pinCount: Int? = nil, hiddenPinMask: Int? = nil) {
+            self.pinCount = pinCount; self.hiddenPinMask = hiddenPinMask
             self.inValues = inValues; self.paramValues = paramValues; self.pinMask = pinMask
             self.outPins = outPins
             self.name = name; self.guid = guid; self.umisteni = umisteni; self.order = order
@@ -376,7 +382,10 @@ public struct PLCProjectCompiler {
                               Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) },
                           outPins: matches(#"<OUT_PIN\b[^>]*>"#, in: body).map {
                               Module.OutPin(name: attribute("PIN_NAME", $0),
-                                            type: attribute("TYPE", $0).flatMap(Int.init)) })
+                                            type: attribute("TYPE", $0).flatMap(Int.init)) },
+                          pinCount: attribute("PIN_COUNT", tag).flatMap(Int.init),
+                          hiddenPinMask: attribute("HIDDEN_PIN_MASK", tag).flatMap {
+                              Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) })
         }
         // Execution order, with a documented tie-break: `had.pcc` lists `reset` (ORDER 40, id 4) before
         // `8xDO1` (ORDER 40, id 10), and `had.dmp` has them the other way round. Ordering by `id`
@@ -505,6 +514,16 @@ public struct PLCProjectCompiler {
     private func records(modules: [Module], wires: [Wire], slots: [String: UInt16],
                          wireValue: (Wire) -> UInt16,
                          allocation: PLCSymbolTable? = nil) throws -> [UInt8] {
+        var starts: [Int: Int] = [:]
+        return try records(modules: modules, wires: wires, slots: slots, wireValue: wireValue,
+                           allocation: allocation, threadStarts: &starts)
+    }
+
+    /// Records with the offset each thread's first record sits at.
+    private func records(modules: [Module], wires: [Wire], slots: [String: UInt16],
+                         wireValue: (Wire) -> UInt16,
+                         allocation: PLCSymbolTable? = nil,
+                         threadStarts: inout [Int: Int]) throws -> [UInt8] {
         var byInput: [UInt8: [Int: UInt16]] = [:]
         for w in wires {
             // A parameter wire is keyed past the in-pins, so the two never share a slot.
@@ -524,6 +543,7 @@ public struct PLCProjectCompiler {
                 out.append(contentsOf: [UInt8](repeating: 0, count: 64 - out.count % 64))
             }
             lastThread = m.threadId
+            if threadStarts[m.threadId] == nil { threadStarts[m.threadId] = out.count }
             // The record's second byte is not a flag of the program's: it is the OR of the hidden
             // in-pins' `pin[0x70]` values (`InPinToStream`, P1.bpl 0x40DE0E), so it comes out of the
             // class's own shape before any word is written.
@@ -579,18 +599,20 @@ public struct PLCProjectCompiler {
                     continue
                 }
                 if case .digitalOutputs = role {
-                    // 14 positions; the data pins are in-pins 1…d. Pins 1 and 2 go to positions 2 and 3, the
-                    // last three to 11, 12 and 13, and the ones between to 7…10; the rest are constants 0.
-                    var words = [UInt16](repeating: PLCProgramBuilder.Module.constant(0), count: 14)
-                    let d = max(0, m.inPinCount - 1)
-                    var positions: [Int] = []
-                    if d >= 1 { positions.append(2) }
-                    if d >= 2 { positions.append(3) }
-                    let middle = max(0, d - 5)
-                    for k in 0..<min(middle, 4) { positions.append(7 + k) }
-                    for k in 0..<min(3, max(0, d - 2)) { positions.append(11 + k) }
-                    for (i, position) in positions.enumerated() { words[position] = inValue(i + 1) }
-                    for w in words { put(w) }
+                    // One word per registered channel; the channels the sheet hides are constant 0 and
+                    // the visible ones take in-pins 1, 2, … in order (`rulkoshaddirigo`: 14 channels, mask
+                    // `$0473` → channels 2, 3, 7, 8, 9, 11, 12, 13 are in-pins 1…8).
+                    let channels = m.pinCount ?? max(0, m.inPinCount - 1)
+                    let hidden = m.hiddenPinMask ?? 0
+                    var pin = 1
+                    for channel in 0..<channels {
+                        if channel < 16, hidden & (1 << channel) != 0 {
+                            put(PLCProgramBuilder.Module.constant(0))
+                        } else {
+                            put(inValue(pin))
+                            pin += 1
+                        }
+                    }
                     continue
                 }
                 let value: UInt16
@@ -655,22 +677,31 @@ public struct PLCProjectCompiler {
     public func table(fromTemplate template: PLCProgramTable,
                       modules: [Module], wires: [Wire],
                       slots: [String: UInt16] = [:]) throws -> [UInt8] {
-        try table(fromTemplate: template, modules: modules, wires: wires,
-                  region: records(modules: modules, wires: wires, slots: slots))
+        var starts: [Int: Int] = [:]
+        let region = try records(modules: modules, wires: wires, slots: slots, wireValue: { $0.value },
+                                 allocation: PLCSymbolTable(modules: modules, wires: wires,
+                                                            classForGUID: classForGUID, shapes: shapes),
+                                 threadStarts: &starts)
+        return try table(fromTemplate: template, modules: modules, wires: wires, region: region,
+                         threadStarts: starts)
     }
 
     /// The same, with the slots and the wire values taken from a generated `PLCSymbolTable`.
     public func table(fromTemplate template: PLCProgramTable, modules: [Module], wires: [Wire],
                       allocation: PLCSymbolTable) throws -> [UInt8] {
-        try table(fromTemplate: template, modules: modules, wires: wires,
-                  region: records(modules: modules, wires: wires, allocation: allocation))
+        var starts: [Int: Int] = [:]
+        let region = try records(modules: modules, wires: wires, slots: allocation.slots,
+                                 wireValue: { allocation.value(fromWire: $0) ?? PLCProgramBuilder.Module.constant(0) },
+                                 allocation: allocation, threadStarts: &starts)
+        return try table(fromTemplate: template, modules: modules, wires: wires, region: region,
+                         threadStarts: starts)
     }
 
     /// Header from the template, then the records, the gap, and the trailer from the template. The
     /// table's length follows the records; nothing is padded to a fixed size.
     private func table(fromTemplate template: PLCProgramTable, modules: [Module], wires: [Wire],
-                       region: [UInt8]) throws -> [UInt8] {
-        PLCProgramTable.assemble(template: template, records: region)
+                       region: [UInt8], threadStarts: [Int: Int] = [:]) throws -> [UInt8] {
+        PLCProgramTable.assemble(template: template, records: region, threadStarts: threadStarts)
     }
 
     /// `{ABC}` and `ABC` are the same GUID; the project file and the id table differ in brace style.

@@ -29,11 +29,16 @@ public struct PLCProgramTable: Equatable, Sendable {
     public static let versionOffset = 0x02
     public static let checksumOffset = 0x1C
     public static let bodyOffset = 0x40
-    /// The sentinel sits at the end of the records rounded up to a 0x20 boundary, plus four. The captured
-    /// tables fix it: 482 record bytes → `0x244`, 486 → `0x244` (the `-mod2` save), `had.dmp`'s 98 → `0xC4`,
-    /// and the 192-byte table's `0x84`.
-    public static let sentinelAlignment = 0x20
+    /// The records are padded to a 64-byte boundary of the table (`TPCCProject.Compile` pads the stream with
+    /// `-size & 0x3F` zeros, 0x4B01E0), and a last 64-byte block of four zero bytes and the 60-byte trailer
+    /// follows. So the sentinel sits at the boundary plus four and the whole table is a multiple of 64. The
+    /// captures fix it: 482 record bytes → `0x244` (640 bytes), 486 → `0x244` (the `-mod2` save), `had.dmp`'s
+    /// 98 → `0xC4` (256), and the 192-byte table's `0x84`.
+    public static let sentinelAlignment = 0x40
     public static let sentinelPad = 4
+    /// The words of the header's thread table: thread `t` (1-based) at `0x20 + 2 (t - 1)`.
+    public static let threadTableOffset = 0x20
+    public static let maxThreads = 16
     /// The sentinel's offset for a table whose records take `records` bytes.
     public static func sentinelOffset(records: Int) -> Int {
         let end = bodyOffset + records
@@ -66,10 +71,33 @@ public struct PLCProgramTable: Equatable, Sendable {
 
     /// A table built from `records`: the header and trailer of `template`, the records between them,
     /// the gap, and the checksum recomputed. Its length follows the records.
-    public static func assemble(template: PLCProgramTable, records: [UInt8]) -> [UInt8] {
+    ///
+    /// The header words that follow from the layout are written here, as `TPCCProject.Compile` does
+    /// (0x4B0E3A and 0x4B0F20): `+0x10` is the end of the padded records in 16-byte units, `+0x1A` the table
+    /// length in 64-byte units, and the thread table at `+0x20` holds, for each thread that produced
+    /// records, the offset of its first record in 16-byte units (`threadStarts` maps a thread id to its
+    /// offset in `records`; a thread without records is 0). The project flags at `+0x04…+0x07` and anything
+    /// else in the header come from the template.
+    public static func assemble(template: PLCProgramTable, records: [UInt8],
+                                threadStarts: [Int: Int] = [:]) -> [UInt8] {
         var out = Array(template.bytes[0..<bodyOffset])
+        let sentinel = sentinelOffset(records: records.count)
+        let total = sentinel + trailerLength
+        func put(_ value: Int, at offset: Int) {
+            out[offset] = UInt8(truncatingIfNeeded: value)
+            out[offset + 1] = UInt8(truncatingIfNeeded: value >> 8)
+        }
+        put((sentinel - sentinelPad) / 16, at: 0x10)
+        put(total / 64, at: 0x1A)
+        // With no thread information the template's table is kept.
+        if !threadStarts.isEmpty {
+            for slot in 0..<maxThreads { put(0, at: threadTableOffset + 2 * slot) }
+            for (thread, start) in threadStarts where thread >= 1 && thread <= maxThreads {
+                put((bodyOffset + start) / 16, at: threadTableOffset + 2 * (thread - 1))
+            }
+        }
         out += records
-        out += [UInt8](repeating: 0, count: sentinelOffset(records: records.count) - out.count)
+        out += [UInt8](repeating: 0, count: sentinel - out.count)
         out += template.bytes[template.sentinelOffset...]
         out[checksumOffset] = 0
         out[checksumOffset + 1] = 0
