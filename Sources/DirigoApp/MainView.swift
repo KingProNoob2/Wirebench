@@ -424,13 +424,46 @@ public struct MainView: View {
         .onAppear { model.refreshPorts() }
     }
 
-    /// The upload's frames and stages, collapsed until wanted.
+    /// The upload's status and log. The header is always visible — what the upload is doing, and how far — and
+    /// the frames and stages open underneath it.
     @ViewBuilder
     private var uploadLogGroup: some View {
-        DisclosureGroup(isExpanded: $showingUploadLog) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { showingUploadLog.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .rotationEffect(.degrees(showingUploadLog ? 90 : 0))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                    Text("Upload Log").font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                    if !model.uploadLog.isEmpty {
+                        Text("\(model.uploadLog.count) lines")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Always shown, collapsed or not.
+            Text(uploadHeadline)
+                .font(.caption2)
+                .foregroundStyle(model.uploadPhase.hasPrefix("Upload failed") ? Color.red : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let progress = model.uploadProgress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+            }
+
+            if showingUploadLog {
                 if model.uploadLog.isEmpty {
-                    Text("Nothing uploaded yet.")
+                    Text("Nothing has been uploaded yet.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 } else {
@@ -448,12 +481,12 @@ public struct MainView: View {
                                 }
                             }
                         }
-                        .frame(maxHeight: 180)
+                        .frame(maxHeight: 200)
                         .onChange(of: model.uploadLog.count) {
                             if let last = model.uploadLog.last { proxy.scrollTo(last.id, anchor: .bottom) }
                         }
                     }
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Button("Copy") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(model.uploadLogText, forType: .string)
@@ -465,17 +498,14 @@ public struct MainView: View {
                     .font(.caption2)
                 }
             }
-            .padding(.top, 4)
-        } label: {
-            HStack(spacing: 6) {
-                Text("Upload Log").font(.caption.weight(.semibold))
-                if !model.uploadLog.isEmpty {
-                    Text("\(model.uploadLog.count)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
         }
+    }
+
+    /// One line in words: the phase and its percentage, or what to do first.
+    private var uploadHeadline: String {
+        if !model.uploadPhase.isEmpty { return model.uploadPhase }
+        return model.isHardwareConnected ? "Ready — compile, then upload from the report."
+                                         : "Not connected — connect to a serial port first."
     }
 
     private func uploadLogColor(_ kind: AppModel.UploadLogEntry.Kind) -> Color {

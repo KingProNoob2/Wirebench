@@ -148,7 +148,62 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
-    public func clearUploadLog() { uploadLog.removeAll() }
+    public func clearUploadLog() { uploadLog.removeAll(); uploadPhase = ""; uploadProgress = nil }
+
+    /// A stage announced by the uploader, as a sentence.
+    nonisolated static func phaseText(for stage: String) -> String {
+        switch stage {
+        case "GetStatus": return "Contacting the PLC…"
+        case "Stop the PLC": return "Stopping the PLC…"
+        case "Read the run/stop register": return "Checking the PLC is stopped…"
+        case "Start the PLC": return "Starting the PLC…"
+        default:
+            if stage.hasPrefix("Table frame ") {
+                return "Writing table " + stage.dropFirst("Table frame ".count)
+                    .replacingOccurrences(of: " of ", with: "/")
+            }
+            return stage
+        }
+    }
+
+    /// Moves the percentage on after each reply, keeping the words the stage set.
+    nonisolated func uploadProgressTick(_ fraction: Double) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.uploadProgress = fraction
+            if let dot = self.uploadPhase.range(of: " · ") {
+                self.uploadPhase = String(self.uploadPhase[..<dot.lowerBound])
+            }
+            if self.isUploading { self.uploadPhase += " · \(Int(fraction * 100))%" }
+        }
+    }
+
+    /// What the upload is doing, in words — "Connection established", "Writing table 3 of 5" — and how far along
+    /// it is, 0…1. `nil` progress means no upload has run.
+    public var uploadPhase: String = ""
+    public var uploadProgress: Double?
+
+    /// Updates the phase and progress from any thread.
+    nonisolated func setUploadPhase(_ phase: String, progress: Double?) {
+        DispatchQueue.main.async { [weak self] in
+            self?.uploadPhase = phase
+            if let progress { self?.uploadProgress = progress }
+        }
+    }
+
+    /// Counts replies so the percentage is steps done over steps in all. A lock, because the transport callback
+    /// runs on the upload's thread.
+    final class UploadTracker: @unchecked Sendable {
+        private let lock = NSLock()
+        private var replies = 0
+        let total: Int
+        init(total: Int) { self.total = total }
+        func reply() -> Double {
+            lock.lock(); defer { lock.unlock() }
+            replies += 1
+            return min(1, Double(replies) / Double(total))
+        }
+    }
 
     /// The log as text, for the clipboard.
     public var uploadLogText: String {
@@ -213,33 +268,57 @@ public final class AppModel: @unchecked Sendable {
         }
         do {
             await MainActor.run { self.uploadStatus = "Stopping the PLC…" }
-            await MainActor.run { self.uploadLog.removeAll() }
-            self.logUpload("Upload: \(table.uploadedBytes.count)-byte table, PLC \(self.plcAddress), PC \(self.pcAddress), "
-                           + "port \(self.selectedPortPath)", kind: .info)
+            await MainActor.run {
+                self.uploadLog.removeAll()
+                self.uploadPhase = "Connecting…"
+                self.uploadProgress = 0
+            }
+            // GetStatus, stop, read, one write per 128-byte chunk, start.
+            let chunks = (table.uploadedBytes.count + 127) / 128
+            let tracker = UploadTracker(total: 4 + chunks)
+            self.logUpload("Upload started: \(table.uploadedBytes.count)-byte table in \(chunks) frame(s) · "
+                           + "PLC address \(self.plcAddress), PC address \(self.pcAddress), \(self.selectedPortPath)",
+                           kind: .info)
+            var established = false
             let logged = LoggingDbNetTransport(wrapping: SerialDbNetTransport(port: self.serialPort)) { [weak self] direction, bytes in
                 guard let self else { return }
                 if direction.hasPrefix("✗") {
-                    self.logUpload("Link error \(direction.dropFirst(2))", kind: .error)
+                    self.logUpload("Link error: \(direction.dropFirst(2))", kind: .error)
+                } else if direction == "→" {
+                    self.logUpload("  → \(AppModel.hexSummary(bytes))", kind: .request)
                 } else {
-                    self.logUpload("\(direction) \(AppModel.hexSummary(bytes))",
-                                   kind: direction == "→" ? .request : .reply)
+                    let fraction = tracker.reply()
+                    self.logUpload("  ← \(AppModel.hexSummary(bytes))", kind: .reply)
+                    if !established {
+                        established = true
+                        self.logUpload("Connection established — the PLC answered.", kind: .stage)
+                        self.setUploadPhase("Connection established · \(Int(fraction * 100))%", progress: fraction)
+                    }
+                    self.uploadProgressTick(fraction)
                 }
             }
             let session = DbNetSession(transport: logged, address: UInt32(self.plcAddress))
             let uploader = PLCUploader(session: session,
                                        destination: self.plcAddress,
                                        source: self.pcAddress)
-            uploader.onStage = { [weak self] stage in self?.logUpload(stage, kind: .stage) }
+            uploader.onStage = { [weak self] stage in
+                guard let self else { return }
+                self.logUpload(stage, kind: .stage)
+                self.setUploadPhase(AppModel.phaseText(for: stage), progress: nil)
+            }
             await MainActor.run { self.uploadStatus = "Writing \(table.uploadedBytes.count) bytes…" }
             let frames = try uploader.upload(table: table)
-            self.logUpload("Done: \(frames) table frame(s) written, PLC started.", kind: .info)
+            self.logUpload("Upload complete — \(frames) table frame(s) written, the PLC is running.", kind: .stage)
             await MainActor.run {
+                self.uploadPhase = "Upload complete · 100%"
+                self.uploadProgress = 1
                 self.uploadStatus = "Uploaded \(frames) frame(s). The PLC is running."
                 self.isUploading = false
             }
         } catch {
-            self.logUpload("Failed: \(error)", kind: .error)
+            self.logUpload("Upload failed: \(error)", kind: .error)
             await MainActor.run {
+                self.uploadPhase = "Upload failed"
                 self.uploadStatus = "Upload failed: \(error)"
                 self.isUploading = false
             }
