@@ -583,8 +583,7 @@ public struct ModuleConfigDialog: View {
         // 8xDI PIN_MASK & Word Output
         let diMaskVal: Int = {
             if let raw = mod.rawAttributes["PIN_MASK"] {
-                let cleaned = raw.replacingOccurrences(of: "$", with: "0x")
-                return Int(cleaned, radix: cleaned.hasPrefix("0x") ? 16 : 10) ?? 0xFF
+                return PinMask.parse(raw)
             }
             return 0xFF
         }()
@@ -597,8 +596,7 @@ public struct ModuleConfigDialog: View {
         self.doPinCount = mod.rawAttributes["PIN_COUNT"].flatMap { Int($0) } ?? max(mod.inPins.count, 8)
         let doHiddenMask: Int = {
             if let raw = mod.rawAttributes["HIDDEN_PIN_MASK"] {
-                let cleaned = raw.replacingOccurrences(of: "$", with: "0x")
-                return Int(cleaned, radix: cleaned.hasPrefix("0x") ? 16 : 10) ?? 0
+                return PinMask.parse(raw)
             }
             return 0
         }()

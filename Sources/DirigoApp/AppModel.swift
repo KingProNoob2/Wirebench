@@ -1556,10 +1556,49 @@ public final class AppModel: @unchecked Sendable {
         simulationDidChange()
     }
 
+    /// Applies a digital-output block's channel count and hidden mask, and keeps the module's pins in step with
+    /// them: `En` plus one pin per visible channel, in channel order. A channel that stays visible keeps its
+    /// pin, value and wires; a hidden one loses them; a newly visible one starts at 0.
     public func update8xDOConfig(id: Int, pinCount: Int, hiddenMaskHex: String) {
-        guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = project?.modules.firstIndex(where: { $0.id == id }),
+              let module = project?.modules[idx] else { return }
+        func visible(_ count: Int, _ mask: Int) -> [Int] {
+            (0..<max(0, count)).filter { $0 >= 16 || mask & (1 << $0) == 0 }
+        }
+        let oldVisible: [Int]
+        if let rawCount = module.rawAttributes["PIN_COUNT"].flatMap({ Int($0) }) {
+            oldVisible = visible(rawCount, module.rawAttributes["HIDDEN_PIN_MASK"].map(PinMask.parse) ?? 0)
+        } else {
+            oldVisible = Array(0..<max(0, module.inPins.count - 1))
+        }
+        let newVisible = visible(pinCount, PinMask.parse(hiddenMaskHex))
+
+        var newPins: [Pin] = module.inPins.isEmpty ? [Pin(id: 0, value: .bool(true))] : [module.inPins[0]]
+        var indexMap: [Int: Int] = [0: 0]
+        for (position, channel) in newVisible.enumerated() {
+            let newIndex = position + 1
+            if let old = oldVisible.firstIndex(of: channel), old + 1 < module.inPins.count {
+                var pin = module.inPins[old + 1]
+                pin.id = newIndex
+                newPins.append(pin)
+                indexMap[old + 1] = newIndex
+            } else {
+                newPins.append(Pin(id: newIndex, value: .bool(false)))
+            }
+        }
+        project?.inConnections = (project?.inConnections ?? []).compactMap { connection in
+            guard connection.inModuleId == id, !connection.isParam else { return connection }
+            guard let moved = indexMap[connection.inPinId] else { return nil }   // its channel is hidden now
+            var kept = connection
+            kept.inPinId = moved
+            return kept
+        }
+        project?.modules[idx].inPins = newPins
         project?.modules[idx].rawAttributes["PIN_COUNT"] = "\(pinCount)"
         project?.modules[idx].rawAttributes["HIDDEN_PIN_MASK"] = hiddenMaskHex
+        if getNode(id: id) != nil {
+            replaceBlock(id: id, with: EightDOBlock(pinCount: newPins.count))
+        }
         self.isDocumentEdited = true
         simulationDidChange()
     }

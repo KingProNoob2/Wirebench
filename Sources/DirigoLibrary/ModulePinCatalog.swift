@@ -610,8 +610,7 @@ public struct ModulePinCatalog: Sendable {
             // 8xDI can have custom mask (PIN_MASK) or active pin count up to 16
             let diMask: Int = {
                 if let raw = rawAttrs["PIN_MASK"] {
-                    let cleaned = raw.replacingOccurrences(of: "$", with: "0x")
-                    return Int(cleaned, radix: cleaned.hasPrefix("0x") ? 16 : 10) ?? 0xFF
+                    return PinMask.parse(raw)
                 }
                 return 0xFF
             }()
@@ -637,8 +636,7 @@ public struct ModulePinCatalog: Sendable {
             let pinCount = rawAttrs["PIN_COUNT"].flatMap { Int($0) } ?? 8
             let hiddenMask: Int = {
                 if let raw = rawAttrs["HIDDEN_PIN_MASK"] {
-                    let cleaned = raw.replacingOccurrences(of: "$", with: "0x")
-                    return Int(cleaned, radix: cleaned.hasPrefix("0x") ? 16 : 10) ?? 0
+                    return PinMask.parse(raw)
                 }
                 return 0
             }()
