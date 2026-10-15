@@ -48,9 +48,10 @@ struct BuildReportSheet: View {
                 Button("Close", action: onClose)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Upload to PLC\u{2026}", action: onUpload)
                 Button("Export Symbol Table (CSV)\u{2026}", action: onExportSymbols)
                 Button("Export Program Binary\u{2026}", action: onExportProgram)
+                // The highlighted button: compiling is done, so uploading is the next step.
+                Button("Upload to PLC\u{2026}", action: onUpload)
                     .keyboardShortcut(.defaultAction)
             }
         }

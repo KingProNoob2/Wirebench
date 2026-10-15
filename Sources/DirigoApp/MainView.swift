@@ -185,7 +185,12 @@ public struct MainView: View {
                 BuildReportSheet(report: report,
                                  onExportProgram: { model.exportCompiledProgram() },
                                  onExportSymbols: { model.exportSymbolTable() },
-                                 onUpload: { model.uploadCompiledProgram() },
+                                 // The report has done its job once the upload starts: close it, and the
+                                 // sidebar's upload log shows the progress.
+                                 onUpload: {
+                                     model.isShowingBuildReport = false
+                                     model.uploadCompiledProgram()
+                                 },
                                  onClose: { model.isShowingBuildReport = false })
             }
         }
@@ -397,13 +402,25 @@ public struct MainView: View {
 
             // Compiling is what the sidebar offers; the report it opens has Upload to PLC, and the
             // export buttons, so the compile → upload path stays two clicks.
-            Button {
-                model.buildAndShowReport()
-            } label: {
-                Text("Compile Project")
-                    .frame(maxWidth: .infinity)
+            // Blue once there is a link to upload over: compiling is then the next step. A ternary cannot pick
+            // between two button styles, so the two cases are spelled out.
+            Group {
+                if model.isHardwareConnected {
+                    Button {
+                        model.buildAndShowReport()
+                    } label: {
+                        Text("Compile Project").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        model.buildAndShowReport()
+                    } label: {
+                        Text("Compile Project").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
-            .buttonStyle(.bordered)
             .controlSize(.regular)
             .disabled(model.project == nil)
 
