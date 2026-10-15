@@ -82,7 +82,7 @@ The `Xcode project membership` test suite fails if the two ever drift apart.
 `./bundle-app.sh` runs `xcodegen generate` and an `xcodebuild` release build, then copies the
 resulting `Dirigo.app` next to the package and to the workspace root.
 
-367 tests across 94 suites, all passing, with 4 known issues. Measured 2026-10-15.
+368 tests across 94 suites, all passing, with no known issues. Measured 2026-10-15.
 
 ---
 

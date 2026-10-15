@@ -710,46 +710,28 @@ struct SymbolTableGenerationTests {
         try compareBytes(pcc: "kostička.pcc", csv: "kostička.csv")
     }
 
-    /// `zelznice` is the only pair whose `.pcc` and `.csv` share a date, so a difference here is the
-    /// model's, not the corpus's. Three gaps it exposes are recorded rather than smoothed over, and this
-    /// test fails if one of them closes without the others being taken with it:
-    ///
-    /// 1. the **module row is conditional** — `PulseGen2`, `And2` and `Int2Bits1` have one while
-    ///    `PulseGen1`, `And1`, `And3`, `And4`, `And5` do not, though they are the same classes;
-    /// 2. `TMDateTime` is not in the class table at all (`DateTime2.Out1` is missing);
-    /// 3. the **bit indices are not unique** in this project (`Or1.Y` and `Not2.Y` are both 1, `Not3.Y`
-    ///    and `PulseGen3.Out` both 2, `Not1.Y` and `Not4.Y` both 4), so numbering is not one global run.
-    @Test("zelznice: the generated table against the file (three known gaps)")
-    func zelznice() async throws {
-        await withKnownIssue("module-row rule, TMDateTime, and non-unique bit indices") {
-            try compare(pcc: "ehhhhhh zelznice.pcc", csv: "ehhhhhh zelznice.csv")
-        }
+    /// `zelznice` is the only pair whose `.pcc` and `.csv` share a date, so a difference here is the model's,
+    /// not the corpus's. It exposed three gaps, all closed now: a module row exists only for the first module
+    /// to open a row (`PulseGen2`, `And2`, `Int2Bits1`), a macro call's named out-pin (`DateTime2.Out1`) is the
+    /// address of the pin the sheet's `Outputs` interface is wired from, and bit numbers repeat because they
+    /// number within a row.
+    @Test("zelznice: the generated table is the file")
+    func zelznice() throws {
+        try compare(pcc: "ehhhhhh zelznice.pcc", csv: "ehhhhhh zelznice.csv")
     }
 
-    /// The captured `rulkoshaddirigo` saves: every INDEX and ROWINDEX Dirigo wrote is reproduced. The one row
-    /// not produced is `Comparator2`'s module row, which Dirigo writes as the owner of row 0 (an open item).
-    @Test("rulkoshaddirigo captures: every captured INDEX and ROWINDEX is reproduced",
+    @Test("zelznice: the generated file is byte for byte Dirigo's")
+    func zelzniceBytes() throws {
+        try compareBytes(pcc: "ehhhhhh zelznice.pcc", csv: "ehhhhhh zelznice.csv")
+    }
+
+    /// The captured `rulkoshaddirigo` saves: every row Dirigo wrote — INDEX, ROWINDEX, OWNER — is reproduced,
+    /// and so is the file's bytes.
+    @Test("rulkoshaddirigo captures: the generated table is the file",
           arguments: ["rulkoshaddirigo", "rulkoshaddirigo-mod", "rulkoshaddirigo-mod2", "rulkoshaddirigo-mod3"])
     func capturedAllocation(name: String) throws {
-        let dir = Self.url("Serial packet capture")
-        let pcc = dir.appendingPathComponent(name + ".pcc")
-        let csv = dir.appendingPathComponent(name + ".csv")
-        try #require(FileManager.default.fileExists(atPath: pcc.path))
-        try #require(FileManager.default.fileExists(atPath: csv.path))
-        let xml = try String(contentsOf: pcc, encoding: .utf8)
-        let real = PLCProjectCompiler.symbols(fromSymbolCSV: try String(contentsOf: csv, encoding: .utf8))
-        let table = PLCSymbolTable(modules: PLCProjectCompiler.programModules(PLCProjectCompiler.modules(in: xml)),
-                                   wires: PLCProjectCompiler.wires(in: xml),
-                                   classForGUID: Self.allClasses(), shapes: PLCProjectCompiler.hadProjectShapes)
-        let mine = Dictionary(table.rows.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
-        var wrong: [String] = []
-        for row in real where row.name != "Comparator2" {
-            guard let got = mine[row.name] else { wrong.append("missing \(row.name)"); continue }
-            if got.index != row.index || got.rowIndex != row.rowIndex {
-                wrong.append("\(row.name): \(got.index),\(got.rowIndex) ≠ \(row.index),\(row.rowIndex)")
-            }
-        }
-        #expect(wrong.isEmpty, "\(wrong)")
+        try compare(pcc: "Serial packet capture/\(name).pcc", csv: "Serial packet capture/\(name).csv")
+        try compareBytes(pcc: "Serial packet capture/\(name).pcc", csv: "Serial packet capture/\(name).csv")
     }
 
     private func compareBytes(pcc pccName: String, csv csvName: String) throws {
@@ -762,7 +744,7 @@ struct SymbolTableGenerationTests {
         try #require(FileManager.default.fileExists(atPath: csvURL.path))
         let xml = try String(contentsOf: pccURL, encoding: .utf8)
         let real = try String(contentsOf: csvURL, encoding: .utf8)
-        let table = PLCSymbolTable(modules: PLCProjectCompiler.modules(in: xml),
+        let table = PLCSymbolTable(modules: PLCProjectCompiler.programModules(PLCProjectCompiler.modules(in: xml)),
                                    wires: PLCProjectCompiler.wires(in: xml),
                                    classForGUID: Self.allClasses(),
                                    shapes: PLCProjectCompiler.hadProjectShapes)
@@ -790,7 +772,7 @@ struct SymbolTableGenerationTests {
         let xml = try String(contentsOf: pccURL, encoding: .utf8)
         let real = PLCProjectCompiler.symbols(fromSymbolCSV:
             try String(contentsOf: csvURL, encoding: .utf8))
-        let modules = PLCProjectCompiler.modules(in: xml)
+        let modules = PLCProjectCompiler.programModules(PLCProjectCompiler.modules(in: xml))
         let wires = PLCProjectCompiler.wires(in: xml)
         let table = PLCSymbolTable(modules: modules, wires: wires,
                                    classForGUID: Self.allClasses(), shapes: PLCProjectCompiler.hadProjectShapes)
@@ -1192,14 +1174,14 @@ struct RecordAddressConsistencyTests {
     }
 
     @Test("had and kostička: every record word resolves against the generated table")
-    func wordsResolve() async throws {
+    func wordsResolve() throws {
         try check(pcc: "had.pcc", csv: "had.csv")
         try check(pcc: "kostička.pcc", csv: "kostička.csv")
-        // `zelznice` still has six words that resolve to nothing, all of them sourced from its macro
-        // modules (a sheet saved as a block, so its pins are not in this library). Recorded, not hidden.
-        await withKnownIssue("six words come from macro sources") {
-            try check(pcc: "ehhhhhh zelznice.pcc", csv: "ehhhhhh zelznice.csv")
-        }
+        // `zelznice` has a macro call (`DateTime2`) whose named output is read inside the program; it resolves
+        // through the sheet's `Outputs` interface. Its constants include `0xFFFF` and `0xE448`, which have
+        // bits 15 and 14 set like every constant.
+        try check(pcc: "ehhhhhh zelznice.pcc", csv: "ehhhhhh zelznice.csv")
+        try check(pcc: "Serial packet capture/rulkoshaddirigo.pcc", csv: "Serial packet capture/rulkoshaddirigo.csv")
     }
 
     func check(pcc pccName: String, csv csvName: String) throws {
@@ -1210,9 +1192,12 @@ struct RecordAddressConsistencyTests {
         try #require(FileManager.default.fileExists(atPath: pcc.path), "\(pccName)")
         try #require(FileManager.default.fileExists(atPath: csv.path), "\(csvName)")
         let xml = try String(contentsOf: pcc, encoding: .utf8)
-        let modules = PLCProjectCompiler.modules(in: xml)
-        let wires = PLCProjectCompiler.wires(in: xml)
-        let allocation = PLCSymbolTable(modules: modules, wires: wires,
+        // The same pipeline `PLCProjectBuild.compile` runs: the program's modules, a macro's inputs resolved
+        // through its call.
+        let all = PLCProjectCompiler.modules(in: xml)
+        let modules = PLCProjectCompiler.recordOrder(all)
+        let wires = PLCProjectCompiler.resolvingMacroInterfaces(modules: all, wires: PLCProjectCompiler.wires(in: xml))
+        let allocation = PLCSymbolTable(modules: PLCProjectCompiler.programModules(all), wires: wires,
                                         classForGUID: SymbolTableGenerationTests.allClasses(),
                                         shapes: PLCProjectCompiler.classShapes)
         let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
@@ -1238,7 +1223,7 @@ struct RecordAddressConsistencyTests {
                 let w = UInt16(record[i]) | (UInt16(record[i + 1]) << 8)
                 i += 2
                 words += 1
-                if w & 0xF000 == 0xC000 { continue }                      // a constant
+                if w & 0xC000 == 0xC000 { continue }                      // a constant: bits 15 and 14 set
                 if w & 0xF000 == 0x1000 || w & 0xF000 == 0x2000 {         // an int or long slot
                     if Int(w & 0x0FFF) > maxSlot { unresolved.append("\(m.name): slot \(String(format: "%04X", w))") }
                     continue

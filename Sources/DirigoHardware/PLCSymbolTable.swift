@@ -78,6 +78,9 @@ public enum PLCClassPins {
         "TMAdvCounter": Spec(moduleValue: 0, bools: [1: "H", 2: "L"], unexportedBools: [3]),
         // Div: out-pin 0 is the quotient, a Long (`0x2000 + index`); out-pin 1 is the int remainder.
         "TMDiv": Spec(moduleValue: 1, longs: [0: "Y"]),
+        // DateTime: D is a Long, the rest are ints. InRange has the one Boolean.
+        "TMDateTime": Spec(words: [1: "H", 2: "M", 3: "S", 4: "DOW"], longs: [0: "D"]),
+        "TMInRange": Spec(bools: [0: "Y"]),
         "TMOr": Spec(bools: [0: "Y"]),
         "TMNot": Spec(bools: [0: "Y"]),
         "TMBoolVar": Spec(bools: [0: "Y"]),
@@ -212,14 +215,6 @@ public struct PLCSymbolTable: Sendable {
                                    index: allocated.bit, rowIndex: allocated.row, colIndex: 0,
                                    name: "\(m.name).\(name)", umisteni: Int(m.umisteni), svorka: sv))
             }
-            // A class whose own value is one of its Booleans (`And`, `PulseGen`) has its module row where that bit is.
-            if let sv = s.moduleValue, let a = addresses[UInt16(m.umisteni) << 8 | UInt16(sv)], a.isBoolean {
-                let id = 1000 + Int(m.umisteni) * 100 + sv + 1
-                moduleRowID[m.umisteni] = id
-                moduleRowName[m.umisteni] = m.name
-                rows.append(Row(id: id, owner: -1, type: 4, index: 510, rowIndex: a.rowIndex,
-                                colIndex: 0, name: m.name, umisteni: Int(m.umisteni), svorka: sv))
-            }
         }
 
         func placeWords(_ m: PLCProjectCompiler.Module, _ s: PLCClassPins.Spec) {
@@ -311,49 +306,57 @@ public struct PLCSymbolTable: Sendable {
             }
         }
 
-        // MARK: OWNER — the word row of the value the pin carries, else the first module row
-
-        // `had.csv` and `kostička.csv` together fix this: a Boolean pin is owned by its *own* module's
-        // value when that module has one (`8xDI1.DI0` → `2001`, `PulseGen1.Out` → `1102`); otherwise by
-        // the value of the module it reads — but only when what it reads *is* that module's own value
-        // (`Int2Bits1.B0` reads `ISwitch1.Y`, which is `ISwitch1`'s own value, so → `1501`); and
-        // otherwise by the first module row in the project (`Or1.Y` → `1102`), which is why that odd
-        // default shows up on both files.
-        let defaultOwner = moduleRowID.keys.sorted().first.flatMap { moduleRowID[$0] }
-        var ownValuePin: [UInt8: Int] = [:]
-        for m in sorted {
-            if let s = spec(m), let sv = s.moduleValue { ownValuePin[m.umisteni] = sv }
-        }
-        func ownerFor(_ m: PLCProjectCompiler.Module) -> Int {
-            if let own = moduleRowID[m.umisteni] { return own }
-            var seen: Set<UInt8> = []
-            var current = m.umisteni
-            while let source = feeds[current]?.sorted(by: { $0.key < $1.key })
-                                        .first(where: { !seen.contains($0.value.module) })?.value {
-                seen.insert(source.module)
-                if ownValuePin[source.module] == source.pin, let id = moduleRowID[source.module] {
-                    return id
-                }
-                current = source.module
+        // A macro call's named out-pins are the sources the sheet's `Outputs` interface is wired from:
+        // `DateTime2.Out1` is `InRange1.Y` inside `*DateTime`, so it shares that pin's address.
+        for call in modules where PLCProjectCompiler.normaliseGUID(call.guid) == PLCProjectCompiler.macroCallGUID {
+            guard let name = call.macroName else { continue }
+            let interfaces = Set(modules.filter {
+                $0.page == "*" + name
+                    && PLCProjectCompiler.normaliseGUID($0.guid) == PLCProjectCompiler.macroInterfaceGUID
+            }.map(\.umisteni))
+            for (k, pin) in call.outPins.enumerated() {
+                guard let w = wires.first(where: { interfaces.contains($0.inModule) && $0.inPin == k && !$0.isParam }),
+                      let source = addresses[UInt16(w.outModule) << 8 | UInt16(w.outPin)] else { continue }
+                addresses[UInt16(call.umisteni) << 8 | UInt16(k)] = source
+                guard let pinName = pin.name else { continue }
+                let boolean = source.isBoolean
+                pinRows.append(Row(id: (boolean ? 500000 : 1000) + Int(call.umisteni) * 100 + k + 1, owner: -1,
+                                   type: boolean ? 6 : 4, index: boolean ? source.index : 510,
+                                   rowIndex: source.rowIndex, colIndex: 0,
+                                   name: "\(call.name).\(pinName)", umisteni: Int(call.umisteni), svorka: k))
             }
-            return defaultOwner ?? -1
         }
 
-        // The rows are *written* in the project's own module order — the order of the `<MODULE>` elements
-        // — while the allocation above ran in ascending module ID. `kostička.pcc` has `ISwitch1` first in
-        // the file, and `kostička.csv` starts with `ISwitch1.Y` even though `ISwitch1` is module 5 and its
-        // index (1) is the second allocated; `had.pcc` is in id order in the file, so the two agree there.
+        // MARK: rows and OWNER, in the project's own module order
+        //
+        // Dirigo's file is written module by module, in the order of the `<MODULE>` elements, for the modules on
+        // the main sheet (a `*` sheet's modules are expanded for the allocation and are not listed). A pin's
+        // OWNER is the row that first stood for its `ROWINDEX`: a word row (`Counter2.Y` owns `Int2Bits2`'s
+        // bits, `8xDI1` its inputs), or — when no earlier module has claimed that row — a *module row* the
+        // first Boolean in it opens, named after the module (`PulseGen2` owns row 0, `And2` row 1,
+        // `Int2Bits1` row 2). `zelznice.csv`, `rulkoshaddirigo.csv`, `had.csv` and `kostička.csv` agree.
         var ordered: [Row] = []
-        for m in modules.sorted(by: { $0.fileIndex < $1.fileIndex }) {
+        var rowOwner: [Int: Int] = [:]
+        for m in modules.sorted(by: { $0.fileIndex < $1.fileIndex }) where !m.page.hasPrefix("*") {
             var mine = rows.filter { $0.umisteni == Int(m.umisteni) }
             mine += pinRows.filter { $0.umisteni == Int(m.umisteni) }
             mine.sort { a, b in
                 if a.svorka != b.svorka { return a.svorka < b.svorka }
-                // The module row (the bare module name) comes before the named pin at the same svorka.
-                return a.name.count < b.name.count
+                return a.type < b.type
             }
             for var r in mine {
-                if r.type == 6 { r.owner = ownerFor(m) }
+                if r.type == 4 {
+                    if rowOwner[r.rowIndex] == nil { rowOwner[r.rowIndex] = r.id }
+                } else {
+                    if rowOwner[r.rowIndex] == nil {
+                        let id = 1000 + Int(m.umisteni) * 100 + r.svorka + 1
+                        ordered.append(Row(id: id, owner: -1, type: 4, index: 510, rowIndex: r.rowIndex,
+                                           colIndex: 0, name: m.name, umisteni: Int(m.umisteni),
+                                           svorka: r.svorka))
+                        rowOwner[r.rowIndex] = id
+                    }
+                    r.owner = rowOwner[r.rowIndex] ?? -1
+                }
                 ordered.append(r)
             }
         }

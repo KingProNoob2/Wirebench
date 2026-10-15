@@ -275,14 +275,15 @@ struct DirigoSwiftTests {
         // Run 20 ticks for Dice simulation
         engine.run(ticks: 20)
         let counter1Node = engine.getNode(id: 5)!
-        // Known fixture issue, not a block bug. This synthetic project was written when PulseGen
-        // ran whenever `En` was high; the help requires `Act` as well ("If Act=0 both outputs are
-        // cleared"), and here `Act` is driven by the macro mode logic rather than by the pin value
-        // stored in the file, so the generator this counter is clocked from stays cleared. See
-        // docs/block-functionality-audit.md.
-        withKnownIssue("counter1's clock generator is not activated by the fixture's mode logic") {
-            #expect(counter1Node.block.outPins[0].asInt > 0)
-        }
+        // The sheet's PulseGen (ID 2) is clocked by its `Act` pin, which this save leaves unwired at constant 0
+        // (only `En` comes in through the macro's one input): with `Act=0` both outputs stay cleared, so the
+        // counter has nothing to count — what a PLC running this file would do too. Switching `Act` on, as
+        // editing that constant would, starts the dice's clock and the counter runs.
+        #expect(counter1Node.block.outPins[0].asInt == 0, "Act is 0: the generator stays cleared")
+        let pulseGenNode = engine.getNode(id: 2)!
+        pulseGenNode.block.inPins[1] = .bool(true)
+        engine.run(ticks: 20)
+        #expect(counter1Node.block.outPins[0].asInt > 0)
 
         // Step 3: Switch mode to Had (Snake) via PrepinacRezim
         if let modeSwitch = modeSwitchNode.block as? BoolVarBlock {

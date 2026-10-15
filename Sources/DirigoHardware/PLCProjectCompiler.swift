@@ -248,13 +248,23 @@ public struct PLCProjectCompiler {
         /// `PIN_MASK` (`"$0030"`): which of a block's sixteen bit channels have a pin. `8xDI1` with `$0030`
         /// has `DI4` and `DI5`, and its out-pin `k` is the `k`-th set bit.
         public var pinMask: Int?
+        /// A macro call's out-pins, as the file names them (`PIN_NAME`, `TYPE`: 1 is Boolean). Empty for
+        /// an ordinary block, whose out-pins come from its class.
+        public var outPins: [OutPin]
+
+        public struct OutPin: Equatable, Sendable {
+            public var name: String?
+            public var type: Int?
+            public init(name: String?, type: Int?) { self.name = name; self.type = type }
+        }
 
         public init(name: String, guid: String, umisteni: UInt8, order: Int,
                     inPinCount: Int, outPinCount: Int, fileIndex: Int = 0,
                     constants: [Int] = [], flag: UInt8 = 0,
                     threadId: Int = 1, page: String = "main", macroName: String? = nil,
-                    inValues: [Int] = [], paramValues: [Int] = [], pinMask: Int? = nil) {
+                    inValues: [Int] = [], paramValues: [Int] = [], pinMask: Int? = nil, outPins: [OutPin] = []) {
             self.inValues = inValues; self.paramValues = paramValues; self.pinMask = pinMask
+            self.outPins = outPins
             self.name = name; self.guid = guid; self.umisteni = umisteni; self.order = order
             self.inPinCount = inPinCount; self.outPinCount = outPinCount
             self.fileIndex = fileIndex; self.constants = constants; self.flag = flag
@@ -363,7 +373,10 @@ public struct PLCProjectCompiler {
                           paramValues: matches(#"<PARAM_PIN\b[^>]*>"#, in: body).map {
                               attribute("VALUE", $0).flatMap(Int.init) ?? 0 },
                           pinMask: attribute("PIN_MASK", tag).flatMap {
-                              Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) })
+                              Int($0.trimmingCharacters(in: CharacterSet(charactersIn: "$")), radix: 16) },
+                          outPins: matches(#"<OUT_PIN\b[^>]*>"#, in: body).map {
+                              Module.OutPin(name: attribute("PIN_NAME", $0),
+                                            type: attribute("TYPE", $0).flatMap(Int.init)) })
         }
         // Execution order, with a documented tie-break: `had.pcc` lists `reset` (ORDER 40, id 4) before
         // `8xDO1` (ORDER 40, id 10), and `had.dmp` has them the other way round. Ordering by `id`
