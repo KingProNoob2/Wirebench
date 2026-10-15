@@ -296,16 +296,21 @@ public struct ModuleCardView: View, Equatable {
                 .frame(height: 0.5 * s)
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if let macroName = module.rawAttributes["MACRO_NAME"],
-               !module.page.hasPrefix("*"),
-               macroName.lowercased() != "inputs" {
-                onOpenMacro?("*" + macroName)
-            } else {
-                onBeginRename?()
+        // Simultaneous, not an `onTapGesture(count: 2)` / `onTapGesture` pair: that pair makes the single tap
+        // wait out the system double-click interval (~0.5 s) to be sure no second click is coming, which is
+        // the delay between clicking a block and it being selected.
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                if let macroName = module.rawAttributes["MACRO_NAME"],
+                   !module.page.hasPrefix("*"),
+                   macroName.lowercased() != "inputs" {
+                    onOpenMacro?("*" + macroName)
+                } else {
+                    onBeginRename?()
+                }
             }
-        }
-        .onTapGesture { onSelect() }
+        )
+        .simultaneousGesture(TapGesture().onEnded { onSelect() })
     }
 
     // MARK: - Pins

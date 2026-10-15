@@ -60,11 +60,17 @@ public struct CanvasView: View {
                         // so a click on one still reaches it — a catch-all gesture would cancel the
                         // edit the double-click had just started.
                         .onTapGesture {
-                            // Clicking the sheet clears both kinds of selection, the way it already
-                            // cleared the block selection.
+                            // Clicking the sheet clears every kind of selection. It lives on the grid, not
+                            // on the whole canvas, so a click that lands on a block never clears the
+                            // selection that block's own tap has just made.
                             model.editingAnnotationIndex = nil
                             model.selectedAnnotationIndex = nil
+                            model.selectedModuleId = nil
                         }
+                        // Double-clicking the empty sheet fits it to the window. Simultaneous, so the single
+                        // tap above never waits for it; and on the grid rather than the whole canvas, so a
+                        // double-click on a block (rename, open macro) does not also zoom.
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { model.zoomToFit() })
 
                     if let project = model.project {
                         schematic(for: project)
@@ -92,15 +98,6 @@ public struct CanvasView: View {
                             model.dragStartPan = model.panOffset
                         }
                 )
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        model.selectedModuleId = nil
-                        model.selectedAnnotationIndex = nil
-                    }
-                )
-                .onTapGesture(count: 2) {
-                    model.zoomToFit()
-                }
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
                 if model.project == nil {
                     emptyState
