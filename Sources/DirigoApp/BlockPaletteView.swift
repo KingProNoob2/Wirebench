@@ -159,13 +159,9 @@ struct BlockPaletteView: View {
     private var blockList: some View {
         Group {
             if matches.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("No blocks match “\(query)”")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                Text("No blocks match “\(query)”")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     // One flat alphabetical list. Grouping it by category produced headers that said

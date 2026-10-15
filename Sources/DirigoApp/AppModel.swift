@@ -1701,7 +1701,6 @@ public final class AppModel: @unchecked Sendable {
 
     /// The last build, kept so the exporters and the report sheet can use it without recompiling.
     public var buildReport: BuildReport?
-    public var isBuilding = false
     /// Whether the report sheet is up.
     public var isShowingBuildReport = false
 

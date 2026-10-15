@@ -55,13 +55,18 @@ public struct ModuleCardView: View, Equatable {
         let bodyHeight: CGFloat = isSegment
             ? max(pinsHeight, SegmentDisplayView.displaySize.height)
             : pinsHeight
-        let isMacroCaller = module.rawAttributes["MACRO_NAME"] != nil
-            && !module.page.hasPrefix("*")
-            && module.rawAttributes["MACRO_NAME"]?.lowercased() != "inputs"
         let hasControl = BlockInteraction.classify(module) == .control
-        let controlSpace: CGFloat = (isMacroCaller || hasControl) ? controlHeight : 0.0
+        let controlSpace: CGFloat = (isMacroCaller(module) || hasControl) ? controlHeight : 0.0
         let calculated = Metrics.headerHeight + bodyHeight + paramsHeight + controlSpace
         return hasControl ? max(76.0, calculated) : calculated
+    }
+
+    /// A macro's call site on a main page. The `Inputs` interface inside a macro page carries the same
+    /// attribute and is not one.
+    nonisolated static func isMacroCaller(_ module: PCCModule) -> Bool {
+        module.rawAttributes["MACRO_NAME"] != nil
+            && !module.page.hasPrefix("*")
+            && module.rawAttributes["MACRO_NAME"]?.lowercased() != "inputs"
     }
 
     nonisolated public static func inPinPoint(for module: PCCModule, pinIndex: Int) -> CGPoint {
@@ -197,11 +202,7 @@ public struct ModuleCardView: View, Equatable {
     private var tint: Color { Theme.tint(forBlockNamed: module.name, guid: module.guid) }
     private var interaction: BlockInteraction { BlockInteraction.classify(module) }
 
-    private var isMacroCaller: Bool {
-        module.rawAttributes["MACRO_NAME"] != nil
-            && !module.page.hasPrefix("*")
-            && module.rawAttributes["MACRO_NAME"]?.lowercased() != "inputs"
-    }
+    private var isMacroCaller: Bool { Self.isMacroCaller(module) }
 
     private var cardShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: Theme.cardRadius * s, style: .continuous)

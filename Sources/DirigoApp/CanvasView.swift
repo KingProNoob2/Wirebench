@@ -591,31 +591,28 @@ public struct CanvasView: View {
 
     // MARK: - Empty state
 
-    @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 18) {
-            ContentUnavailableView {
-                Label("No Project Open", systemImage: "cpu")
-            } description: {
-                Text("Open an existing .pcc project from disk, or create a new diagram to begin simulating.")
-            } actions: {
-                HStack(spacing: 12) {
-                    Button {
-                        model.openProjectFile()
-                    } label: {
-                        Label("Open Project…", systemImage: "folder")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-
-                    Button {
-                        model.createNewProject()
-                    } label: {
-                        Label("New Project", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+        ContentUnavailableView {
+            Label("No Project Open", systemImage: "cpu")
+        } description: {
+            Text("Open an existing .pcc project from disk, or create a new diagram to begin simulating.")
+        } actions: {
+            HStack(spacing: 12) {
+                Button {
+                    model.openProjectFile()
+                } label: {
+                    Label("Open Project…", systemImage: "folder")
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button {
+                    model.createNewProject()
+                } label: {
+                    Label("New Project", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
         }
         .padding(28)

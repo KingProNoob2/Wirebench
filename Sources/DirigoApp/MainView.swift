@@ -6,7 +6,6 @@ public struct MainView: View {
     @Bindable var model: AppModel
     @State private var showInspector: Bool = true
     @State private var showingPalette = false
-    @State private var showingUploadLog = false
     @State private var newPageName: String = ""
     @State private var newPageIsMacro = false
     @State private var showingNewPage = false
@@ -42,31 +41,6 @@ public struct MainView: View {
     }
 
     public var body: some View {
-        content
-            .onReceive(NotificationCenter.default.publisher(for: .showBlockPalette)) { _ in
-                if model.project != nil { showingPalette = true }
-            }
-    }
-
-    /// Whether a given file panel is the one being presented.
-    private func panelBinding(_ panel: AppModel.FilePanel) -> Binding<Bool> {
-        Binding(get: { model.pendingFilePanel == panel },
-                set: { presented in if !presented { model.pendingFilePanel = nil } })
-    }
-
-    /// Whether the build report is up — and only while there is a report to show.
-    private var buildSheetBinding: Binding<Bool> {
-        Binding(get: { model.isShowingBuildReport && model.buildReport != nil },
-                set: { model.isShowingBuildReport = $0 })
-    }
-
-    /// The message the model asked to show.
-    private var alertBinding: Binding<Bool> {
-        Binding(get: { model.pendingAlert != nil },
-                set: { presented in if !presented { model.pendingAlert = nil } })
-    }
-
-    private var content: some View {
         NavigationSplitView {
             sidebarContent
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
@@ -79,11 +53,10 @@ public struct MainView: View {
         }
         .coordinateSpace(name: "AppWindow")
         .navigationTitle(model.projectTitle)
-        .toolbar {
-            toolbarContent
-        }
-        .background {
-            shortcutsBackground
+        .toolbar { toolbarContent }
+        .background { shortcutsBackground }
+        .onReceive(NotificationCenter.default.publisher(for: .showBlockPalette)) { _ in
+            if model.project != nil { showingPalette = true }
         }
         .sheet(isPresented: Binding(
             get: { model.configuringModuleId != nil },
@@ -100,84 +73,45 @@ public struct MainView: View {
         // which is what keeps it free of AppKit.
         .fileImporter(isPresented: panelBinding(.open),
                       allowedContentTypes: [.pccProject, .xml],
-                      allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first { model.openProject(at: url) }
-            case .failure(let error):
-                model.presentMessage(title: "Could not open that file",
-                                     message: error.localizedDescription,
-                                     kind: .warning)
-            }
-        }
+                      allowsMultipleSelection: false,
+                      onCompletion: chosenFile("Could not open that file") { model.openProject(at: $0) })
         .fileImporter(isPresented: panelBinding(.uploadProgram),
                       allowedContentTypes: [.data],
-                      allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first { model.uploadProgram(from: url) }
-            case .failure(let error):
-                model.presentMessage(title: "Could not read that file",
-                                     message: error.localizedDescription,
-                                     kind: .warning)
-            }
-        }
+                      allowsMultipleSelection: false,
+                      onCompletion: chosenFile("Could not read that file") { model.uploadProgram(from: $0) })
         .fileExporter(isPresented: panelBinding(.saveAs),
                       document: LegacySaveDocument(project: model.project),
                       contentType: .pccProject,
-                      defaultFilename: model.saveAsDefaultName) { result in
-            switch result {
-            case .success(let url): model.didChooseSaveURL(url)
-            case .failure(let error):
-                model.presentMessage(title: "Could not save the project",
-                                     message: error.localizedDescription,
-                                     kind: .critical)
-            }
-        }
+                      defaultFilename: model.saveAsDefaultName,
+                      onCompletion: savedFile("Could not save the project", kind: .critical) {
+                          model.didChooseSaveURL($0)
+                      })
         .fileExporter(isPresented: panelBinding(.export),
                       document: LegacySaveDocument(project: model.project),
                       contentType: .pccProject,
-                      defaultFilename: model.exportDefaultName) { result in
-            switch result {
-            case .success(let url): model.finishExport(to: url)
-            case .failure(let error):
-                model.presentMessage(title: "Could not export the project",
-                                     message: error.localizedDescription,
-                                     kind: .warning)
-            }
-        }
+                      defaultFilename: model.exportDefaultName,
+                      onCompletion: savedFile("Could not export the project") { model.finishExport(to: $0) })
         .fileExporter(isPresented: panelBinding(.exportProgramBinary),
                       document: ProgramBinaryDocument(),
                       contentType: .programBinary,
-                      defaultFilename: model.programBinaryDefaultName) { result in
-            switch result {
-            case .success(let url): model.finishProgramBinaryExport(to: url)
-            case .failure(let error):
-                model.presentMessage(title: "Could not export the program",
-                                     message: error.localizedDescription,
-                                     kind: .warning)
-            }
-        }
+                      defaultFilename: model.programBinaryDefaultName,
+                      onCompletion: savedFile("Could not export the program") {
+                          model.finishProgramBinaryExport(to: $0)
+                      })
         .fileExporter(isPresented: panelBinding(.exportSymbolTable),
                       document: SymbolTableDocument(),
                       contentType: .commaSeparatedText,
-                      defaultFilename: model.symbolTableDefaultName) { result in
-            switch result {
-            case .success(let url): model.finishSymbolTableExport(to: url)
-            case .failure(let error):
-                model.presentMessage(title: "Could not export the symbol table",
-                                     message: error.localizedDescription,
-                                     kind: .warning)
-            }
-        }
+                      defaultFilename: model.symbolTableDefaultName,
+                      onCompletion: savedFile("Could not export the symbol table") {
+                          model.finishSymbolTableExport(to: $0)
+                      })
         .fileImporter(isPresented: panelBinding(.importBuildTemplate),
                       allowedContentTypes: [.programBinary]) { result in
             switch result {
             case .success(let url): model.loadBuildTemplate(from: url)
             case .failure(let error):
                 model.presentMessage(title: "Could not read that program binary",
-                                     message: error.localizedDescription,
-                                     kind: .warning)
+                                     message: error.localizedDescription, kind: .warning)
             }
         }
         .sheet(isPresented: buildSheetBinding) {
@@ -199,6 +133,49 @@ public struct MainView: View {
         } message: {
             Text(model.pendingAlert?.message ?? "")
         }
+    }
+
+    /// An importer's completion: the chosen file goes to `use`; a failure becomes a warning with `failure` as
+    /// its title.
+    private func chosenFile(_ failure: String, _ use: @escaping (URL) -> Void) -> (Result<[URL], Error>) -> Void {
+        { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { use(url) }
+            case .failure(let error):
+                model.presentMessage(title: failure, message: error.localizedDescription, kind: .warning)
+            }
+        }
+    }
+
+    /// An exporter's completion: where it was written goes to `use`; a failure is reported as `kind`.
+    private func savedFile(_ failure: String, kind: AppModel.PendingAlert.Kind = .warning,
+                           _ use: @escaping (URL) -> Void) -> (Result<URL, Error>) -> Void {
+        { result in
+            switch result {
+            case .success(let url): use(url)
+            case .failure(let error):
+                model.presentMessage(title: failure, message: error.localizedDescription, kind: kind)
+            }
+        }
+    }
+
+    /// Whether a given file panel is the one being presented.
+    private func panelBinding(_ panel: AppModel.FilePanel) -> Binding<Bool> {
+        Binding(get: { model.pendingFilePanel == panel },
+                set: { presented in if !presented { model.pendingFilePanel = nil } })
+    }
+
+    /// Whether the build report is up — and only while there is a report to show.
+    private var buildSheetBinding: Binding<Bool> {
+        Binding(get: { model.isShowingBuildReport && model.buildReport != nil },
+                set: { model.isShowingBuildReport = $0 })
+    }
+
+    /// The message the model asked to show.
+    private var alertBinding: Binding<Bool> {
+        Binding(get: { model.pendingAlert != nil },
+                set: { presented in if !presented { model.pendingAlert = nil } })
     }
 
     @ViewBuilder
@@ -267,15 +244,15 @@ public struct MainView: View {
             // that cannot be adjusted (`listSectionSpacing` is unavailable there), which left the
             // sidebar looking like content was missing between groups.
             sectionLabel("Pages", tint: Color.accentColor, isMacro: false)
-            ForEach(mainPages, id: \.caption) { pageRow(for: $0) }
+            ForEach(mainPages, id: \.caption) { pageRow(for: $0, isMacro: false) }
 
             sectionLabel("Macros", tint: Color.accentColor, isMacro: true)
-            ForEach(macroPages, id: \.caption) { macroRow(for: $0) }
+            ForEach(macroPages, id: \.caption) { pageRow(for: $0, isMacro: true) }
 
             sectionLabel("Hardware Link", tint: nil, isMacro: nil)
             // Same leading inset as every other row's content, so the hardware block lines up with
             // the titles above it instead of sitting 8pt out to the left.
-            hardwareSection
+            HardwareLinkSection(model: model)
                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 0))
         }
         .listStyle(.sidebar)
@@ -326,213 +303,6 @@ public struct MainView: View {
         let count = model.moduleCount(onPage: caption)
         if count == 0 { return "This page is empty. It cannot be the last page." }
         return "\(count) block\(count == 1 ? "" : "s") on it, and their wires, will be removed too."
-    }
-
-    @ViewBuilder
-    private var hardwareSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(model.isHardwareConnected ? Theme.signalHigh : Color.secondary.opacity(0.4))
-                    .frame(width: 7, height: 7)
-                    .shadow(color: model.isHardwareConnected ? Theme.signalHigh.opacity(0.8) : .clear, radius: 3)
-                Text(model.isHardwareConnected ? "Connected" : "Disconnected")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(model.isHardwareConnected ? Theme.signalHigh : .secondary)
-                Spacer(minLength: 4)
-                if let port = model.availablePorts.first(where: { $0.path == model.selectedPortPath }) {
-                    Text(port.name)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            // An empty picker is a dead control; say what is wrong instead — and offer a rescan, so
-            // plugging an adapter in after launch does not need the sidebar to be toggled to be seen.
-            HStack(spacing: 6) {
-                if model.availablePorts.isEmpty {
-                    Text("No serial ports found.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Picker("Serial Port", selection: $model.selectedPortPath) {
-                        ForEach(model.availablePorts) { port in
-                            Text(port.name).tag(port.path)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                }
-                Spacer(minLength: 2)
-                Button {
-                    model.refreshPorts()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .help("Rescan for serial adapters")
-            }
-
-            // A standard macOS push button — no bolt glyph, no custom glass style. A ternary cannot
-            // pick between two button styles, so the two cases are spelled out.
-            Group {
-                if model.isHardwareConnected {
-                    Button {
-                        model.disconnectHardware()
-                    } label: {
-                        Text("Disconnect").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Button {
-                        model.connectHardware()
-                    } label: {
-                        Text("Connect").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-            .controlSize(.regular)
-            .disabled(model.availablePorts.isEmpty)
-
-            // Compiling is what the sidebar offers; the report it opens has Upload to PLC, and the
-            // export buttons, so the compile → upload path stays two clicks.
-            // Blue once there is a link to upload over: compiling is then the next step. A ternary cannot pick
-            // between two button styles, so the two cases are spelled out.
-            Group {
-                if model.isHardwareConnected {
-                    Button {
-                        model.buildAndShowReport()
-                    } label: {
-                        Text("Compile Project").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button {
-                        model.buildAndShowReport()
-                    } label: {
-                        Text("Compile Project").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .controlSize(.regular)
-            .disabled(model.project == nil)
-
-            if !model.uploadStatus.isEmpty {
-                Text(model.uploadStatus)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            uploadLogGroup
-        }
-        .padding(.vertical, 6)
-        // The list has to be refreshed or it is empty forever: `refreshPorts` is the only thing that
-        // populates `availablePorts`, and nothing called it — so the Hardware Link section always read
-        // "No serial ports found." Re-reading on appear also picks up an adapter plugged in after
-        // launch, since the sidebar is rebuilt when it is shown again.
-        .onAppear { model.refreshPorts() }
-    }
-
-    /// The upload's status and log. The header is always visible — what the upload is doing, and how far — and
-    /// the frames and stages open underneath it.
-    @ViewBuilder
-    private var uploadLogGroup: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { showingUploadLog.toggle() }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(showingUploadLog ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 10)
-                    Text("Upload Log").font(.caption.weight(.semibold))
-                    Spacer(minLength: 0)
-                    if !model.uploadLog.isEmpty {
-                        Text("\(model.uploadLog.count) lines")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            // Always shown, collapsed or not.
-            Text(uploadHeadline)
-                .font(.caption2)
-                .foregroundStyle(model.uploadPhase.hasPrefix("Upload failed") ? Color.red : Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let progress = model.uploadProgress {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .controlSize(.small)
-            }
-
-            if showingUploadLog {
-                if model.uploadLog.isEmpty {
-                    Text("Nothing has been uploaded yet.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 2) {
-                                ForEach(model.uploadLog) { entry in
-                                    Text(entry.text)
-                                        .font(.system(size: 9.5, design: .monospaced))
-                                        .foregroundStyle(uploadLogColor(entry.kind))
-                                        .textSelection(.enabled)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .id(entry.id)
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 200)
-                        .onChange(of: model.uploadLog.count) {
-                            if let last = model.uploadLog.last { proxy.scrollTo(last.id, anchor: .bottom) }
-                        }
-                    }
-                    HStack(spacing: 10) {
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(model.uploadLogText, forType: .string)
-                        }
-                        Button("Clear") { model.clearUploadLog() }
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .font(.caption2)
-                }
-            }
-        }
-    }
-
-    /// One line in words: the phase and its percentage, or what to do first.
-    private var uploadHeadline: String {
-        if !model.uploadPhase.isEmpty { return model.uploadPhase }
-        return model.isHardwareConnected ? "Ready — compile, then upload from the report."
-                                         : "Not connected — connect to a serial port first."
-    }
-
-    private func uploadLogColor(_ kind: AppModel.UploadLogEntry.Kind) -> Color {
-        switch kind {
-        case .stage: return .primary
-        case .request: return .secondary
-        case .reply: return Theme.signalHigh
-        case .error: return .red
-        case .info: return .secondary
-        }
     }
 
     @ToolbarContentBuilder
@@ -644,39 +414,20 @@ public struct MainView: View {
         .allowsHitTesting(false)
     }
 
-    @ViewBuilder
-    private func pageRow(for page: ProjectPage) -> some View {
+    /// A sidebar row for a page or a macro page, with its delete action.
+    private func pageRow(for page: ProjectPage, isMacro: Bool) -> some View {
         NavigationLink(value: page.caption) {
-            SidebarRow(symbol: "square.grid.2x2", tint: Color.accentColor,
-                       title: page.caption, count: moduleCount(for: page.caption))
+            SidebarRow(symbol: isMacro ? "shippingbox" : "square.grid.2x2", tint: Color.accentColor,
+                       title: isMacro ? String(page.caption.dropFirst()) : page.caption,
+                       count: moduleCount(for: page.caption))
         }
         .contextMenu {
-            Button("Delete Page", systemImage: "trash", role: .destructive) {
+            Button(isMacro ? "Delete Macro Page" : "Delete Page", systemImage: "trash", role: .destructive) {
                 pendingPageDeletion = page.caption
             }
             // A project with no pages has nowhere to put a block, so the last one stays.
             .disabled((model.project?.pages.count ?? 0) <= 1)
         }
-    }
-
-    private func macroRow(for page: ProjectPage) -> some View {
-        NavigationLink(value: page.caption) {
-            SidebarRow(symbol: "shippingbox", tint: Color.accentColor,
-                       title: cleanMacroName(page.caption), count: moduleCount(for: page.caption))
-        }
-        .contextMenu {
-            Button("Delete Macro Page", systemImage: "trash", role: .destructive) {
-                pendingPageDeletion = page.caption
-            }
-            .disabled((model.project?.pages.count ?? 0) <= 1)
-        }
-    }
-
-    private func cleanMacroName(_ caption: String) -> String {
-        if caption.hasPrefix("*") {
-            return String(caption.dropFirst())
-        }
-        return caption
     }
 
     private func moduleCount(for pageCaption: String) -> Int {
