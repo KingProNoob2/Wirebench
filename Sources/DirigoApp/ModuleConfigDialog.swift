@@ -134,7 +134,6 @@ public struct ModuleConfigDialog: View {
                 Spacer()
             }
             .padding(16)
-            .background(.thinMaterial)
 
             Divider()
 
@@ -145,13 +144,10 @@ public struct ModuleConfigDialog: View {
                 }
             }
             .formStyle(.grouped)
-            // `Form` in its grouped style paints the system's opaque background, which reads as a
-            // grey slab sitting inside the dialog's translucent chrome. Let the material through
-            // instead, so header, body and footer are one surface.
+            // The grouped `Form` paints its own opaque background; hiding it leaves the sheet's material as the
+            // one surface, so header, body and footer are the same colour instead of a lighter panel inset in
+            // the middle.
             .scrollContentBackground(.hidden)
-            .background(.thinMaterial)
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
 
             Divider()
 
@@ -171,7 +167,6 @@ public struct ModuleConfigDialog: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(14)
-            .background(.thinMaterial)
         }
         .frame(width: 460, height: 420)
         .onAppear {
