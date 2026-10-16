@@ -115,6 +115,7 @@ struct DirigoSim {
     std::unordered_map<int32_t, std::vector<size_t>> incomingByModule;
     /// Macro interfaces, resolved from module attributes Swift-side. See `DirigoMacroBridge`.
     std::vector<DirigoMacroBridge> macroBridges;
+    int32_t macroSweeps = 1;
     /// The step's wall clock, decomposed by Swift. See `dirigo_sim_set_wall_clock`.
     DirigoWallClock wallClock{0, 0, 0, 0, 0};
     std::vector<std::vector<size_t>> schedule;   /* by thread id, in ORDER */
@@ -558,9 +559,11 @@ void propagateMacroCalls(DirigoSim *sim) {
 }
 
 void propagate(DirigoSim *sim) {
-    propagateMacroCalls(sim);
-    for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
-    propagateMacroCalls(sim);
+    for (int32_t sweep = 0; sweep < sim->macroSweeps; ++sweep) {
+        propagateMacroCalls(sim);
+        for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
+        propagateMacroCalls(sim);
+    }
 }
 
 }  // namespace
@@ -618,6 +621,10 @@ DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
         sim->incomingByModule[conn.inModule].push_back(stored);
     }
     return sim;
+}
+
+void dirigo_sim_set_macro_sweeps(DirigoSim *sim, int32_t sweeps) {
+    if (sim) sim->macroSweeps = sweeps < 1 ? 1 : sweeps;
 }
 
 void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridges, int32_t count) {

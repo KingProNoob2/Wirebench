@@ -1,0 +1,117 @@
+import Testing
+import Foundation
+import DirigoCore
+import DirigoLibrary
+import DirigoEngine
+import DirigoHardware
+
+/// A macro that calls another macro: `Main` calls `*A`, which calls `*B`, which inverts its input.
+///
+///     Main:  Src ──► A1 ──► Probe
+///     *A:    Inputs ──► B1 ──► Outputs
+///     *B:    Inputs ──► Not ──► Outputs
+@Suite("Nested macros")
+struct NestedMacroTests {
+    static func project() -> PCCProject {
+        var project = PCCProject(name: "nested")
+        project.pages = [ProjectPage(caption: "Main"), ProjectPage(caption: "*A"), ProjectPage(caption: "*B")]
+        project.appOptions.cycleDelay = 10
+        func call(_ id: Int, _ name: String, _ macro: String, page: String, order: Int) -> PCCModule {
+            PCCModule(id: id, guid: MacroBlock.guid, name: name, x: 0, y: 0, order: order,
+                      threadId: page.hasPrefix("*") ? 0 : 1, page: page,
+                      inPins: [Pin(id: 0, value: .bool(false))], outPins: [Pin(id: 0, value: .bool(false))],
+                      rawAttributes: ["MACRO_NAME": macro])
+        }
+        func inputs(_ id: Int, page: String) -> PCCModule {
+            PCCModule(id: id, guid: InputsBlock.guid, name: "Inputs\(id)", x: 0, y: 0, order: 10,
+                      threadId: 0, page: page, inPins: [], outPins: [Pin(id: 0, value: .bool(false))],
+                      rawAttributes: ["MACRO_NAME": "Inputs", "KIND": "0"])
+        }
+        func outputs(_ id: Int, page: String) -> PCCModule {
+            PCCModule(id: id, guid: OutputsBlock.guid, name: "Outputs\(id)", x: 0, y: 0, order: 90,
+                      threadId: 0, page: page, inPins: [Pin(id: 0, value: .bool(false))], outPins: [],
+                      rawAttributes: ["MACRO_NAME": "Outputs", "KIND": "1"])
+        }
+        project.modules = [
+            PCCModule(id: 1, guid: BoolVarBlock.guid, name: "Src", x: 0, y: 0, order: 10, threadId: 1, page: "Main",
+                      inPins: [], outPins: [Pin(id: 0, value: .bool(false))]),
+            call(2, "A1", "A", page: "Main", order: 20),
+            PCCModule(id: 3, guid: NotBlock.guid, name: "Probe", x: 0, y: 0, order: 30, threadId: 1, page: "Main",
+                      inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .bool(false))],
+                      outPins: [Pin(id: 0, value: .bool(false))]),
+            inputs(10, page: "*A"), call(11, "B1", "B", page: "*A", order: 20), outputs(12, page: "*A"),
+            inputs(20, page: "*B"),
+            PCCModule(id: 21, guid: NotBlock.guid, name: "Not1", x: 0, y: 0, order: 20, threadId: 0, page: "*B",
+                      inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .bool(false))],
+                      outPins: [Pin(id: 0, value: .bool(false))]),
+            outputs(22, page: "*B"),
+        ]
+        func wire(_ from: Int, _ to: Int, pin: Int = 0) -> Connection {
+            Connection(inModuleId: to, inPinId: pin, outModuleId: from, outPinId: 0, isParam: false)
+        }
+        project.inConnections = [
+            wire(1, 2), wire(2, 3, pin: 1),
+            wire(10, 11), wire(11, 12),
+            wire(20, 21, pin: 1), wire(21, 22),
+        ]
+        return project
+    }
+
+    @Test("A value crosses two macro levels and back, in the Swift engine")
+    func swiftEngine() throws {
+        let engine = SimulationEngine(project: Self.project(), scheduling: .everyTick)
+        engine.step()
+        // Src is false, `*B` inverts it, and `A1`'s output is what came back.
+        #expect(engine.getNode(id: 2)?.block.outPins.first?.asBool == true)
+        // And the main sheet's `Not` reads it.
+        #expect(engine.getNode(id: 3)?.block.outPins.first?.asBool == false)
+    }
+
+    @Test("Both engines agree on nested macros")
+    func enginesAgree() throws {
+        let project = Self.project()
+        #expect(MacroCalls.nestingDepth(in: project.modules) == 2)
+        #expect(CxxSimulationCore.macroBridges(in: project).count == 4, "an Inputs and an Outputs per call")
+        try CxxSimulationTests.compareBothEngines(project, label: "nested macros")
+    }
+
+    @Test("Nesting depth: none, one level, two")
+    func depth() {
+        var project = Self.project()
+        #expect(MacroCalls.nestingDepth(in: project.modules) == 2)
+        project.modules.removeAll { $0.id == 11 }           // `*A` no longer calls `*B`
+        #expect(MacroCalls.nestingDepth(in: project.modules) == 1)
+        project.modules.removeAll { $0.id == 2 }
+        #expect(MacroCalls.nestingDepth(in: project.modules) == 0)
+    }
+
+    @Test("The compiler reaches a sheet that only another sheet calls, and expands it in place")
+    func compilerExpandsNested() throws {
+        let xml = PCCSerializer().serialize(project: Self.project())
+        let modules = PLCProjectCompiler.modules(in: xml)
+        let program = PLCProjectCompiler.programModules(modules).map(\.name)
+        #expect(program.contains("Not1"), "`*B` is called only from `*A`, and is still in the program: \(program)")
+        let order = PLCProjectCompiler.expansionOrder(modules).map(\.name)
+        let a = try #require(order.firstIndex(of: "A1"))
+        let b = try #require(order.firstIndex(of: "B1"))
+        let n = try #require(order.firstIndex(of: "Not1"))
+        #expect(a < b && b < n, "A1's sheet, then B1's sheet, in place: \(order)")
+        #expect(order.firstIndex(of: "Probe")! > n, "the main sheet carries on after the whole expansion")
+    }
+
+    @Test("A sheet that calls itself does not loop")
+    func selfCallTerminates() {
+        var project = Self.project()
+        project.modules.append(PCCModule(id: 30, guid: MacroBlock.guid, name: "Loop", x: 0, y: 0, order: 50,
+                                         threadId: 0, page: "*B",
+                                         inPins: [Pin(id: 0, value: .bool(false))],
+                                         outPins: [Pin(id: 0, value: .bool(false))],
+                                         rawAttributes: ["MACRO_NAME": "B"]))
+        #expect(MacroCalls.nestingDepth(in: project.modules) >= 2)
+        let xml = PCCSerializer().serialize(project: project)
+        let modules = PLCProjectCompiler.modules(in: xml)
+        #expect(!PLCProjectCompiler.expansionOrder(modules).isEmpty)
+        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        engine.step()
+    }
+}

@@ -61,12 +61,10 @@ public struct ModuleCardView: View, Equatable {
         return hasControl ? max(76.0, calculated) : calculated
     }
 
-    /// A macro's call site on a main page. The `Inputs` interface inside a macro page carries the same
-    /// attribute and is not one.
+    /// A macro's call site, on a main page or — nested macros — on another macro's sheet. The `Inputs`, `Outputs`
+    /// and `Params` interfaces inside a sheet carry a `MACRO_NAME` too and are not calls.
     nonisolated static func isMacroCaller(_ module: PCCModule) -> Bool {
-        module.rawAttributes["MACRO_NAME"] != nil
-            && !module.page.hasPrefix("*")
-            && module.rawAttributes["MACRO_NAME"]?.lowercased() != "inputs"
+        MacroCalls.target(of: module) != nil
     }
 
     nonisolated public static func inPinPoint(for module: PCCModule, pinIndex: Int) -> CGPoint {
@@ -301,9 +299,7 @@ public struct ModuleCardView: View, Equatable {
         // the delay between clicking a block and it being selected.
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
-                if let macroName = module.rawAttributes["MACRO_NAME"],
-                   !module.page.hasPrefix("*"),
-                   macroName.lowercased() != "inputs" {
+                if let macroName = MacroCalls.target(of: module) {
                     onOpenMacro?("*" + macroName)
                 } else {
                     onBeginRename?()
@@ -513,9 +509,7 @@ public struct ModuleCardView: View, Equatable {
 
     @ViewBuilder
     private var macroButton: some View {
-        if let macroName = module.rawAttributes["MACRO_NAME"],
-           !module.page.hasPrefix("*"),
-           macroName.lowercased() != "inputs" {
+        if let macroName = MacroCalls.target(of: module) {
             Button {
                 onOpenMacro?("*" + macroName)
             } label: {
@@ -599,9 +593,7 @@ public struct ModuleCardView: View, Equatable {
 
         Divider()
 
-        if let macroName = module.rawAttributes["MACRO_NAME"],
-           !module.page.hasPrefix("*"),
-           macroName.lowercased() != "inputs" {
+        if let macroName = MacroCalls.target(of: module) {
             Button {
                 onOpenMacro?("*" + macroName)
             } label: {

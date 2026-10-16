@@ -176,6 +176,10 @@ DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
 /// passes none, and the core then behaves exactly as it did before macros existed.
 void dirigo_sim_set_macro_bridges(DirigoSim *sim, const DirigoMacroBridge *bridges, int32_t count);
 
+/* How many times one propagation sweeps "bridges, wires, bridges": 1 unless macros nest, then two per level, so a
+   value crosses the whole stack within one propagation. */
+void dirigo_sim_set_macro_sweeps(DirigoSim *sim, int32_t sweeps);
+
 /// Sets the wall clock every `DIRIGO_BLOCK_DATETIME` module will read until the next call.
 ///
 /// Called once per step by the caller that owns the clock. A time-dependent block that read its own

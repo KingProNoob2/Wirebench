@@ -44,6 +44,8 @@ public final class SimulationEngine: @unchecked Sendable {
     public private(set) var scheduledThreads: [(threadId: Int, nodes: [RuntimeNode])] = []
     public private(set) var tickCount: UInt64 = 0
     public var cycleDelayMs: Double
+    /// How many macro sweeps one propagation makes: more than one only when macros nest.
+    private let macroSweeps: Int
 
     /// The wall clock this engine stamps a cycle with.
     ///
@@ -141,6 +143,7 @@ public final class SimulationEngine: @unchecked Sendable {
         self.profile = profile
         self.scheduling = scheduling
         self.cycleDelayMs = Double(max(1, project.appOptions.cycleDelay))
+        self.macroSweeps = MacroCalls.sweeps(forDepth: MacroCalls.nestingDepth(in: project.modules))
         setupRuntime()
     }
 
@@ -256,6 +259,12 @@ public final class SimulationEngine: @unchecked Sendable {
     /// Propagates signal values across all connections and macro interfaces.
 
     public func propagateWires() {
+        // Nested macros need the sweep below once per trip across a level (see `MacroCalls.sweeps`); a project
+        // with no macro, or one level of them, runs it once, as before.
+        for _ in 0..<macroSweeps { propagateWiresOnce() }
+    }
+
+    private func propagateWiresOnce() {
         // 1. Push current macro caller inputs to macro subpage inputs before wire propagation
         propagateMacroCalls()
 
@@ -297,11 +306,9 @@ public final class SimulationEngine: @unchecked Sendable {
 
     private func propagateMacroCalls() {
         for macroNode in nodes.values {
-            guard let macroName = macroNode.module.rawAttributes["MACRO_NAME"] ?? (macroNode.block as? MacroBlock)?.macroName,
-                  macroName.lowercased() != "inputs",
-                  macroName.lowercased() != "outputs",
-                  macroName.lowercased() != "params",
-                  !macroNode.module.page.hasPrefix("*") else {
+            // A call on a `*` sheet is a nested macro and bridges like any other.
+            guard let macroName = MacroCalls.target(of: macroNode.module) ?? (macroNode.block as? MacroBlock)?.macroName,
+                  !["inputs", "outputs", "params"].contains(macroName.lowercased()) else {
                 continue
             }
 

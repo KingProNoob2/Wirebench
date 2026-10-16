@@ -157,6 +157,7 @@ public final class CxxSimulationCore {
             bridges.withUnsafeBufferPointer { buffer in
                 dirigo_sim_set_macro_bridges(created, buffer.baseAddress, Int32(buffer.count))
             }
+            dirigo_sim_set_macro_sweeps(created, Int32(MacroCalls.sweeps(forDepth: MacroCalls.nestingDepth(in: project.modules))))
         }
 
         self.sim = created
@@ -174,12 +175,10 @@ public final class CxxSimulationCore {
     /// and a file with an unusual interface name still resolves.
     public static func macroBridges(in project: PCCProject) -> [DirigoMacroBridge] {
         var result: [DirigoMacroBridge] = []
-        let reserved: Set<String> = ["inputs", "outputs", "params"]
 
         for macro in project.modules {
-            guard let name = macro.rawAttributes["MACRO_NAME"], !name.isEmpty,
-                  !macro.page.hasPrefix("*"),
-                  !reserved.contains(name.lowercased()) else { continue }
+            // A call on a `*` sheet is a nested macro and is bridged like any other.
+            guard let name = MacroCalls.target(of: macro) else { continue }
             let targetPage = "*\(name)"
             let candidates = project.modules.filter {
                 $0.page == targetPage

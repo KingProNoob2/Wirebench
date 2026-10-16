@@ -319,13 +319,39 @@ public struct PLCProjectCompiler {
     /// The capture that motivated this (`Serial packet capture/`) shows both cases: a `SystemCmd` moved onto
     /// `main` with thread 0 and an uncalled `*out` sheet leave the uploaded table byte-identical.
     public static func programModules(_ modules: [Module]) -> [Module] {
-        let calls = Set(modules.filter { m in
-            normaliseGUID(m.guid) == macroCallGUID && m.threadId > 0 && !m.page.hasPrefix("*")
-        }.compactMap { $0.macroName })
+        let calls = calledSheets(modules)
         return modules.filter { m in
             if m.page.hasPrefix("*") { return calls.contains(String(m.page.dropFirst())) }
             return m.threadId > 0
         }
+    }
+
+    private static func isCall(_ m: Module) -> Bool { normaliseGUID(m.guid) == macroCallGUID && m.macroName != nil }
+
+    /// The sheets a program reaches: those a top-level module with a thread calls, and — nested macros — those
+    /// that any reached sheet calls in turn. A sheet that calls itself, directly or round a cycle, is reached once.
+    private static func calledSheets(_ modules: [Module]) -> Set<String> {
+        var reached: Set<String> = []
+        var frontier = modules.filter { isCall($0) && $0.threadId > 0 && !$0.page.hasPrefix("*") }
+            .compactMap(\.macroName)
+        while let name = frontier.popLast() {
+            guard reached.insert(name).inserted else { continue }
+            frontier += modules.filter { isCall($0) && $0.page == "*" + name }.compactMap(\.macroName)
+        }
+        return reached
+    }
+
+    /// The modules a call stands for, in expansion order: its sheet's modules by `(ORDER, ID)`, each nested call
+    /// replaced in place by its own sheet's, and so on down. `seen` stops a sheet that calls itself.
+    private static func inlined(_ call: Module, in program: [Module], seen: Set<String> = []) -> [Module] {
+        guard isCall(call), let name = call.macroName, !seen.contains(name) else { return [] }
+        var out: [Module] = []
+        for inner in program.filter({ $0.page == "*" + name })
+                            .sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
+            out.append(inner)
+            out += inlined(inner, in: program, seen: seen.union([name]))
+        }
+        return out
     }
 
     /// The program's modules in the order Dirigo allocates in: `ExpandModules` (`docs/spec/execution-model.md`
@@ -335,9 +361,7 @@ public struct PLCProjectCompiler {
         var out: [Module] = []
         for m in program.filter({ !$0.page.hasPrefix("*") }).sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
             out.append(m)
-            if normaliseGUID(m.guid) == macroCallGUID, let name = m.macroName {
-                out += program.filter { $0.page == "*" + name }.sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) })
-            }
+            out += inlined(m, in: program)
         }
         return out
     }
@@ -351,12 +375,9 @@ public struct PLCProjectCompiler {
         for m in program.filter({ !$0.page.hasPrefix("*") })
                         .sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
             groups[m.threadId, default: []].append(m)
-            if normaliseGUID(m.guid) == macroCallGUID, let name = m.macroName {
-                for var inner in program.filter({ $0.page == "*" + name })
-                        .sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
-                    inner.threadId = m.threadId
-                    groups[m.threadId, default: []].append(inner)
-                }
+            for var inner in inlined(m, in: program) {
+                inner.threadId = m.threadId
+                groups[m.threadId, default: []].append(inner)
             }
         }
         return groups.keys.sorted().flatMap { groups[$0]! }
@@ -468,8 +489,9 @@ public struct PLCProjectCompiler {
         func feedingCall(of interface: Module, pin: Int) -> (UInt8, Int)? {
             guard interface.page.hasPrefix("*") else { return nil }
             let name = String(interface.page.dropFirst())
+            // A call on a `*` sheet is a nested macro; one that sits on the sheet it calls is a loop, not a caller.
             guard let call = modules.first(where: {
-                normaliseGUID($0.guid) == macroCallGUID && $0.macroName == name && !$0.page.hasPrefix("*")
+                normaliseGUID($0.guid) == macroCallGUID && $0.macroName == name && $0.page != interface.page
             }) else { return nil }
             guard let w = wires.first(where: { !$0.isParam && $0.inModule == call.umisteni && $0.inPin == pin })
             else { return nil }

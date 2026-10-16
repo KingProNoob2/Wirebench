@@ -308,22 +308,33 @@ public struct PLCSymbolTable: Sendable {
 
         // A macro call's named out-pins are the sources the sheet's `Outputs` interface is wired from:
         // `DateTime2.Out1` is `InRange1.Y` inside `*DateTime`, so it shares that pin's address.
-        for call in modules where PLCProjectCompiler.normaliseGUID(call.guid) == PLCProjectCompiler.macroCallGUID {
-            guard let name = call.macroName else { continue }
-            let interfaces = Set(modules.filter {
-                $0.page == "*" + name
-                    && PLCProjectCompiler.normaliseGUID($0.guid) == PLCProjectCompiler.macroInterfaceGUID
-            }.map(\.umisteni))
-            for (k, pin) in call.outPins.enumerated() {
-                guard let w = wires.first(where: { interfaces.contains($0.inModule) && $0.inPin == k && !$0.isParam }),
-                      let source = addresses[UInt16(w.outModule) << 8 | UInt16(w.outPin)] else { continue }
-                addresses[UInt16(call.umisteni) << 8 | UInt16(k)] = source
-                guard let pinName = pin.name else { continue }
-                let boolean = source.isBoolean
-                pinRows.append(Row(id: (boolean ? 500000 : 1000) + Int(call.umisteni) * 100 + k + 1, owner: -1,
-                                   type: boolean ? 6 : 4, index: boolean ? source.index : 510,
-                                   rowIndex: source.rowIndex, colIndex: 0,
-                                   name: "\(call.name).\(pinName)", umisteni: Int(call.umisteni), svorka: k))
+        // A nested macro's output feeds an outer sheet's `Outputs`, so an outer call's pin can only be resolved once
+        // the inner one has been: repeat until a pass places nothing, which is at most the nesting depth.
+        var aliased: Set<UInt16> = []
+        var placedAny = true
+        while placedAny {
+            placedAny = false
+            for call in modules where PLCProjectCompiler.normaliseGUID(call.guid) == PLCProjectCompiler.macroCallGUID {
+                guard let name = call.macroName else { continue }
+                let interfaces = Set(modules.filter {
+                    $0.page == "*" + name
+                        && PLCProjectCompiler.normaliseGUID($0.guid) == PLCProjectCompiler.macroInterfaceGUID
+                }.map(\.umisteni))
+                for (k, pin) in call.outPins.enumerated() {
+                    let key = UInt16(call.umisteni) << 8 | UInt16(k)
+                    guard !aliased.contains(key),
+                          let w = wires.first(where: { interfaces.contains($0.inModule) && $0.inPin == k && !$0.isParam }),
+                          let source = addresses[UInt16(w.outModule) << 8 | UInt16(w.outPin)] else { continue }
+                    aliased.insert(key)
+                    placedAny = true
+                    addresses[key] = source
+                    guard let pinName = pin.name else { continue }
+                    let boolean = source.isBoolean
+                    pinRows.append(Row(id: (boolean ? 500000 : 1000) + Int(call.umisteni) * 100 + k + 1, owner: -1,
+                                       type: boolean ? 6 : 4, index: boolean ? source.index : 510,
+                                       rowIndex: source.rowIndex, colIndex: 0,
+                                       name: "\(call.name).\(pinName)", umisteni: Int(call.umisteni), svorka: k))
+                }
             }
         }
 
