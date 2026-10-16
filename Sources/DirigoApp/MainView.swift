@@ -392,7 +392,7 @@ public struct MainView: View {
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 34, alignment: .trailing)
                     .onTapGesture(count: 2) { model.simulationSpeed = 1 }
-                    .help("Double-click to return to 100%.")
+                    .help("Double-click to return to 100% (real time).")
             }
             // Equal room either side inside the toolbar's capsule. A leading `Spacer` used to soak up the slack and
             // push everything right, which left a wide gap on the left and none on the right.
