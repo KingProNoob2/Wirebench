@@ -12,12 +12,12 @@ enum SidebarMetrics {
     static let outerPadding: CGFloat = 10
 
     /// A tinted rounded square behind a row's glyph.
-    static func tile<S: View>(tint: Color, @ViewBuilder content: () -> S) -> some View {
+    static func tile<S: View>(tint: Color, fill: Double = 0.15, @ViewBuilder content: () -> S) -> some View {
         content()
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(tint)
             .frame(width: iconTile, height: iconTile)
-            .background(tint.opacity(0.15),
+            .background(tint.opacity(fill),
                         in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -111,15 +111,18 @@ struct SidebarAddButton: View {
 /// A counted pill. Quieter when the count is zero, so empty pages recede.
 struct SidebarCountBadge: View {
     let count: Int
+    /// On a selected row, whose background is the accent colour: the badge is white on a lighter pill.
+    var onAccent = false
 
     var body: some View {
         Text("\(count)")
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(count == 0 ? Color.secondary.opacity(0.6) : Color.secondary)
+            .foregroundStyle(onAccent ? Color.white : (count == 0 ? Color.secondary.opacity(0.6) : Color.secondary))
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
-            .background(Color.primary.opacity(0.08), in: Capsule(style: .continuous))
+            .background(onAccent ? Color.white.opacity(0.24) : Color.primary.opacity(0.08),
+                        in: Capsule(style: .continuous))
     }
 }
 
@@ -130,15 +133,20 @@ struct SidebarRow: View {
     let title: String
     let count: Int
 
+    /// `.increased` when the list draws this row selected, on the accent colour. The tile and badge are
+    /// accent-tinted, so left alone they vanish into that background (a blue glyph on a blue row).
+    @Environment(\.backgroundProminence) private var prominence
+
     var body: some View {
+        let selected = prominence == .increased
         HStack(spacing: 8) {
-            SidebarMetrics.tile(tint: tint) {
+            SidebarMetrics.tile(tint: selected ? .white : tint, fill: selected ? 0.24 : 0.15) {
                 Image(systemName: symbol)
             }
             Text(title)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            SidebarCountBadge(count: count)
+            SidebarCountBadge(count: count, onAccent: selected)
         }
     }
 }
