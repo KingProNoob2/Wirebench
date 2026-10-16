@@ -420,49 +420,45 @@ struct SignalRow: View, Equatable {
                     .fill(isHigh ? Theme.signalHigh : Color.secondary.opacity(0.35))
                     .frame(width: 7, height: 7)
                 if let number {
-                    // A field only while it is being edited. A `TextField` inside a `Form` reserves the
-                    // standard control height however plain its style is, which is what made these rows
-                    // taller than the read-only ones and left the label off their baseline. At rest this
-                    // is the *same view* as a read-only row, so the two cannot differ.
-                    if isEditing {
-                        TextField("", text: $draft)
-                            .textFieldStyle(.plain)
-                            .multilineTextAlignment(.trailing)
-                            .font(.system(.body, design: .monospaced))
-                            .monospacedDigit()
-                            .focused($isEditingFocused)
-                            .frame(width: max(38, CGFloat(value.count) * 8.5 + 18), alignment: .trailing)
-                            .padding(.horizontal, 3)
-                            .background(Color.primary.opacity(0.10),
-                                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .onSubmit { commit() }
-                            // Focus after the field exists rather than in the same update that creates it,
-                            // which is what makes the caret land in it reliably.
-                            .task { isEditingFocused = true }
-                            .onChange(of: isEditingFocused) { _, focused in
-                                if !focused { commit() }
+                    // One chip, resting or editing. The resting text sizes it; while editing, the field is laid *over*
+                    // that text, which is hidden but still there to give the chip its size. Swapping a `TextField` in
+                    // for the text changed the row's width and height — a `TextField` in a `Form` reserves the
+                    // standard control height — and moved everything beside it.
+                    Text(value)
+                        .font(.system(.body, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(isHigh ? .primary : .secondary)
+                        .opacity(isEditing ? 0 : 1)
+                        .frame(minWidth: max(30, CGFloat(value.count) * 8.5 + 12), alignment: .trailing)
+                        .padding(.horizontal, 4)
+                        .background(Color.primary.opacity(isEditing || isHovering ? 0.16 : 0.08),
+                                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .overlay {
+                            if isEditing {
+                                TextField("", text: $draft)
+                                    .textFieldStyle(.plain)
+                                    .multilineTextAlignment(.trailing)
+                                    .font(.system(.body, design: .monospaced))
+                                    .monospacedDigit()
+                                    .focused($isEditingFocused)
+                                    .padding(.horizontal, 4)
+                                    .onSubmit { commit() }
+                                    // Focus after the field exists rather than in the same update that creates it,
+                                    // which is what makes the caret land in it reliably.
+                                    .task { isEditingFocused = true }
+                                    .onChange(of: isEditingFocused) { _, focused in
+                                        if !focused { commit() }
+                                    }
                             }
-                    } else {
-                        // A resting value that still *looks* and *behaves* like something you can type
-                        // into: a padded chip so the whole box is the tap target rather than the glyphs,
-                        // with a faint fill at rest and a stronger one under the pointer. The padding is
-                        // horizontal only — vertical padding is what inflated these rows before.
-                        Text(value)
-                            .font(.system(.body, design: .monospaced))
-                            .monospacedDigit()
-                            .foregroundStyle(isHigh ? .primary : .secondary)
-                            .frame(minWidth: max(30, CGFloat(value.count) * 8.5 + 12), alignment: .trailing)
-                            .padding(.horizontal, 4)
-                            .background(Color.primary.opacity(isHovering ? 0.16 : 0.08),
-                                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .contentShape(Rectangle())
-                            .onHover { isHovering = $0 }
-                            .onTapGesture {
-                                draft = value
-                                isEditing = true
-                            }
-                            .help(isInput ? "Click to edit this input." : "Click to set this variable.")
-                    }
+                        }
+                        .contentShape(Rectangle())
+                        .onHover { isHovering = $0 }
+                        .onTapGesture {
+                            guard !isEditing else { return }
+                            draft = value
+                            isEditing = true
+                        }
+                        .help(isInput ? "Click to edit this input." : "Click to set this variable.")
                 } else {
                     Text(value)
                         .font(.system(.body, design: .monospaced))
@@ -502,19 +498,31 @@ struct ParamValueField: View {
     @State private var draft: String?
 
     var body: some View {
-        TextField("Value", text: Binding(
-            get: { draft ?? current },
-            set: { text in
-                draft = text
-                if let number = Int32(text.trimmingCharacters(in: .whitespaces)) {
-                    model.updateModuleParam(id: moduleId, paramIndex: index, value: .int32(number))
-                }
-            }))
+        // The same chip as a signal row's value: its text sizes it and the field lies over that, so typing does not
+        // change the row's width or height (a bordered `TextField` in a `Form` is taller than the text beside it).
+        Text(current)
             .font(.system(.body, design: .monospaced))
-            .multilineTextAlignment(.trailing)
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 110)
-            .onSubmit { draft = nil }
+            .monospacedDigit()
+            .opacity(0)
+            .frame(minWidth: max(30, CGFloat(current.count) * 8.5 + 12), alignment: .trailing)
+            .padding(.horizontal, 4)
+            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay {
+                TextField("", text: Binding(
+                    get: { draft ?? current },
+                    set: { text in
+                        draft = text
+                        if let number = Int32(text.trimmingCharacters(in: .whitespaces)) {
+                            model.updateModuleParam(id: moduleId, paramIndex: index, value: .int32(number))
+                        }
+                    }))
+                    .textFieldStyle(.plain)
+                    .font(.system(.body, design: .monospaced))
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+                    .padding(.horizontal, 4)
+                    .onSubmit { draft = nil }
+            }
             // What was typed has been written; from then on the field shows the block's own value, so a change from
             // the simulation or from another editor is not hidden behind the old text.
             .onChange(of: current) { _, _ in
