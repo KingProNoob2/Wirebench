@@ -16,16 +16,55 @@ public struct MainView: View {
         self.model = model
     }
 
-    /// The speed slider's position: the index of the nearest step.
-    private var speedIndex: Binding<Double> {
-        Binding(
-            get: {
-                let steps = AppModel.speedSteps
-                let nearest = steps.indices.min { abs(steps[$0] - model.simulationSpeed) < abs(steps[$1] - model.simulationSpeed) }
-                return Double(nearest ?? 0)
-            },
-            set: { model.simulationSpeed = AppModel.speedSteps[min(max(Int($0.rounded()), 0), AppModel.speedSteps.count - 1)] }
-        )
+    /// Where the simulation speed sits among the offered steps (the nearest one).
+    private var speedPosition: Int {
+        let steps = AppModel.speedSteps
+        return steps.indices.min { abs(steps[$0] - model.simulationSpeed) < abs(steps[$1] - model.simulationSpeed) } ?? 0
+    }
+
+    private func percent(_ speed: Double) -> String { "\(Int((speed * 100).rounded()))%" }
+
+    private func stepSpeed(by delta: Int) {
+        let steps = AppModel.speedSteps
+        model.simulationSpeed = steps[min(max(speedPosition + delta, 0), steps.count - 1)]
+    }
+
+    /// Simulation speed as ‹ 25% ›: a step button either side of a menu of the presets. A slider with six
+    /// stops drew a thumb bigger than the capsule it sat in, and ticks under it that made the capsule taller
+    /// than its neighbour.
+    private var speedControl: some View {
+        HStack(spacing: 2) {
+            Button { stepSpeed(by: -1) } label: { Image(systemName: "minus") }
+                .disabled(speedPosition == 0)
+                .help("Slower")
+            Menu {
+                ForEach(AppModel.speedSteps, id: \.self) { speed in
+                    Button {
+                        model.simulationSpeed = speed
+                    } label: {
+                        if speed == AppModel.speedSteps[speedPosition] {
+                            Label(percent(speed) + (speed == 1 ? "  (real time)" : ""), systemImage: "checkmark")
+                        } else {
+                            Text(percent(speed) + (speed == 1 ? "  (real time)" : ""))
+                        }
+                    }
+                }
+            } label: {
+                Text(percent(model.simulationSpeed))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .frame(minWidth: 42)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Simulation speed. 100% is real time, as the PLC would run it.")
+            Button { stepSpeed(by: 1) } label: { Image(systemName: "plus") }
+                .disabled(speedPosition == AppModel.speedSteps.count - 1)
+                .help("Faster")
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .disabled(model.project == nil)
     }
 
     private var allPages: [ProjectPage] {
@@ -379,20 +418,7 @@ public struct MainView: View {
             HStack(spacing: 6) {
                 TickCountBadge(model: model)
 
-                // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
-                // stay the profile's, and this only changes how fast time passes.
-                Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
-                    .frame(width: 150)
-                    .disabled(model.project == nil)
-                    .help("Simulation speed. 100% is real time, as the PLC would run it.")
-
-                Text("\(Int((model.simulationSpeed * 100).rounded()))%")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 30, alignment: .trailing)
-                    .onTapGesture(count: 2) { model.simulationSpeed = 1 }
-                    .help("Double-click to return to 100% (real time).")
+                speedControl
             }
             // Equal room either side inside the toolbar's capsule. A leading `Spacer` used to soak up the slack and
             // push everything right, which left a wide gap on the left and none on the right.
