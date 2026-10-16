@@ -391,12 +391,13 @@ public struct MainView: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 40, alignment: .trailing)
+                    .frame(minWidth: 34, alignment: .trailing)
                     .onTapGesture(count: 2) { model.simulationSpeed = 1 }
                     .help("Double-click to return to 100%.")
             }
-            // Room inside the toolbar's capsule, so the percentage does not sit on its edge.
-            .padding(.horizontal, 10)
+            // A little room inside the toolbar's capsule on the right, so the percentage does not sit on its edge.
+            // The left already has the capsule's own inset.
+            .padding(.trailing, 4)
         }
 
         ToolbarItem(placement: .primaryAction) {
