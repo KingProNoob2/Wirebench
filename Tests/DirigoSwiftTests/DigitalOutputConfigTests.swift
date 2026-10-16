@@ -68,3 +68,48 @@ struct DigitalOutputConfigTests {
         #expect(wires.count == 1 && wires[0].inPinId == do7, "DO7's wire follows its pin; DO2's is dropped")
     }
 }
+
+/// An `IntVar` holds a value that nothing but a `Set` block or a person can change.
+@Suite("IntVar by hand")
+struct IntVarEditTests {
+    @MainActor
+    private func model() throws -> AppModel {
+        var project = PCCProject(name: "intvar")
+        project.pages = [ProjectPage(caption: "main")]
+        project.appOptions.cycleDelay = 10
+        project.modules = [
+            PCCModule(id: 1, guid: IntVarBlock.guid, name: "IntVar1", x: 0, y: 0, order: 10,
+                      threadId: 1, page: "main", inPins: [], outPins: [Pin(id: 0, value: .int32(0))]),
+        ]
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("intvar-\(UUID()).pcc")
+        try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
+        let model = AppModel()
+        model.loadProject(url: url)
+        return model
+    }
+
+    @Test("A value typed over an IntVar sticks through further steps, on whichever engine runs it")
+    @MainActor
+    func valueSticks() throws {
+        let model = try model()
+        model.setVariableValue(moduleId: 1, value: 42)
+        #expect(model.getNode(id: 1)?.block.outPins.first?.asInt == 42)
+        for _ in 0..<5 { model.step() }
+        #expect(model.getNode(id: 1)?.block.outPins.first?.asInt == 42,
+                "the variable kept what was written (core: \(model.isUsingCxxCore))")
+        model.setVariableValue(moduleId: 1, value: -7)
+        model.step()
+        #expect(model.getNode(id: 1)?.block.outPins.first?.asInt == -7)
+    }
+
+    @Test("The inspector offers an editable value for an IntVar's output, and not for other blocks")
+    @MainActor
+    func inspectorBinding() throws {
+        let model = try model()
+        let module = try #require(model.module(id: 1))
+        let binding = try #require(InspectorView.editableVariable(model: model, module: module, value: .int32(0)))
+        binding.wrappedValue = 9
+        #expect(binding.wrappedValue == 9)
+        #expect(model.getNode(id: 1)?.block.outPins.first?.asInt == 9)
+    }
+}

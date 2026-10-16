@@ -769,6 +769,9 @@ void dirigo_sim_set_out(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue 
     if (pin < 0 || static_cast<size_t>(pin) >= m.outPins.size()) return;
     m.outPins[pin] = value;
     m.pulseRemaining = 0;                 /* `BoolVarBlock.setOutput` */
+    /* A variable's value is its *state*, not its pin: writing the pin alone is undone the next time the
+       variable runs, so a value set by hand has to reach `intValue` too. */
+    if (m.kind == DIRIGO_BLOCK_INTVAR && pin == 0) m.intValue = static_cast<int32_t>(asInt(value));
 }
 
 int32_t dirigo_sim_portable_kind_count(void) { return 12; }

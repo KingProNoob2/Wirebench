@@ -1150,6 +1150,17 @@ public final class AppModel: @unchecked Sendable {
         refreshAfterPinEdit()
     }
 
+    /// Sets a variable block's value by hand (`IntVar`). The value is the block's state, so it is written
+    /// through `WritableVariable` — and into the C++ core's copy when that is running the project — rather than
+    /// onto the output pin, which the variable would overwrite from its stored value on its next pass.
+    public func setVariableValue(moduleId: Int, value: Int) {
+        guard let node = getNode(id: moduleId), let variable = node.block as? WritableVariable else { return }
+        let stored = PinValue.int32(Int32(truncatingIfNeeded: value))
+        variable.writeVariable(stored)
+        cxxCore?.setOut(moduleId: moduleId, pin: 0, value: stored)
+        refreshAfterPinEdit()
+    }
+
     /// Re-propagates and, when the simulation is not running, takes one step so an edit shows up now.
     private func refreshAfterPinEdit() {
         engine?.propagateWires()

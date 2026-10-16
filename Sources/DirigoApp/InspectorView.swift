@@ -74,9 +74,11 @@ public struct InspectorView: View {
                         ForEach(0..<mod.outPins.count, id: \.self) { idx in
                             let val = node?.block.outPins.indices.contains(idx) == true
                                 ? node!.block.outPins[idx] : .bool(false)
+                            // An `IntVar`'s output *is* the variable, so it can be typed over like an input.
                             SignalRow(name: ModulePinCatalog.outputPinFullName(for: mod, index: idx),
                                       value: val.description,
-                                      isHigh: val.asBool)
+                                      isHigh: val.asBool,
+                                      number: Self.editableVariable(model: model, module: mod, value: val))
                                 .equatable()
                         }
                     }
@@ -139,6 +141,16 @@ public struct InspectorView: View {
                 Text("Select a function block on the canvas to inspect its signals and parameters.")
             }
         }
+    }
+
+    /// A typed-in value for an `IntVar`'s output: the variable itself, which nothing else can change by hand.
+    static func editableVariable(model: AppModel, module: PCCModule, value: PinValue) -> Binding<Int>? {
+        guard model.getNode(id: module.id)?.block is IntVarBlock else { return nil }
+        return Binding(
+            get: {
+                (model.getNode(id: module.id)?.block as? IntVarBlock).map { Int($0.currentValue) } ?? value.asInt
+            },
+            set: { model.setVariableValue(moduleId: module.id, value: $0) })
     }
 
     /// A typed-in value for an input pin that holds an integer.
@@ -425,7 +437,7 @@ struct SignalRow: View, Equatable {
                             .contentShape(Rectangle())
                             .onHover { isHovering = $0 }
                             .onTapGesture { isEditing = true }
-                            .help("Click to edit this input.")
+                            .help(isInput ? "Click to edit this input." : "Click to set this variable.")
                     }
                 } else {
                     Text(value)
