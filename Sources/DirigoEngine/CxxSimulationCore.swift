@@ -68,7 +68,10 @@ public final class CxxSimulationCore {
         project.modules.allSatisfy { kind(forGUID: $0.guid) != nil }
     }
 
-    public init(project: PCCProject, profileScheduling: Bool = true) {
+    public init(project original: PCCProject, profileScheduling: Bool = true) {
+        // Every call of a macro runs on its own copy of the sheet, as in `SimulationEngine`; the copies'
+        // modules are addressable here by the ids `MacroInstancing` gave them.
+        let project = MacroInstancing.instanced(original)
         // The same starting state `SimulationEngine.setupRuntime` builds: a block per module, the
         // project's in-pin and param-pin values applied over the block's own defaults. The values are
         // handed over as flat C arrays the core copies from, so nothing here outlives the call.

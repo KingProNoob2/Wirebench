@@ -56,6 +56,9 @@ public final class Bits2IntBlock: FunctionBlock, @unchecked Sendable {
                 packedVal |= (1 << i)
             }
         }
+        // An Int is a 16-bit signed word: all sixteen bits set read back as -1, which is how a sign bit
+        // copied into the upper inputs gives a negative number.
+        if inPins.count - 1 >= 16 { packedVal = Int32(Int16(truncatingIfNeeded: packedVal)) }
         outPins[0] = .int32(packedVal)
     }
 

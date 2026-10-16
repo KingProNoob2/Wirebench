@@ -336,6 +336,17 @@ struct CxxSimulationTests {
             inPins: [.bool(false), .bool(true), .bool(true)], paramPins: [], outPins: 1)
         try Self.compareBothEngines(bitsDisabled, label: "Bits2Int En=0")
 
+        // Sixteen bits make a 16-bit signed Int: the upper bits copied from a sign read back negative.
+        let sixteen = Self.oneModuleProject(
+            name: "bits2int-16", guid: Bits2IntBlock.guid,
+            inPins: [.bool(true), .bool(true), .bool(false), .bool(true)] + Array(repeating: PinValue.bool(true), count: 13),
+            paramPins: [], outPins: 1)
+        try Self.compareBothEngines(sixteen, label: "Bits2Int 16 bits")
+        let block = Bits2IntBlock(totalPins: 17)
+        block.inPins = [.bool(true), .bool(true), .bool(false), .bool(true)] + Array(repeating: PinValue.bool(true), count: 13)
+        block.process(sample: SampleContext(deltaMs: 1))
+        #expect(block.outPins[0].asInt == -3, "0xFFFD as a signed 16-bit Int")
+
         // Div: En, A, B — quotient and remainder, including the B = 0 guard and negative operands.
         for (a, b) in [(Int32(17), Int32(5)), (7, 7), (-17, 5), (17, -5), (-17, -5), (0, 3),
                        (5, 0), (-5, 0), (Int32.min, -1)] {

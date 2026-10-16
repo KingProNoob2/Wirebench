@@ -79,9 +79,10 @@ public struct PLCProjectBuild: Equatable, Sendable {
     ///   - template: the table whose header and profile are carried into the build.
     public static func compile(xml: String, classForGUID: [String: String],
                                template: PLCProgramTable) throws -> PLCProjectBuild {
-        let modules = PLCProjectCompiler.modules(in: xml)
-        let wires = PLCProjectCompiler.resolvingMacroInterfaces(
-            modules: modules, wires: PLCProjectCompiler.wires(in: xml))
+        // Each call of a macro gets its own copy of the sheet (see `PLCProjectCompiler.instanced`).
+        let (modules, rawWires) = PLCProjectCompiler.instanced(
+            modules: PLCProjectCompiler.modules(in: xml), wires: PLCProjectCompiler.wires(in: xml))
+        let wires = PLCProjectCompiler.resolvingMacroInterfaces(modules: modules, wires: rawWires)
         let normalised = Dictionary(uniqueKeysWithValues: classForGUID.map {
             (PLCProjectCompiler.normaliseGUID($0.key), $0.value)
         })

@@ -501,3 +501,15 @@ public enum SystemCommandSimulation {
         }
     }
 }
+
+extension SystemCommandInfo {
+    /// The `DEFINITION=` a module carries once this variant is chosen: the `[@SystemCommands]` syntax without the
+    /// mnemonic, e.g. `TXT=Pwm, CMD=0x0303, I1=(Int)PwmCH, I2=(Int)Value, O1=(Int)Out`.
+    public var definitionString: String {
+        func pin(_ schema: PinSchema) -> String {
+            "(\(schema.dataType))" + (schema.isHidden ? "(Hidden)" : "") + schema.name
+        }
+        let word = String(format: "0x%04X", command)
+        return "TXT=\(text), CMD=\(word), I1=\(pin(input1)), I2=\(pin(input2)), O1=\(pin(output))"
+    }
+}

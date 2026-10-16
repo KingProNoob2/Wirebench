@@ -341,6 +341,64 @@ public struct PLCProjectCompiler {
         return reached
     }
 
+    /// Gives every call of a macro its own copy of the macro's sheet, as Dirigo's expansion does (`MacroInstancing`
+    /// says which calls get one). A clone has fresh module ids, its own `*Name#n` page, and the wires between its
+    /// modules; the calls inside it name the clones of *their* sheets. The first call of each macro keeps the
+    /// original sheet, so a project that calls each macro once is returned as it came.
+    ///
+    /// Module ids are one byte in the record, so only as many copies are made as there are ids left (past the
+    /// project's highest); a call that does not fit keeps sharing its macro's sheet, as every call did before.
+    public static func instanced(modules: [Module], wires: [Wire]) -> (modules: [Module], wires: [Wire]) {
+        var sheets: [String: MacroInstancing.Sheet] = [:]
+        var topCalls: [MacroInstancing.Call] = []
+        for m in modules {
+            let page = m.page.lowercased()
+            let call = isCall(m) ? m.macroName.map { MacroInstancing.Call(key: Int(m.umisteni), order: m.order, target: $0) } : nil
+            if page.hasPrefix("*") {
+                var sheet = sheets[page] ?? MacroInstancing.Sheet(calls: [], size: 0)
+                sheet.size += 1
+                if let call { sheet.calls.append(call) }
+                sheets[page] = sheet
+            } else if let call, m.threadId > 0 {
+                topCalls.append(call)
+            }
+        }
+        let highest = modules.map { Int($0.umisteni) }.max() ?? 0
+        let plan = MacroInstancing.plan(topCalls: topCalls, sheets: sheets, budget: 255 - highest)
+        guard !plan.isEmpty else { return (modules, wires) }
+
+        var resultModules = modules
+        var resultWires = wires
+        var next = highest + 1
+        func renamed(_ m: Module, owner: String) -> Module {
+            guard let name = plan.renames[.init(owner: owner, key: Int(m.umisteni))] else { return m }
+            var copy = m
+            copy.macroName = name
+            return copy
+        }
+        resultModules = resultModules.map { renamed($0, owner: "") }
+        for clone in plan.clones {
+            var idMap: [UInt8: UInt8] = [:]
+            for m in modules where m.page.lowercased() == clone.sheet {
+                var copy = renamed(m, owner: clone.name)
+                copy.umisteni = UInt8(next)
+                idMap[m.umisteni] = UInt8(next)
+                next += 1
+                copy.page = "*" + clone.name
+                resultModules.append(copy)
+            }
+            for w in wires {
+                guard let from = idMap[w.outModule], let to = idMap[w.inModule] else { continue }
+                var copy = w
+                copy.outModule = from
+                copy.inModule = to
+                resultWires.append(copy)
+            }
+        }
+        // The order `modules(in:)` returns: by ORDER, ties by descending id.
+        return (resultModules.sorted { ($0.order, -Int($0.umisteni)) < ($1.order, -Int($1.umisteni)) }, resultWires)
+    }
+
     /// The modules a call stands for, in expansion order: its sheet's modules by `(ORDER, ID)`, each nested call
     /// replaced in place by its own sheet's, and so on down. `seen` stops a sheet that calls itself.
     private static func inlined(_ call: Module, in program: [Module], seen: Set<String> = []) -> [Module] {

@@ -103,21 +103,48 @@ public final class DbNetSession {
 /// much more to expect — no delimiter search needed.
 public final class SerialDbNetTransport: DbNetTransport {
     private let port: SerialPort
-    private let pollInterval: TimeInterval = 0.01
 
     public init(port: SerialPort) {
         self.port = port
     }
 
+    /// How many bytes the reply in `bytes` will have, once that can be told. A serial frame says so in its first
+    /// bytes — `10 DA SA FCB CS 16` is six, `68 L L 68 …` is `L + 6` — and a reply is complete the moment that many
+    /// have arrived. Waiting for the UDP station's 15-byte header instead meant no serial reply ever completed,
+    /// and every exchange ran out its whole timeout (2.5 s each, 22 s for a 640-byte upload).
+    static func serialFrameLength(of bytes: [UInt8]) -> Int? {
+        guard let marker = bytes.first else { return nil }
+        switch marker {
+        case 0x10: return 6
+        case 0x68:
+            guard bytes.count >= 4 else { return nil }
+            // `68 L L 68`: a header that does not repeat itself is noise; read on to the timeout.
+            guard bytes[1] == bytes[2], bytes[3] == 0x68 else { return nil }
+            return Int(bytes[1]) + 6
+        default: return nil
+        }
+    }
+
     public func exchange(_ frame: [UInt8], timeout: TimeInterval) throws -> [UInt8] {
+        port.discardInput()
         _ = try port.write(data: Data(frame))
 
         let deadline = Date().addingTimeInterval(timeout)
         var received: [UInt8] = []
 
-        while Date() < deadline {
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            guard port.waitReadable(timeout: remaining) else { continue }
             if let chunk = try? port.read(maxBytes: 256), !chunk.isEmpty {
                 received.append(contentsOf: chunk)
+                // A serial frame is judged by its own length rules only; the UDP station's below would misread it.
+                if received[0] == 0x10 || received[0] == 0x68 {
+                    if let total = Self.serialFrameLength(of: received), received.count >= total {
+                        return Array(received.prefix(total))
+                    }
+                    continue
+                }
                 // Enough for the header? Then the length field tells us the total.
                 if received.count >= DbNetFrame.Offset.payload {
                     let lengthField = Int(received[DbNetFrame.Offset.length])
@@ -131,8 +158,6 @@ public final class SerialDbNetTransport: DbNetTransport {
                    DbNetFrame.flag(of: received) == DbNetFrame.retryFlag {
                     return Array(received.prefix(DbNetFrame.retryFrameLength))
                 }
-            } else {
-                Thread.sleep(forTimeInterval: pollInterval)
             }
         }
         return received

@@ -671,13 +671,17 @@ public final class AppModel: @unchecked Sendable {
         let module = BlockFactory.makeModule(
             guid: guid, id: id, name: name,
             x: spot.x, y: spot.y,
-            order: order, threadId: 1, page: selectedPage
+            order: order, threadId: threadForNewBlocks, page: selectedPage
         )
         project.modules.append(module)
         self.project = project
         self.selectedModuleId = id
         self.isDocumentEdited = true
         self.engine = installEngine(project: project)
+        // A new SystemCmd is the Tris command (0x0302), as Dirigo makes one: it has pins to name and a command to send.
+        if guid == SystemCmdBlock.guid, let tris = systemCommandCatalogue.first(where: { $0.command == 0x0302 }) {
+            setSystemCommand(moduleId: id, to: tris)
+        }
         return id
     }
 

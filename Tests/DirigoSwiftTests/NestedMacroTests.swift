@@ -114,4 +114,87 @@ struct NestedMacroTests {
         let engine = SimulationEngine(project: project, scheduling: .everyTick)
         engine.step()
     }
+    // MARK: - One copy of the sheet per call
+
+    /// `project()` with a second call of `*A` (`A2`, id 4) whose input is a constant `true`, where `A1` is
+    /// fed `false`. `*A` calls `*B` once and `*B` inverts, so `A1` must answer `true` and `A2` `false`.
+    static func twoCalls() -> PCCProject {
+        var project = project()
+        project.modules.append(PCCModule(
+            id: 4, guid: MacroBlock.guid, name: "A2", x: 0, y: 0, order: 25, threadId: 1, page: "Main",
+            inPins: [Pin(id: 0, value: .bool(true))], outPins: [Pin(id: 0, value: .bool(false))],
+            rawAttributes: ["MACRO_NAME": "A"]))
+        return project
+    }
+
+    @Test("Two calls of one macro see independent copies, in the Swift engine")
+    func swiftCallsAreIndependent() {
+        let engine = SimulationEngine(project: Self.twoCalls(), scheduling: .everyTick)
+        for _ in 0..<3 { engine.step() }
+        #expect(engine.getNode(id: 2)?.block.outPins.first?.asBool == true)
+        #expect(engine.getNode(id: 4)?.block.outPins.first?.asBool == false)
+    }
+
+    @Test("Two calls of one macro see independent copies, in the C++ core")
+    func cxxCallsAreIndependent() {
+        let project = Self.twoCalls()
+        let core = CxxSimulationCore(project: project, profileScheduling: false)
+        for _ in 0..<3 { core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0)) }
+        #expect(core.outValue(moduleId: 2, pin: 0)?.asBool == true)
+        #expect(core.outValue(moduleId: 4, pin: 0)?.asBool == false)
+    }
+
+    /// `project()` plus a sheet `*C` that nothing calls and that calls `*A` with an input of `true`. That call
+    /// never runs, so `A1`'s answer must not change — its input used to be overwritten by the stray call's.
+    static func strayCall() -> PCCProject {
+        var project = project()
+        project.pages.append(ProjectPage(caption: "*C"))
+        project.modules.append(PCCModule(
+            id: 5, guid: MacroBlock.guid, name: "Stray", x: 0, y: 0, order: 10, threadId: 0, page: "*C",
+            inPins: [Pin(id: 0, value: .bool(true))], outPins: [Pin(id: 0, value: .bool(false))],
+            rawAttributes: ["MACRO_NAME": "A"]))
+        return project
+    }
+
+    @Test("A call on a sheet nothing calls does not feed the macro a real call is using")
+    func strayCallIsIgnored() {
+        let engine = SimulationEngine(project: Self.strayCall(), scheduling: .everyTick)
+        for _ in 0..<3 { engine.step() }
+        #expect(engine.getNode(id: 2)?.block.outPins.first?.asBool == true, "A1: Src is false, B inverts")
+        let core = CxxSimulationCore(project: Self.strayCall(), profileScheduling: false)
+        for _ in 0..<3 { core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0)) }
+        #expect(core.outValue(moduleId: 2, pin: 0)?.asBool == true)
+    }
+
+    @Test("Both engines agree when a macro is called twice")
+    func enginesAgreeOnTwoCalls() throws {
+        try CxxSimulationTests.compareBothEngines(Self.twoCalls(), label: "two calls")
+    }
+
+    @Test("Instancing leaves a project with one call per macro alone, and clones a repeated call")
+    func instancingClones() {
+        let single = Self.project()
+        #expect(MacroInstancing.instanced(single) == single)
+        let doubled = MacroInstancing.instanced(Self.twoCalls())
+        // `A2` gets `*A#1` (3 modules) and that sheet's call of `B` gets `*B#2` (3 modules).
+        #expect(doubled.modules.count == Self.twoCalls().modules.count + 6)
+        #expect(doubled.modules.first { $0.id == 4 }?.rawAttributes["MACRO_NAME"] == "A#1")
+        #expect(doubled.modules.first { $0.id == 2 }?.rawAttributes["MACRO_NAME"] == "A", "the first call keeps the sheet")
+    }
+
+    @Test("The compiler expands each call of a macro into its own modules")
+    func compilerCopiesPerCall() throws {
+        let xml = PCCSerializer().serialize(project: Self.twoCalls())
+        let (modules, wires) = PLCProjectCompiler.instanced(
+            modules: PLCProjectCompiler.modules(in: xml), wires: PLCProjectCompiler.wires(in: xml))
+        let order = PLCProjectCompiler.expansionOrder(modules)
+        #expect(order.filter { $0.name == "Not1" }.count == 2, "`*B` is expanded under each call of `*A`")
+        #expect(Set(order.map(\.umisteni)).count == order.count, "every expanded module has its own id")
+        let resolved = PLCProjectCompiler.resolvingMacroInterfaces(modules: modules, wires: wires)
+        let a1 = try #require(modules.first { $0.name == "A1" }), a2 = try #require(modules.first { $0.name == "A2" })
+        let notIDs = order.filter { $0.name == "Not1" }.map(\.umisteni)
+        // Each `Not1` reads what feeds its own chain's call, so the two do not read the same source.
+        let sources = notIDs.compactMap { id in resolved.first { $0.inModule == id && $0.inPin == 1 }?.outModule }
+        #expect(sources.count == 2 && sources[0] != sources[1], "\(sources) \(a1.umisteni) \(a2.umisteni)")
+    }
 }

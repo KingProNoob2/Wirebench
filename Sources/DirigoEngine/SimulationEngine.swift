@@ -32,6 +32,10 @@ public final class SimulationEngine: @unchecked Sendable {
     }
 
     public let project: PCCProject
+    /// What actually runs: `project` with every call of a macro given its own copy of the macro's sheet
+    /// (`MacroInstancing`). The copies' modules exist only here, so `nodes` has more entries than `project`
+    /// has modules when a macro is called twice.
+    private let runtime: PCCProject
     /// The hardware profile whose thread periods drive `.profileIntervals` scheduling.
     public let profile: PLCProfile?
     public let scheduling: ThreadScheduling
@@ -140,10 +144,11 @@ public final class SimulationEngine: @unchecked Sendable {
         scheduling: ThreadScheduling = .everyTick
     ) {
         self.project = project
+        self.runtime = MacroInstancing.instanced(project)
         self.profile = profile
         self.scheduling = scheduling
         self.cycleDelayMs = Double(max(1, project.appOptions.cycleDelay))
-        self.macroSweeps = MacroCalls.sweeps(forDepth: MacroCalls.nestingDepth(in: project.modules))
+        self.macroSweeps = MacroCalls.sweeps(forDepth: MacroCalls.nestingDepth(in: runtime.modules))
         setupRuntime()
     }
 
@@ -169,7 +174,7 @@ public final class SimulationEngine: @unchecked Sendable {
         executionSchedule.removeAll()
 
         // 1. Instantiate blocks
-        for mod in project.modules {
+        for mod in runtime.modules {
             let block = BlockRegistry.shared.create(for: mod)
             
             // Initialize pin values from project file
@@ -202,22 +207,22 @@ public final class SimulationEngine: @unchecked Sendable {
 
         // 3. Index connection maps for fast immediate forward propagation
         outInConnectionMap.removeAll()
-        for conn in project.inConnections {
+        for conn in runtime.inConnections {
             outInConnectionMap[conn.outModuleId, default: []].append(conn)
         }
 
         outParamConnectionMap.removeAll()
-        for conn in project.paramConnections {
+        for conn in runtime.paramConnections {
             outParamConnectionMap[conn.outModuleId, default: []].append(conn)
         }
 
         // Inbound maps: the original evaluates by pulling (see `pullInputs`).
         inConnectionMap.removeAll()
         inParamConnectionMap.removeAll()
-        for conn in project.inConnections {
+        for conn in runtime.inConnections {
             inConnectionMap[conn.inModuleId, default: []].append(conn)
         }
-        for conn in project.paramConnections {
+        for conn in runtime.paramConnections {
             inParamConnectionMap[conn.inModuleId, default: []].append(conn)
         }
 
@@ -269,7 +274,7 @@ public final class SimulationEngine: @unchecked Sendable {
         propagateMacroCalls()
 
         // 2. IN connections
-        for conn in project.inConnections {
+        for conn in runtime.inConnections {
             guard let srcNode = nodes[conn.outModuleId],
                   let dstNode = nodes[conn.inModuleId] else {
                 continue
@@ -287,7 +292,7 @@ public final class SimulationEngine: @unchecked Sendable {
         }
 
         // 3. PARAM connections
-        for conn in project.paramConnections {
+        for conn in runtime.paramConnections {
             guard let srcNode = nodes[conn.outModuleId],
                   let dstNode = nodes[conn.inModuleId] else {
                 continue

@@ -71,6 +71,9 @@ public struct ModuleConfigDialog: View {
     // Dynamic Generic Parameters
     @State private var genericParamValues: [Int: String] = [:]
 
+    // Macro interface: a pin name being typed, committed on Return.
+    @State private var pinNameDrafts: [Int: String] = [:]
+
     public init(model: AppModel, moduleId: Int) {
         self.model = model
         self.moduleId = moduleId
@@ -180,8 +183,13 @@ public struct ModuleConfigDialog: View {
         case boolVar, pulseGen, singlePulse, counter, advCounter, timer, ramp, range, mean, intVar, floatVar
         case div, rs, dateTime, pwm, caseValues, switchInputs, int2Bits, bits2Int, demux, logic
         case digitalInputs, digitalOutputs, parameters, none
+        case macroInterface, macroCall, systemCmd
 
         init(_ mod: PCCModule) {
+            // A macro's own blocks are recognised by what they are, not by what the sheet's author named them.
+            if MacroInterface.kind(of: mod) != nil { self = .macroInterface; return }
+            if MacroCalls.target(of: mod) != nil { self = .macroCall; return }
+            if mod.guid == SystemCmdBlock.guid { self = .systemCmd; return }
             let n = mod.name.filter { !$0.isNumber }.lowercased()
             func has(_ words: String...) -> Bool { words.contains { n.contains($0) } }
             if has("boolvar", "tlacitko", "prepinac", "roztoct") || mod.guid == BoolVarBlock.guid { self = .boolVar }
@@ -387,6 +395,86 @@ public struct ModuleConfigDialog: View {
                 Text("This function block does not have configurable simulation parameters.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+        case .macroInterface:
+            let isInputs = MacroInterface.kind(of: mod) == .inputs
+            Section(isInputs ? "Macro Inputs" : "Macro Outputs") {
+                ForEach(Array(MacroInterface.pinNames(of: mod).enumerated()), id: \.offset) { index, name in
+                    HStack {
+                        TextField("Pin name", text: Binding(
+                            get: { pinNameDrafts[index] ?? name },
+                            set: { pinNameDrafts[index] = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            if let draft = pinNameDrafts[index] {
+                                model.renameInterfacePin(moduleId: moduleId, pin: index, to: draft)
+                                pinNameDrafts[index] = nil
+                            }
+                        }
+                        Button {
+                            pinNameDrafts = [:]
+                            model.removeInterfacePin(moduleId: moduleId, pin: index)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove this pin")
+                        .disabled(MacroInterface.pinNames(of: mod).count <= 1)
+                    }
+                }
+                Button {
+                    model.addInterfacePin(moduleId: moduleId)
+                } label: {
+                    Label("Add Pin", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderless)
+                hint("Every call of this macro gets the same pins. Names are saved when you press Return.")
+            }
+        case .systemCmd:
+            Section("System Command") {
+                let catalogue = model.systemCommandCatalogue
+                let current = model.systemCommand(of: mod)
+                // A command the project uses but the profile does not list (`zelznice.pcc`'s `Pwm` on a P3) stays selectable.
+                let options = current.map { c in catalogue.contains { $0.command == c.command && $0.text == c.text } ? catalogue : [c] + catalogue } ?? catalogue
+                Picker("Command", selection: Binding<String>(
+                    get: { current.map { "\($0.command)|\($0.text)" } ?? "" },
+                    set: { tag in
+                        model.setSystemCommand(moduleId: moduleId,
+                                               to: catalogue.first { "\($0.command)|\($0.text)" == tag })
+                    }
+                )) {
+                    Text("None — set the command word on the Cmd pin").tag("")
+                    ForEach(options, id: \.mnemonic) { info in
+                        Text("\(info.title)  ·  \(info.text)").tag("\(info.command)|\(info.text)")
+                    }
+                }
+                if let current {
+                    LabeledContent("Command word", value: String(format: "0x%04X", current.command))
+                    LabeledContent("Parameter 1", value: current.input1.isHidden ? "not used" : "\(current.input1.name) (\(current.input1.dataType))")
+                    LabeledContent("Parameter 2", value: current.input2.isHidden ? "not used" : "\(current.input2.name) (\(current.input2.dataType))")
+                    LabeledContent("Result", value: current.output.isHidden ? "not used" : "\(current.output.name) (\(current.output.dataType))")
+                }
+                ForEach(0..<mod.paramPins.count, id: \.self) { index in
+                    LabeledContent(ModulePinCatalog.paramPinFullName(for: mod, index: index)) {
+                        ParamValueField(model: model, moduleId: moduleId, index: index,
+                                        current: mod.paramPins[index].value.description)
+                    }
+                }
+                hint("The pins are named after the command, and only the ones it uses are written to the PLC.")
+            }
+        case .macroCall:
+            Section("Macro Call") {
+                if let name = MacroCalls.target(of: mod) {
+                    LabeledContent("Calls", value: "*" + name)
+                    Button {
+                        model.selectedPage = "*" + name
+                        model.closeConfigureModule()
+                    } label: {
+                        Label("Open Macro", systemImage: "arrow.up.right.square")
+                    }
+                    hint("The pins follow the macro's Inputs and Outputs blocks.")
+                }
             }
         }
     }
@@ -624,7 +712,9 @@ public struct ModuleConfigDialog: View {
         case .digitalOutputs:
             model.update8xDOConfig(id: moduleId, pinCount: doPinCount,
                                    hiddenMaskHex: mask(doVisibleBits, count: doPinCount, where: false))
-        case .parameters, .none:
+        case .macroInterface, .macroCall:
+            break
+        case .parameters, .none, .systemCmd:
             for (index, text) in genericParamValues {
                 model.updateModuleParam(id: moduleId, paramIndex: index, value: PinValue.parse(text))
             }

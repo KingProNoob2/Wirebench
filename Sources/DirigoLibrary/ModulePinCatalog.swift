@@ -706,6 +706,24 @@ public struct ModulePinCatalog: Sendable {
 
         // --- System & Control ---
         case "systemcmd":
+            // A module that has been given a command names its pins after it: `PwmCH`, `Value`, `Out`, and says so
+            // when the command does not use one.
+            if let definition = rawAttrs["DEFINITION"].flatMap(ProfilesParser.systemCommand(fromDefinition:)) {
+                func parameter(_ pin: SystemCommandInfo.PinSchema, _ slot: String) -> PinSchema {
+                    pin.isHidden
+                        ? PinSchema(shortcut: slot, name: "Not used by \(definition.text)", dataType: pin.dataType)
+                        : PinSchema(shortcut: pin.name, name: "Parameter \(slot) (\(pin.dataType))", dataType: pin.dataType)
+                }
+                let word = String(format: "0x%04X", definition.command)
+                return (
+                    inPins: [PinSchema(shortcut: "En", name: "Enabled", dataType: "Boolean"),
+                             PinSchema(shortcut: "Cmd", name: "\(definition.text) command \(word)", dataType: "Int")],
+                    paramPins: [parameter(definition.input1, "I1"), parameter(definition.input2, "I2")],
+                    outPins: [definition.output.isHidden
+                        ? PinSchema(shortcut: "O1", name: "Not used by \(definition.text)", dataType: definition.output.dataType)
+                        : PinSchema(shortcut: definition.output.name, name: "Result (\(definition.output.dataType))", dataType: definition.output.dataType)]
+                )
+            }
             return (
                 inPins: [
                     PinSchema(shortcut: "En", name: "Enabled", dataType: "Boolean"),

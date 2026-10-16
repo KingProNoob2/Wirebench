@@ -90,8 +90,7 @@ public struct InspectorView: View {
                             let pVal = node?.block.paramPins.indices.contains(idx) == true
                                 ? node!.block.paramPins[idx] : mod.paramPins[idx].value
                             LabeledContent(ModulePinCatalog.paramPinFullName(for: mod, index: idx)) {
-                                Text(pVal.description)
-                                    .font(.system(.body, design: .monospaced))
+                                ParamValueField(model: model, moduleId: mod.id, index: idx, current: pVal.description)
                             }
                         }
                     }
@@ -480,5 +479,31 @@ struct SignalRow: View, Equatable {
                     .truncationMode(.middle)
             }
         }
+    }
+}
+
+/// A parameter's value, typed over. The number is written to the block as it is typed — a half-typed `-` waits —
+/// so there is no Return to forget and no OK to press.
+struct ParamValueField: View {
+    @Bindable var model: AppModel
+    let moduleId: Int
+    let index: Int
+    let current: String
+    @State private var draft: String?
+
+    var body: some View {
+        TextField("Value", text: Binding(
+            get: { draft ?? current },
+            set: { text in
+                draft = text
+                if let number = Int32(text.trimmingCharacters(in: .whitespaces)) {
+                    model.updateModuleParam(id: moduleId, paramIndex: index, value: .int32(number))
+                }
+            }))
+            .font(.system(.body, design: .monospaced))
+            .multilineTextAlignment(.trailing)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 110)
+            .onSubmit { draft = nil }
     }
 }

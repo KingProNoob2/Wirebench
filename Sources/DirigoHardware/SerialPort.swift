@@ -122,15 +122,39 @@ public final class SerialPort: @unchecked Sendable {
         isOpen = false
     }
 
+    /// Writes all of `data`. The port is non-blocking, so a long frame can be taken in pieces; this waits for room
+    /// rather than dropping the rest.
     public func write(data: Data) throws -> Int {
         guard isOpen, fileDescriptor >= 0 else { return 0 }
-        let bytesWritten = data.withUnsafeBytes { ptr in
-            Darwin.write(fileDescriptor, ptr.baseAddress, data.count)
+        var offset = 0
+        while offset < data.count {
+            let written = data.withUnsafeBytes { ptr in
+                Darwin.write(fileDescriptor, ptr.baseAddress! + offset, data.count - offset)
+            }
+            if written > 0 { offset += written; continue }
+            guard written < 0, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
+            _ = poll(&descriptor, 1, 100)
         }
-        if bytesWritten < 0 {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-        }
-        return bytesWritten
+        return offset
+    }
+
+    /// Blocks until a byte can be read or `timeout` seconds pass. Returns whether one can.
+    /// This is what the reader waits on instead of sleeping: a reply is picked up when its first byte arrives, not
+    /// at the next tick of a poll loop.
+    public func waitReadable(timeout: TimeInterval) -> Bool {
+        guard isOpen, fileDescriptor >= 0 else { return false }
+        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
+        let milliseconds = Int32(max(0, min(timeout, 60)) * 1000)
+        return poll(&descriptor, 1, milliseconds) > 0 && descriptor.revents & Int16(POLLIN) != 0
+    }
+
+    /// Throws away what has arrived and not been read, so a stale byte cannot be taken for the next reply.
+    public func discardInput() {
+        guard isOpen, fileDescriptor >= 0 else { return }
+        tcflush(fileDescriptor, TCIFLUSH)
     }
 
     public func read(maxBytes: Int = 1024) throws -> Data {

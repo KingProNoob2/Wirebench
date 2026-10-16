@@ -42,7 +42,11 @@ public enum BlockTypeCatalog {
     /// is what stops the two front ends disagreeing about which class a GUID is.
     public static let classNamesByGUID: [String: String] = {
         var map: [String: String] = [:]
-        for info in all { map[info.guid.uuidString.uppercased()] = info.delphiClass }
+        // A macro call and a macro interface have no record of their own — the compiler expands the sheet — so
+        // their GUIDs stay out of the map, which is how it tells a macro from a block that has no shape yet.
+        for info in all where info.guid != MacroBlock.guid && info.guid != InputsBlock.guid {
+            map[info.guid.uuidString.uppercased()] = info.delphiClass
+        }
         return map
     }()
 

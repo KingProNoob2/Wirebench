@@ -29,6 +29,15 @@ public enum BlockFactory {
         // treats them as configuration markers, so the generic one-in/one-out fallback was wrong.
         let label = BlockPinTemplate(inputs: [], params: [], outputs: [])
         var table = ["565E4F34-495E-4988-A572-E789AB4963E8": segment]
+        // The help lists SystemCmd with four inputs and no parameters; every real module has `En` and `Cmd` as inputs
+        // and `Par1`, `Par2` as parameters (`rulkoshaddirigo.pcc`, `zelznice.pcc`), which is what the compiler and the
+        // block read.
+        table["060906AA-5048-4931-BE5C-714697885084"] = BlockPinTemplate(
+            inputs: [PinTemplate(abbrev: "En", name: "Enabled", dataType: "Boolean", defaultValue: "1"),
+                     PinTemplate(abbrev: "Cmd", name: "Command", dataType: "Int", defaultValue: "770")],
+            params: [PinTemplate(abbrev: "Par1", name: "Parametr1", dataType: "Int", defaultValue: "0"),
+                     PinTemplate(abbrev: "Par2", name: "Parametr2", dataType: "Int", defaultValue: "0")],
+            outputs: [PinTemplate(abbrev: "Out", name: "Output", dataType: "Int", defaultValue: "-")])
         for guid in ["4D83C589-DE5F-4FB1-9222-F5836722340B",   // Case
                      "A99FFBCE-0803-4939-AB9D-DE413F16A36F",   // Default
                      "0E92235F-6CE0-4FEC-8EB4-556846E16695",   // EndSwitch
@@ -50,8 +59,8 @@ public enum BlockFactory {
         threadId: Int,
         page: String
     ) -> PCCModule {
-        let template = PinTemplateCatalog.template(forGuid: guid)
-            ?? layoutOverrides[guid.uuidString.uppercased()]
+        let template = layoutOverrides[guid.uuidString.uppercased()]
+            ?? PinTemplateCatalog.template(forGuid: guid)
         let inputs = makePins(from: template?.inputs ?? [], counted: template?.defaultInputCount)
         let params = makePins(from: template?.params ?? [], counted: nil)
         // A type with no recovered pin layout still gets a connected-looking block rather than one

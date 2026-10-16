@@ -11,6 +11,8 @@ public struct MainView: View {
     @State private var showingNewPage = false
     /// Caption of the page whose deletion is awaiting confirmation.
     @State private var pendingPageDeletion: String?
+    @State private var renamingMacro: String?
+    @State private var renameText = ""
 
     public init(model: AppModel = AppModel.shared ?? AppModel()) {
         self.model = model
@@ -213,6 +215,17 @@ public struct MainView: View {
                  ? "Adds a macro page. Its name is prefixed with “*”, as Dirigo stores them."
                  : "Adds a page to the project and switches to it.")
         }
+        .alert("Rename Macro", isPresented: Binding(get: { renamingMacro != nil },
+                                                    set: { if !$0 { renamingMacro = nil } })) {
+            TextField("Name", text: $renameText)
+            Button("Rename") {
+                if let caption = renamingMacro { model.renameMacroPage(caption, to: renameText) }
+                renamingMacro = nil
+            }
+            Button("Cancel", role: .cancel) { renamingMacro = nil }
+        } message: {
+            Text("Every call of the macro follows the new name.")
+        }
         .alert("Delete “\(pendingPageDeletion ?? "")”?",
                isPresented: Binding(get: { pendingPageDeletion != nil },
                                     set: { if !$0 { pendingPageDeletion = nil } })) {
@@ -332,7 +345,11 @@ public struct MainView: View {
             .popover(isPresented: $showingPalette, arrowEdge: .bottom) {
                 BlockPaletteView(
                     onInsert: { guid in model.addBlock(guid: guid) },
-                    dismiss: { showingPalette = false }
+                    dismiss: { showingPalette = false },
+                    macros: model.callableMacros,
+                    interfaces: model.missingMacroInterfaces,
+                    onInsertMacro: { model.addMacroCall(sheet: $0) },
+                    onInsertInterface: { model.addMacroInterface($0) }
                 )
             }
 
@@ -439,6 +456,12 @@ public struct MainView: View {
                        count: moduleCount(for: page.caption))
         }
         .contextMenu {
+            if isMacro {
+                Button("Rename Macro…", systemImage: "pencil") {
+                    renameText = String(page.caption.dropFirst())
+                    renamingMacro = page.caption
+                }
+            }
             Button(isMacro ? "Delete Macro Page" : "Delete Page", systemImage: "trash", role: .destructive) {
                 pendingPageDeletion = page.caption
             }

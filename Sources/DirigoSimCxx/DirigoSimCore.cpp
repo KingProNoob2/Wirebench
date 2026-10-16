@@ -350,6 +350,9 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
             for (size_t i = 0; i < bits && i < 32; ++i) {
                 if (asBool(m.inPins[i + 1])) packed |= static_cast<int32_t>(1u << i);
             }
+            /* An Int is a 16-bit signed word: all sixteen bits set read back as -1, which is how a sign bit
+               copied into the upper inputs gives a negative number. */
+            if (bits >= 16) packed = static_cast<int16_t>(packed);
             if (!m.outPins.empty()) m.outPins[0] = int32Value(packed);
             return;
         }

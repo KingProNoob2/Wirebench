@@ -1,4 +1,5 @@
 import SwiftUI
+import DirigoCore
 import DirigoLibrary
 
 /// The block picker, shown from the toolbar.
@@ -10,6 +11,11 @@ struct BlockPaletteView: View {
     /// Called with the chosen block-type GUID.
     let onInsert: (UUID) -> Void
     let dismiss: () -> Void
+    /// The macro sheets this page may call, and the interface blocks it still lacks (a macro page only).
+    var macros: [String] = []
+    var interfaces: [MacroInterface.Kind] = []
+    var onInsertMacro: (String) -> Void = { _ in }
+    var onInsertInterface: (MacroInterface.Kind) -> Void = { _ in }
 
     @State private var query = ""
     @State private var selectedCategory: String?
@@ -88,7 +94,10 @@ struct BlockPaletteView: View {
 
     private var matches: [BlockTypeInfo] {
         let scope = BlockTypeCatalog.all.filter { info in
-            selectedCategory == nil || info.category == selectedCategory
+            // The catalogue's bare `Macro` and `Macro IO` would insert a block with no name and no pins; the
+            // macro rows insert working ones.
+            info.guid != MacroInterface.callGUID && info.guid != MacroInterface.interfaceGUID &&
+            (selectedCategory == nil || info.category == selectedCategory)
         }
         return Self.ranked(scope, for: query)
     }
@@ -156,9 +165,60 @@ struct BlockPaletteView: View {
         .buttonStyle(.plain)
     }
 
+    private enum MacroEntry {
+        case call(String)
+        case interface(MacroInterface.Kind)
+
+        var title: String {
+            switch self {
+            case .call(let sheet): return MacroInterface.name(ofSheet: sheet)
+            case .interface(let kind): return kind == .inputs ? "Macro Inputs" : "Macro Outputs"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .call: return "Call this macro"
+            case .interface(let kind): return kind == .inputs ? "The pins this macro takes in" : "The pins this macro gives back"
+            }
+        }
+    }
+
+    /// The user's own macros and the interface blocks of the macro page being edited, for the current search.
+    private var macroEntries: [MacroEntry] {
+        guard selectedCategory == nil || selectedCategory == "Macro" else { return [] }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let all = interfaces.map(MacroEntry.interface) + macros.map(MacroEntry.call)
+        return all.filter { q.isEmpty || $0.title.lowercased().contains(q) }
+    }
+
+    private func macroRow(_ entry: MacroEntry) -> some View {
+        Button {
+            switch entry {
+            case .call(let sheet): onInsertMacro(sheet)
+            case .interface(let kind): onInsertInterface(kind)
+            }
+            dismiss()
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(Theme.tint(forCategory: "Macro")).frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.title)
+                    Text(entry.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text("Macro").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var blockList: some View {
         Group {
-            if matches.isEmpty {
+            if matches.isEmpty && macroEntries.isEmpty {
                 Text("No blocks match “\(query)”")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -167,6 +227,7 @@ struct BlockPaletteView: View {
                     // One flat alphabetical list. Grouping it by category produced headers that said
                     // nothing useful in "All Blocks" and broke the alphabet into runs.
                     LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(macroEntries.enumerated()), id: \.offset) { _, entry in macroRow(entry) }
                         ForEach(matches, id: \.guid) { info in
                             blockRow(info)
                         }
