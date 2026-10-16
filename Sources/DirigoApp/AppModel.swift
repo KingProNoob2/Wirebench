@@ -1205,7 +1205,8 @@ public final class AppModel: @unchecked Sendable {
             node.block.paramPins[paramIndex] = value
         }
         self.isDocumentEdited = true
-        simulationDidChange()
+        // Through the same path as every other edit: what reads the parameter is recomputed now, not at the next tick.
+        refreshAfterPinEdit()
     }
 
     public func updatePulseGenTiming(id: Int, tOn: Int, tOff: Int) {

@@ -63,8 +63,9 @@ public struct InspectorView: View {
                                       isHigh: val.asBool,
                                       onToggle: { model.toggleModuleInput(moduleId: mod.id, pinIndex: idx) },
                                       number: Self.editableNumber(model: model, module: mod, index: idx, value: val),
-                                      isInput: true)
+                                      isInput: true, owner: mod.id, pin: idx)
                                 .equatable()
+                                .id("\(mod.id).in.\(idx)")
                         }
                     }
                 }
@@ -78,8 +79,10 @@ public struct InspectorView: View {
                             SignalRow(name: ModulePinCatalog.outputPinFullName(for: mod, index: idx),
                                       value: val.description,
                                       isHigh: val.asBool,
-                                      number: Self.editableVariable(model: model, module: mod, value: val))
+                                      number: Self.editableVariable(model: model, module: mod, value: val),
+                                      owner: mod.id, pin: idx)
                                 .equatable()
+                                .id("\(mod.id).out.\(idx)")
                         }
                     }
                 }
@@ -91,6 +94,7 @@ public struct InspectorView: View {
                                 ? node!.block.paramPins[idx] : mod.paramPins[idx].value
                             LabeledContent(ModulePinCatalog.paramPinFullName(for: mod, index: idx)) {
                                 ParamValueField(model: model, moduleId: mod.id, index: idx, current: pVal.description)
+                                    .id("\(mod.id).par.\(idx)")
                             }
                         }
                     }
@@ -378,6 +382,11 @@ struct SignalRow: View, Equatable {
     /// Whether this is an input row. A plain `Bool`, because this is what `==` compares: the closure above
     /// is main-actor isolated and cannot be read from a nonisolated comparison.
     var isInput: Bool = false
+    /// The module this row belongs to, and its pin. Part of what `==` compares: without it, selecting another block
+    /// whose row reads the same (`X`, `0`) was "equal", so SwiftUI kept the old row — its closures pointing at the
+    /// *previous* block — and a number typed there was written to the wrong module, or looked as if it had not been.
+    var owner: Int = 0
+    var pin: Int = 0
 
     /// Whether the value is currently a field rather than text. Purely local: the row rests as text so
     /// it is laid out like every other row, and becomes a field for as long as it is being edited.
@@ -398,7 +407,8 @@ struct SignalRow: View, Equatable {
     }
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.name == rhs.name && lhs.value == rhs.value && lhs.isHigh == rhs.isHigh
+        lhs.owner == rhs.owner && lhs.pin == rhs.pin
+            && lhs.name == rhs.name && lhs.value == rhs.value && lhs.isHigh == rhs.isHigh
             && lhs.isInput == rhs.isInput
             && (lhs.number == nil) == (rhs.number == nil)
     }
@@ -505,5 +515,10 @@ struct ParamValueField: View {
             .textFieldStyle(.roundedBorder)
             .frame(width: 110)
             .onSubmit { draft = nil }
+            // What was typed has been written; from then on the field shows the block's own value, so a change from
+            // the simulation or from another editor is not hidden behind the old text.
+            .onChange(of: current) { _, _ in
+                if let typed = draft, Int32(typed.trimmingCharacters(in: .whitespaces)) != nil { draft = nil }
+            }
     }
 }
