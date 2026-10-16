@@ -383,8 +383,20 @@ struct SignalRow: View, Equatable {
     /// Whether the value is currently a field rather than text. Purely local: the row rests as text so
     /// it is laid out like every other row, and becomes a field for as long as it is being edited.
     @State private var isEditing = false
+    /// What has been typed so far. The field edits this text, not the value: `TextField(value:format:)` commits
+    /// only on Return or on losing focus, and this row removes the field the moment either happens — so the
+    /// typed number could be discarded before the commit and the value fell back to what it was.
+    @State private var draft = ""
     @State private var isHovering = false
     @FocusState private var isEditingFocused: Bool
+
+    /// Writes what was typed, if it is a whole number, and closes the field. Anything else is dropped and the
+    /// row shows the value it had.
+    private func commit() {
+        guard isEditing else { return }
+        isEditing = false
+        if let typed = Int(draft.trimmingCharacters(in: .whitespaces)) { number?.wrappedValue = typed }
+    }
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.name == rhs.name && lhs.value == rhs.value && lhs.isHigh == rhs.isHigh
@@ -404,7 +416,7 @@ struct SignalRow: View, Equatable {
                     // taller than the read-only ones and left the label off their baseline. At rest this
                     // is the *same view* as a read-only row, so the two cannot differ.
                     if isEditing {
-                        TextField("", value: number, format: .number)
+                        TextField("", text: $draft)
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
                             .font(.system(.body, design: .monospaced))
@@ -414,12 +426,12 @@ struct SignalRow: View, Equatable {
                             .padding(.horizontal, 3)
                             .background(Color.primary.opacity(0.10),
                                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .onSubmit { isEditing = false }
+                            .onSubmit { commit() }
                             // Focus after the field exists rather than in the same update that creates it,
                             // which is what makes the caret land in it reliably.
                             .task { isEditingFocused = true }
                             .onChange(of: isEditingFocused) { _, focused in
-                                if !focused { isEditing = false }
+                                if !focused { commit() }
                             }
                     } else {
                         // A resting value that still *looks* and *behaves* like something you can type
@@ -436,7 +448,10 @@ struct SignalRow: View, Equatable {
                                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                             .contentShape(Rectangle())
                             .onHover { isHovering = $0 }
-                            .onTapGesture { isEditing = true }
+                            .onTapGesture {
+                                draft = value
+                                isEditing = true
+                            }
                             .help(isInput ? "Click to edit this input." : "Click to set this variable.")
                     }
                 } else {
