@@ -9,6 +9,7 @@ struct BuildReportSheet: View {
     let report: AppModel.BuildReport
     let onExportProgram: () -> Void
     let onExportSymbols: () -> Void
+    let optimize: Binding<Bool>
     let onUpload: () -> Void
     let onClose: () -> Void
 
@@ -41,6 +42,9 @@ struct BuildReportSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minHeight: 90)
+
+            Toggle("Optimize program", isOn: optimize)
+                .help("Put the records in dataflow order, so a value reaches everything that reads it in the cycle it is made, and drop gates nothing reads. Addresses do not change.")
 
             Divider()
 

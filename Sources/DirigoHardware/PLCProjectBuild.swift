@@ -22,6 +22,8 @@ public struct PLCProjectBuild: Equatable, Sendable {
         public var dataSlots: Int
         public var terminals: Int
         public var symbolRows: Int
+        /// What the optimising pass did, when it ran.
+        public var optimization: Optimization?
 
         /// The summary both front ends show, in the same words.
         public var lines: [String] {
@@ -37,6 +39,14 @@ public struct PLCProjectBuild: Equatable, Sendable {
                 out.append("   modules: " + unshapedModules.prefix(8).joined(separator: ", ")
                            + (unshapedModules.count > 8 ? ", …" : ""))
             }
+            if let optimization {
+                var line = "Optimised: \(optimization.bytesSaved) byte(s) saved"
+                if optimization.bytesSaved > 0, !optimization.removedModules.isEmpty {
+                    line += ", \(optimization.removedModules.count) unused module(s) dropped"
+                }
+                line += "; a value crosses the program in \(optimization.cyclesAfter) cycle(s) instead of \(optimization.cyclesBefore)."
+                out.append(line)
+            }
             if !macros.isEmpty {
                 out.append("\(macros.count) macro module(s) were left out: "
                            + macros.prefix(4).joined(separator: ", ")
@@ -47,6 +57,15 @@ public struct PLCProjectBuild: Equatable, Sendable {
 
         /// True when every module either compiled, writes no record by design, or is a macro.
         public var isComplete: Bool { unshaped.isEmpty }
+    }
+
+    /// What `PLCProgramOptimizer` changed.
+    public struct Optimization: Equatable, Sendable {
+        public var removedModules: [String]
+        public var bytesSaved: Int
+        public var cyclesBefore: Int
+        public var cyclesAfter: Int
+        public var movedModules: Int
     }
 
     /// One module's share of the record region.
@@ -78,7 +97,7 @@ public struct PLCProjectBuild: Equatable, Sendable {
     ///   - classForGUID: normalised GUID to implementing class name. A GUID that is absent is a macro.
     ///   - template: the table whose header and profile are carried into the build.
     public static func compile(xml: String, classForGUID: [String: String],
-                               template: PLCProgramTable) throws -> PLCProjectBuild {
+                               template: PLCProgramTable, optimize: Bool = false) throws -> PLCProjectBuild {
         // Each call of a macro gets its own copy of the sheet (see `PLCProjectCompiler.instanced`).
         let (modules, rawWires) = PLCProjectCompiler.instanced(
             modules: PLCProjectCompiler.modules(in: xml), wires: PLCProjectCompiler.wires(in: xml))
@@ -92,7 +111,17 @@ public struct PLCProjectBuild: Equatable, Sendable {
                                         shapes: PLCProjectCompiler.classShapes)
         let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
                                           classForGUID: normalised)
-        let ordered = PLCProjectCompiler.recordOrder(modules)
+        var ordered = PLCProjectCompiler.recordOrder(modules)
+        var optimization: Optimization?
+        if optimize {
+            let before = try compiler.records(modules: ordered, wires: wires, allocation: allocation).count
+            let result = PLCProgramOptimizer.optimize(ordered, wires: wires, allModules: modules, classForGUID: normalised)
+            ordered = result.modules
+            let after = try compiler.records(modules: ordered, wires: wires, allocation: allocation).count
+            optimization = Optimization(removedModules: result.removed, bytesSaved: before - after,
+                                        cyclesBefore: result.cyclesBefore, cyclesAfter: result.cyclesAfter,
+                                        movedModules: result.moved)
+        }
         let records = try compiler.records(modules: ordered, wires: wires, allocation: allocation)
         let table = try compiler.table(fromTemplate: template, modules: ordered, wires: wires,
                                        allocation: allocation)
@@ -135,7 +164,8 @@ public struct PLCProjectBuild: Equatable, Sendable {
             recordBytes: records.count,
             dataSlots: allocation.addresses.values.filter { !$0.isBoolean }.count,
             terminals: allocation.addresses.values.filter { $0.isBoolean }.count,
-            symbolRows: allocation.rows.count)
+            symbolRows: allocation.rows.count,
+            optimization: optimization)
         return PLCProjectBuild(moduleRecords: perModule, report: report, table: table, records: records,
                                symbolCSV: allocation.csv)
     }

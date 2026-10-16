@@ -128,20 +128,7 @@ public struct MainView: View {
                                      message: error.localizedDescription, kind: .warning)
             }
         }
-        .sheet(isPresented: buildSheetBinding) {
-            if let report = model.buildReport {
-                BuildReportSheet(report: report,
-                                 onExportProgram: { model.exportCompiledProgram() },
-                                 onExportSymbols: { model.exportSymbolTable() },
-                                 // The report has done its job once the upload starts: close it, and the
-                                 // sidebar's upload log shows the progress.
-                                 onUpload: {
-                                     model.isShowingBuildReport = false
-                                     model.uploadCompiledProgram()
-                                 },
-                                 onClose: { model.isShowingBuildReport = false })
-            }
-        }
+        .sheet(isPresented: buildSheetBinding) { buildReportSheet }
         .alert(model.pendingAlert?.title ?? "", isPresented: alertBinding) {
             Button("OK", role: .cancel) { model.pendingAlert = nil }
         } message: {
@@ -328,6 +315,30 @@ public struct MainView: View {
         let count = model.moduleCount(onPage: caption)
         if count == 0 { return "This page is empty. It cannot be the last page." }
         return "\(count) block\(count == 1 ? "" : "s") on it, and their wires, will be removed too."
+    }
+
+    /// The report sheet, out of `body` so the body stays quick to type-check.
+    @ViewBuilder
+    private var buildReportSheet: some View {
+        if let report = model.buildReport {
+            BuildReportSheet(report: report,
+                             onExportProgram: { model.exportCompiledProgram() },
+                             onExportSymbols: { model.exportSymbolTable() },
+                             optimize: optimizeBinding,
+                             // The report has done its job once the upload starts: close it, and the
+                             // sidebar's upload log shows the progress.
+                             onUpload: {
+                                 model.isShowingBuildReport = false
+                                 model.uploadCompiledProgram()
+                             },
+                             onClose: { model.isShowingBuildReport = false })
+        }
+    }
+
+    /// The build report's switch: flipping it compiles again, so the report shows the program that would be sent.
+    private var optimizeBinding: Binding<Bool> {
+        Binding(get: { model.optimizeProgram },
+                set: { model.optimizeProgram = $0; _ = model.compileProject() })
     }
 
     @ToolbarContentBuilder

@@ -51,7 +51,7 @@ struct DirigoCLI {
 
         case "build":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: dirigo-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet]")
+                print("Error: Missing file path. Usage: dirigo-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet] [--optimize]")
                 return
             }
             buildProject(path: args[2], options: Array(args.dropFirst(3)))
@@ -96,6 +96,8 @@ struct DirigoCLI {
                                                 Show the hardware profile and SystemCmd catalogue
           dirigo-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet]
                                                 Compile the project to <name>.pbd and <name>.csv.
+                                                --optimize drops unused gates and puts the records in dataflow
+                                                order, so values settle in fewer PLC cycles.
                                                 --template carries a real export's table, header and
                                                 profile into the build. Exits 1 if any module's class
                                                 has no record shape yet.
@@ -414,6 +416,7 @@ struct DirigoCLI {
         var templateURL: URL?
         var quiet = false
         var showModules = false
+        var optimize = false
         var index = 0
         while index < options.count {
             switch options[index] {
@@ -430,6 +433,9 @@ struct DirigoCLI {
                 index += 1
             case "--modules":
                 showModules = true
+                index += 1
+            case "--optimize":
+                optimize = true
                 index += 1
             default:
                 print("Unknown option: \(options[index])")
@@ -458,7 +464,7 @@ struct DirigoCLI {
 
             let build = try PLCProjectBuild.compile(xml: xml,
                                                     classForGUID: BlockTypeCatalog.classNamesByGUID,
-                                                    template: template)
+                                                    template: template, optimize: optimize)
             let binary = try PLCProgramImage.programBinary(table: build.table,
                                                           projectName: url.lastPathComponent,
                                                           header: header)

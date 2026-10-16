@@ -1736,6 +1736,12 @@ public final class AppModel: @unchecked Sendable {
     /// Whether the report sheet is up.
     public var isShowingBuildReport = false
 
+    /// Whether builds run the optimising pass (`PLCProgramOptimizer`): records in dataflow order, unread gates dropped.
+    /// On by default; remembered between launches.
+    public var optimizeProgram: Bool = UserDefaults.standard.object(forKey: "optimizeProgram") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(optimizeProgram, forKey: "optimizeProgram") }
+    }
+
     /// The program binary the user imported, if any: the build takes its table and header from it.
     private var buildTemplateImage: PLCProgramImage?
 
@@ -1762,7 +1768,7 @@ public final class AppModel: @unchecked Sendable {
         do {
             let build = try PLCProjectBuild.compile(xml: xml,
                                                     classForGUID: BlockTypeCatalog.classNamesByGUID,
-                                                    template: template)
+                                                    template: template, optimize: optimizeProgram)
             let name = currentFileURL?.lastPathComponent ?? (project.name + ".pcc")
             let binary = try PLCProgramImage.programBinary(table: build.table, projectName: name,
                                                            header: buildTemplateImage?.header)
