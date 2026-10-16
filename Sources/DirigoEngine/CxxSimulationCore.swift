@@ -243,6 +243,9 @@ public final class CxxSimulationCore {
     /// Milliseconds until the earliest thread is due.
     public func nextDueInMs() -> Double { dirigo_sim_next_due_ms(sim) }
 
+    /// Milliseconds of simulated time until a thread next runs, exactly.
+    public func msUntilNextRun() -> Double { dirigo_sim_ms_until_run(sim) }
+
     public func outValue(moduleId: Int, pin: Int) -> PinValue? {
         guard let index = indexByModuleId[moduleId] else { return nil }
         return Self.pinValue(dirigo_sim_get_out(sim, index, Int32(pin)))

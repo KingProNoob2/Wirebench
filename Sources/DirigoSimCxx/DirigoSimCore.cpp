@@ -678,10 +678,23 @@ double dirigo_sim_next_due_ms(const DirigoSim *sim) {
     return soonest <= stepMs ? 0 : soonest - stepMs;
 }
 
+double dirigo_sim_ms_until_run(const DirigoSim *sim) {
+    if (!sim || !sim->profileScheduling) return 0;
+    double soonest = std::numeric_limits<double>::max();
+    for (int32_t tid : sim->threadIds) {
+        const double interval = intervalMs(sim, tid);
+        auto it = sim->threadElapsedMs.find(tid);
+        const double elapsed = it == sim->threadElapsedMs.end() ? interval : it->second;
+        soonest = std::min(soonest, std::max(0.0, interval - elapsed));
+    }
+    return soonest == std::numeric_limits<double>::max() ? 0 : soonest;
+}
+
 int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
     if (!sim) return 0;
     sim->tickCount += 1;
-    const double stepMs = std::max(1.0, deltaMs);
+    /* The caller's delta is taken as given, to a thousandth of a millisecond, so a slowed simulation is slowed. */
+    const double stepMs = std::max(0.001, deltaMs);
     propagate(sim);
     bool ranAny = false;
 

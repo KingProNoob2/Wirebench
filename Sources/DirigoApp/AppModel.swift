@@ -999,10 +999,13 @@ public final class AppModel: @unchecked Sendable {
                 let now = ContinuousClock.now
                 let elapsedMs = Double((now - lastStepTime).components.seconds) * 1000
                     + Double((now - lastStepTime).components.attoseconds) / 1e15
-                let simulatedMs = max(1, elapsedMs * self.simulationSpeed)
-                let ran = cxxCore != nil
+                // Simulated time since the last step, and whether it reaches a thread. Calling `step` anyway would
+                // count a tick and wake the UI every few milliseconds whatever the speed, with no thread running.
+                let simulatedMs = elapsedMs * self.simulationSpeed
+                let untilRun = self.cxxCore?.msUntilNextRun() ?? engine.msUntilNextRun()
+                let ran = untilRun <= simulatedMs + 1e-9
                     ? stepBackend(deltaMs: simulatedMs)
-                    : engine.stepIfDue(deltaMs: simulatedMs)
+                    : false
                 if ran { lastStepTime = now }
                 if updatePending && self.isAppActive && !ran && now - lastUIUpdateTime >= .milliseconds(28) {
                     self.simulationDidChange()
@@ -1031,8 +1034,11 @@ public final class AppModel: @unchecked Sendable {
                 // Sleep until the next thread is due — in wall-clock time, so a slowed simulation waits longer —
                 // never less than 2 ms and never longer than a second. A pending update caps the wait
                 // instead, so it is delivered within one frame rather than one thread period.
-                let nextDueMs = cxxCore?.nextDueInMs() ?? engine.nextDueInMs()
-                var dueSec = min(max(nextDueMs / 1000.0 / max(0.01, self.simulationSpeed), 0.002), 1.0)
+                let untilRunNow = self.cxxCore?.msUntilNextRun() ?? engine.msUntilNextRun()
+                let sinceStep = Double((ContinuousClock.now - lastStepTime).components.seconds) * 1000
+                    + Double((ContinuousClock.now - lastStepTime).components.attoseconds) / 1e15
+                let remainingSimMs = max(0, untilRunNow - sinceStep * self.simulationSpeed)
+                var dueSec = min(max(remainingSimMs / 1000.0 / max(0.01, self.simulationSpeed), 0.002), 1.0)
                 if updatePending { dueSec = min(dueSec, 0.028) }
                 try? await Task.sleep(nanoseconds: UInt64(dueSec * 1_000_000_000))
             }

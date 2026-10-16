@@ -187,6 +187,22 @@ struct ThreadSchedulingTests {
         #expect(engine.threadRunCounts[7] == 100)
     }
 
+    /// A slowed simulation hands the engine deltas of a fraction of a millisecond. They used to be raised to 1 ms,
+    /// so below about 30% speed the simulation did not get any slower — the loop just made more, shorter steps.
+    @Test("Sub-millisecond deltas are honoured, and the exact time to the next run is reported")
+    func subMillisecondDeltas() {
+        let engine = SimulationEngine(project: Self.makeProject(), profile: Self.makeProfile(),
+                                      scheduling: .profileIntervals)
+        engine.step(deltaMs: 1)                         // every thread runs once on the first pass
+        let first = engine.threadRunCounts[1] ?? 0
+        // Thread 1 has a 30 ms period: 1 ms is gone, so 29 ms remain — not rounded to a project cycle.
+        #expect(engine.msUntilNextRun() > 0 && engine.msUntilNextRun() <= 9 + 1e-9,
+                "thread 2 (10 ms) is next: \(engine.msUntilNextRun())")
+        for _ in 0..<50 { engine.step(deltaMs: 0.1) }   // 5 ms in all
+        #expect(engine.threadRunCounts[1] == first, "5 ms has not reached a 30 ms thread")
+        #expect(abs(engine.msUntilNextRun() - 4) < 1e-6, "9 ms − 5 ms = 4 ms: \(engine.msUntilNextRun())")
+    }
+
     @Test("Threads the profile does not define fall back to the cycle delay")
     func unknownThreadFallsBack() {
         let engine = SimulationEngine(

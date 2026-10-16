@@ -191,6 +191,10 @@ int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs);
 /// Milliseconds until the earliest thread is due next; 0 when one already is.
 double dirigo_sim_next_due_ms(const DirigoSim *sim);
 
+/* Simulated milliseconds until some thread next runs; 0 when one would on the next step. Exact, where
+   `next_due_ms` counts a thread within one project cycle of its period as due. */
+double dirigo_sim_ms_until_run(const DirigoSim *sim);
+
 uint64_t dirigo_sim_tick_count(const DirigoSim *sim);
 
 DirigoValue dirigo_sim_get_in(const DirigoSim *sim, int32_t index, int32_t pin);

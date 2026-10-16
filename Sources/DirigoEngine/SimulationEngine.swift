@@ -377,7 +377,9 @@ public final class SimulationEngine: @unchecked Sendable {
         // One instant for the whole cycle, not one per thread.
         let stepTimestamp = now()
 
-        let stepMs = max(1, deltaMs ?? cycleDelayMs)
+        // A caller's delta is taken as given — down to a thousandth of a millisecond, so a slowed simulation
+        // really is slowed — and only the project's own cycle is held to at least 1 ms.
+        let stepMs = deltaMs.map { max(0.001, $0) } ?? max(1, cycleDelayMs)
         for (tid, list) in scheduled {
             let interval = intervalMs(forThread: tid)
             var isDue = true
@@ -445,6 +447,19 @@ public final class SimulationEngine: @unchecked Sendable {
         }
         // The clock advances by one step per call, so a thread within one step of its period is due.
         return soonest <= stepMs ? 0 : soonest - stepMs
+    }
+
+    /// Simulated milliseconds until some thread next runs, `0` when one would on the next step. Exact: unlike
+    /// `nextDueInMs`, which counts a thread within one project cycle of its period as due, so a caller that
+    /// steps by a delta of its own can tell whether *that* delta reaches a thread.
+    public func msUntilNextRun() -> Double {
+        guard scheduling == .profileIntervals else { return 0 }
+        var soonest = Double.greatestFiniteMagnitude
+        for (tid, _) in scheduledThreads {
+            let interval = intervalMs(forThread: tid)
+            soonest = min(soonest, max(0, interval - (threadElapsedMs[tid] ?? interval)))
+        }
+        return soonest == .greatestFiniteMagnitude ? 0 : soonest
     }
 
     /// One cycle, but only when a thread is due. Reports whether anything ran, so a caller can skip
