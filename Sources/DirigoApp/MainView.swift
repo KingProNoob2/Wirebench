@@ -377,7 +377,6 @@ public struct MainView: View {
             .disabled(model.project == nil)
 
             HStack(spacing: 6) {
-                Spacer()
                 TickCountBadge(model: model)
 
                 // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
@@ -395,9 +394,9 @@ public struct MainView: View {
                     .onTapGesture(count: 2) { model.simulationSpeed = 1 }
                     .help("Double-click to return to 100%.")
             }
-            // A little room inside the toolbar's capsule on the right, so the percentage does not sit on its edge.
-            // The left already has the capsule's own inset.
-            .padding(.trailing, 4)
+            // Equal room either side inside the toolbar's capsule. A leading `Spacer` used to soak up the slack and
+            // push everything right, which left a wide gap on the left and none on the right.
+            .padding(.horizontal, 8)
         }
 
         ToolbarItem(placement: .primaryAction) {
