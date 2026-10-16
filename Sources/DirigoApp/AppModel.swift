@@ -78,7 +78,13 @@ public final class AppModel: @unchecked Sendable {
     public var selectedPage: String = "main"
     public var selectedModuleId: Int?
     public var isPlaying: Bool = false
-    public var tickRateHz: Double = 20.0
+    /// How fast simulated time runs: 1.0 is real time, the speed the PLC itself would run at. Threads keep
+    /// their profile periods; this scales how much time passes per wall-clock second.
+    public var simulationSpeed: Double = 1.0
+    /// The speeds the toolbar offers, slowest first. Slow ones are for watching a sequence, fast ones for
+    /// getting a 1 s timer to expire; past 4× a thread that is due every few milliseconds cannot keep up,
+    /// because a step runs each due thread once.
+    public static let speedSteps: [Double] = [0.1, 0.25, 0.5, 1, 2, 4]
     public var tickCount: UInt64 = 0
     public var simulationVersion: UInt64 = 0
 
@@ -989,9 +995,10 @@ public final class AppModel: @unchecked Sendable {
                 let now = ContinuousClock.now
                 let elapsedMs = Double((now - lastStepTime).components.seconds) * 1000
                     + Double((now - lastStepTime).components.attoseconds) / 1e15
+                let simulatedMs = max(1, elapsedMs * self.simulationSpeed)
                 let ran = cxxCore != nil
-                    ? stepBackend(deltaMs: max(1, elapsedMs))
-                    : engine.stepIfDue(deltaMs: max(1, elapsedMs))
+                    ? stepBackend(deltaMs: simulatedMs)
+                    : engine.stepIfDue(deltaMs: simulatedMs)
                 if ran { lastStepTime = now }
                 if updatePending && self.isAppActive && !ran && now - lastUIUpdateTime >= .milliseconds(28) {
                     self.simulationDidChange()
@@ -1017,12 +1024,11 @@ public final class AppModel: @unchecked Sendable {
                     }
                 }
 
-                // Sleep until the next thread is due, never faster than the rate the user asked for and
-                // never longer than a second. A pending update caps the wait instead, so it is delivered
-                // within one frame rather than one thread period.
-                let frameSec = 1.0 / max(1.0, self.tickRateHz)
+                // Sleep until the next thread is due — in wall-clock time, so a slowed simulation waits longer —
+                // never less than 2 ms and never longer than a second. A pending update caps the wait
+                // instead, so it is delivered within one frame rather than one thread period.
                 let nextDueMs = cxxCore?.nextDueInMs() ?? engine.nextDueInMs()
-                var dueSec = min(max(nextDueMs / 1000.0, frameSec), 1.0)
+                var dueSec = min(max(nextDueMs / 1000.0 / max(0.01, self.simulationSpeed), 0.002), 1.0)
                 if updatePending { dueSec = min(dueSec, 0.028) }
                 try? await Task.sleep(nanoseconds: UInt64(dueSec * 1_000_000_000))
             }

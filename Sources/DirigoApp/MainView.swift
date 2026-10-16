@@ -16,6 +16,18 @@ public struct MainView: View {
         self.model = model
     }
 
+    /// The speed slider's position: the index of the nearest step.
+    private var speedIndex: Binding<Double> {
+        Binding(
+            get: {
+                let steps = AppModel.speedSteps
+                let nearest = steps.indices.min { abs(steps[$0] - model.simulationSpeed) < abs(steps[$1] - model.simulationSpeed) }
+                return Double(nearest ?? 0)
+            },
+            set: { model.simulationSpeed = AppModel.speedSteps[min(max(Int($0.rounded()), 0), AppModel.speedSteps.count - 1)] }
+        )
+    }
+
     private var allPages: [ProjectPage] {
         model.project?.pages ?? []
     }
@@ -368,19 +380,20 @@ public struct MainView: View {
                 Spacer()
                 TickCountBadge(model: model)
 
-                // A *ceiling*, not a cadence: the loop now steps when the project's threads are due
-                // (`Tick` every 71 ms, `Timer 1s` every 1000 ms), so this only bites when a thread asks
-                // to run faster than the user wants to allow.
-                Slider(value: $model.tickRateHz, in: 20...200)
-                    .frame(width: 200)
+                // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
+                // stay the profile's, and this only changes how fast time passes.
+                Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
+                    .frame(width: 120)
                     .disabled(model.project == nil)
-                    .help("Maximum step rate. Threads run on the periods their profile declares.")
+                    .help("Simulation speed. 100% is real time, as the PLC would run it.")
 
-                Text("\(Int(model.tickRateHz)) Hz")
+                Text("\(Int((model.simulationSpeed * 100).rounded()))%")
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 46, alignment: .leading)
+                    .frame(minWidth: 38, alignment: .trailing)
+                    .onTapGesture(count: 2) { model.simulationSpeed = 1 }
+                    .help("Double-click to return to 100%.")
             }
         }
 
