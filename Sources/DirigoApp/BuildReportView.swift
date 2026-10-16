@@ -48,15 +48,17 @@ struct BuildReportSheet: View {
                 Button("Close", action: onClose)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Export Symbol Table (CSV)\u{2026}", action: onExportSymbols)
-                Button("Export Program Binary\u{2026}", action: onExportProgram)
+                Button("Export CSV\u{2026}", action: onExportSymbols)
+                    .help("Export the symbol table as a CSV file")
+                Button("Export Program\u{2026}", action: onExportProgram)
+                    .help("Export the program binary (.pbd)")
                 // The highlighted button: compiling is done, so uploading is the next step.
                 Button("Upload to PLC\u{2026}", action: onUpload)
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
-        .frame(minWidth: 560, minHeight: 340)
+        .frame(minWidth: 580, minHeight: 340)
     }
 }
 
