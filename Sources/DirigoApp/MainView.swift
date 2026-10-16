@@ -382,7 +382,7 @@ public struct MainView: View {
                 // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
                 // stay the profile's, and this only changes how fast time passes.
                 Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
-                    .frame(width: 180)
+                    .frame(width: 150)
                     .disabled(model.project == nil)
                     .help("Simulation speed. 100% is real time, as the PLC would run it.")
 
@@ -390,13 +390,13 @@ public struct MainView: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 34, alignment: .trailing)
+                    .frame(minWidth: 30, alignment: .trailing)
                     .onTapGesture(count: 2) { model.simulationSpeed = 1 }
                     .help("Double-click to return to 100% (real time).")
             }
             // Equal room either side inside the toolbar's capsule. A leading `Spacer` used to soak up the slack and
             // push everything right, which left a wide gap on the left and none on the right.
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 4)
         }
 
         ToolbarItem(placement: .primaryAction) {
