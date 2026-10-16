@@ -78,17 +78,18 @@ public final class AppModel: @unchecked Sendable {
     public var selectedPage: String = "main"
     public var selectedModuleId: Int?
     public var isPlaying: Bool = false
-    /// How fast simulated time runs: 1.0 is real time, the speed the PLC itself would run at. Threads keep
-    /// their profile periods; this scales how much time passes per wall-clock second.
-    ///
-    /// It starts at 5%, not 100%: at the PLC's own speed a fast project (a 71 ms `Tick` thread driving the dice
-    /// or the snake) flashes past faster than it can be watched — and 25% still did. At 5% that thread steps
-    /// about once every 1.4 s.
-    public var simulationSpeed: Double = 0.05
-    /// The speeds the toolbar offers, slowest first. Slow ones are for watching a sequence, fast ones for
-    /// getting a 1 s timer to expire; past 4× a thread that is due every few milliseconds cannot keep up,
-    /// because a step runs each due thread once.
-    public static let speedSteps: [Double] = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4]
+    /// How fast simulated time runs, as a multiple of the *base speed*: 1.0 — shown as 100% — is a tenth of the
+    /// PLC's real time. At the PLC's own speed a fast project (a 71 ms `Tick` thread driving the dice or the
+    /// snake) flashes past faster than it can be watched, so the base is the pace that can. Threads keep their
+    /// profile periods; this scales how much time passes per wall-clock second.
+    public var simulationSpeed: Double = 1.0
+    /// Real time is this many times the base speed (1000%).
+    public static let baseSpeed = 0.1
+    /// The speeds the toolbar offers, slowest first, as multiples of the base. Past 1000% (real time) a thread
+    /// that is due every few milliseconds cannot keep up, because a step runs each due thread once.
+    public static let speedSteps: [Double] = [0.1, 0.25, 0.5, 1, 2, 4, 10]
+    /// Simulated seconds per wall-clock second.
+    var effectiveSpeed: Double { simulationSpeed * Self.baseSpeed }
     public var tickCount: UInt64 = 0
     public var simulationVersion: UInt64 = 0
 
@@ -1001,7 +1002,7 @@ public final class AppModel: @unchecked Sendable {
                     + Double((now - lastStepTime).components.attoseconds) / 1e15
                 // Simulated time since the last step, and whether it reaches a thread. Calling `step` anyway would
                 // count a tick and wake the UI every few milliseconds whatever the speed, with no thread running.
-                let simulatedMs = elapsedMs * self.simulationSpeed
+                let simulatedMs = elapsedMs * self.effectiveSpeed
                 let untilRun = self.cxxCore?.msUntilNextRun() ?? engine.msUntilNextRun()
                 let ran = untilRun <= simulatedMs + 1e-9
                     ? stepBackend(deltaMs: simulatedMs)
@@ -1037,8 +1038,8 @@ public final class AppModel: @unchecked Sendable {
                 let untilRunNow = self.cxxCore?.msUntilNextRun() ?? engine.msUntilNextRun()
                 let sinceStep = Double((ContinuousClock.now - lastStepTime).components.seconds) * 1000
                     + Double((ContinuousClock.now - lastStepTime).components.attoseconds) / 1e15
-                let remainingSimMs = max(0, untilRunNow - sinceStep * self.simulationSpeed)
-                var dueSec = min(max(remainingSimMs / 1000.0 / max(0.01, self.simulationSpeed), 0.002), 1.0)
+                let remainingSimMs = max(0, untilRunNow - sinceStep * self.effectiveSpeed)
+                var dueSec = min(max(remainingSimMs / 1000.0 / max(0.001, self.effectiveSpeed), 0.002), 1.0)
                 if updatePending { dueSec = min(dueSec, 0.028) }
                 try? await Task.sleep(nanoseconds: UInt64(dueSec * 1_000_000_000))
             }

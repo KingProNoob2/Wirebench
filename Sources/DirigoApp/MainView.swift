@@ -385,7 +385,7 @@ public struct MainView: View {
                     .controlSize(.small)
                     .frame(width: 150)
                     .disabled(model.project == nil)
-                    .help("Simulation speed. 100% is real time, as the PLC would run it.")
+                    .help("Simulation speed. 100% is the base pace; 1000% is real time, as the PLC would run it.")
 
                 Text("\(Int((model.simulationSpeed * 100).rounded()))%")
                     .font(.caption)
@@ -393,7 +393,7 @@ public struct MainView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 38, alignment: .trailing)
                     .onTapGesture(count: 2) { model.simulationSpeed = 1 }
-                    .help("Double-click to return to 100% (real time).")
+                    .help("Double-click to return to 100%.")
             }
             // The capsule hugs this row, so these are its margins: the same on both sides. The label has a fixed
             // width (it used to have a minimum, which left a gap before short values like "5%") and the slider is
