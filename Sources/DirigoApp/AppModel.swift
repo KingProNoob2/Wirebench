@@ -81,14 +81,14 @@ public final class AppModel: @unchecked Sendable {
     /// How fast simulated time runs: 1.0 is real time, the speed the PLC itself would run at. Threads keep
     /// their profile periods; this scales how much time passes per wall-clock second.
     ///
-    /// It starts at 25%, not 100%: at the PLC's own speed a fast project (a 71 ms `Tick` thread driving the dice
-    /// or the snake) flashes past faster than it can be watched, and this is an editor before it is a
-    /// stand-in for the hardware.
-    public var simulationSpeed: Double = 0.25
+    /// It starts at 5%, not 100%: at the PLC's own speed a fast project (a 71 ms `Tick` thread driving the dice
+    /// or the snake) flashes past faster than it can be watched — and 25% still did. At 5% that thread steps
+    /// about once every 1.4 s.
+    public var simulationSpeed: Double = 0.05
     /// The speeds the toolbar offers, slowest first. Slow ones are for watching a sequence, fast ones for
     /// getting a 1 s timer to expire; past 4× a thread that is due every few milliseconds cannot keep up,
     /// because a step runs each due thread once.
-    public static let speedSteps: [Double] = [0.05, 0.1, 0.25, 0.5, 1, 2, 4]
+    public static let speedSteps: [Double] = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 4]
     public var tickCount: UInt64 = 0
     public var simulationVersion: UInt64 = 0
 
