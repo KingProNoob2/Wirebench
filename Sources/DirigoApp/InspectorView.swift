@@ -419,7 +419,7 @@ struct SignalRow: View, Equatable {
                 Circle()
                     .fill(isHigh ? Theme.signalHigh : Color.secondary.opacity(0.35))
                     .frame(width: 7, height: 7)
-                if let number {
+                if number != nil {
                     // One chip, resting or editing. The resting text sizes it; while editing, the field is laid *over*
                     // that text, which is hidden but still there to give the chip its size. Swapping a `TextField` in
                     // for the text changed the row's width and height — a `TextField` in a `Form` reserves the
@@ -429,7 +429,7 @@ struct SignalRow: View, Equatable {
                         .monospacedDigit()
                         .foregroundStyle(isHigh ? .primary : .secondary)
                         .opacity(isEditing ? 0 : 1)
-                        .frame(minWidth: max(30, CGFloat(value.count) * 8.5 + 12), alignment: .trailing)
+                        .frame(minWidth: valueChipWidth(for: value), alignment: .trailing)
                         .padding(.horizontal, 4)
                         .background(Color.primary.opacity(isEditing || isHovering ? 0.16 : 0.08),
                                     in: RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -504,7 +504,7 @@ struct ParamValueField: View {
             .font(.system(.body, design: .monospaced))
             .monospacedDigit()
             .opacity(0)
-            .frame(minWidth: max(30, CGFloat(current.count) * 8.5 + 12), alignment: .trailing)
+            .frame(minWidth: valueChipWidth(for: current), alignment: .trailing)
             .padding(.horizontal, 4)
             .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .overlay {
@@ -529,4 +529,10 @@ struct ParamValueField: View {
                 if let typed = draft, Int32(typed.trimmingCharacters(in: .whitespaces)) != nil { draft = nil }
             }
     }
+}
+
+/// The width a value chip reserves for `text`, in the monospaced body font: wide enough that a value changing by a
+/// digit does not make the row jump, and never narrower than a short one needs to be a click target.
+private func valueChipWidth(for text: String) -> CGFloat {
+    max(30, CGFloat(text.count) * 8.5 + 12)
 }

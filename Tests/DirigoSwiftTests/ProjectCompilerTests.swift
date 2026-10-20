@@ -475,7 +475,6 @@ struct RecordReproductionTests {
 
     @Test("Every record of had.dmp, rebuilt from the model, is byte for byte the real one")
     func allNineRecords() throws {
-        let xml = try String(contentsOf: Self.root.appendingPathComponent("had+1block.pcc"), encoding: .utf8)
         let csv = try String(contentsOf: Self.root.appendingPathComponent("had+1block.csv"), encoding: .utf8)
         let table = [UInt8](try Data(contentsOf: Self.root.appendingPathComponent("had.dmp")))
         let slots = PLCProjectCompiler.slots(fromSymbolCSV: csv)
@@ -1089,7 +1088,6 @@ struct ClassShapesFromP1Tests {
 
     @Test("had.dmp's records still come out byte for byte through the merged table")
     func recordsThroughTheLibraryTable() throws {
-        let xml = try String(contentsOf: Self.root.appendingPathComponent("had+1block.pcc"), encoding: .utf8)
         let table = [UInt8](try Data(contentsOf: Self.root.appendingPathComponent("had.dmp")))
         // `ISwitch1`'s masks are the six non-zero unconnected values past its first pin, which is what
         // `PLCProjectCompiler.declaredConstants` reads out of the project.
@@ -1210,7 +1208,7 @@ struct RecordAddressConsistencyTests {
                                         shapes: PLCProjectCompiler.classShapes)
         let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes,
                                           classForGUID: SymbolTableGenerationTests.allClasses())
-        let region = try compiler.records(modules: modules, wires: wires, allocation: allocation)
+        _ = try compiler.records(modules: modules, wires: wires, allocation: allocation)
 
         // The addresses the table hands out, as the `(INDEX, ROWINDEX)` and slot numbers a word can hold.
         var terminals: Set<UInt16> = []

@@ -912,11 +912,6 @@ public struct PLCProjectCompiler {
             self.info1 = info1; self.info2 = info2; self.info3 = info3
             self.kAdr = kAdr; self.qAdr = qAdr
         }
-
-        /// `500 + umisteni` then the terminal, or `1000 + umisteni*100` then the terminal, with the
-        /// terminal 1-based — the scheme the rows' own ids use (`500601` = module 6, terminal 1).
-        public var terminalWord: UInt16 { UInt16(umisteni << 8) | UInt16(svorka) }
-        public var slotWord: UInt16? { type == 4 ? 0x1000 + UInt16(rowIndex) : nil }
     }
 
     /// The column order of the file, exactly as Dirigo's own header has it. The reader and the writer

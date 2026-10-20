@@ -148,18 +148,6 @@ public extension PCCModule {
     /// The attribute prefix that marks a property as belonging to this reimplementation.
     static let extraPropertyPrefix = "X_"
 
-    /// Every extra property on this module, in the order the attributes appear.
-    ///
-    /// The name is the attribute without its prefix, so `X_RampTime` reads as `RampTime`.
-    var extraProperties: [String: ExtraPropertyValue] {
-        var found: [String: ExtraPropertyValue] = [:]
-        for key in rawAttributes.keys where key.hasPrefix(Self.extraPropertyPrefix) {
-            guard let text = rawAttributes[key] else { continue }
-            found[String(key.dropFirst(Self.extraPropertyPrefix.count))] = .decode(text)
-        }
-        return found
-    }
-
     /// The extra property names in attribute order, so a UI can list them deterministically.
     var extraPropertyNames: [String] {
         rawAttributes.keys

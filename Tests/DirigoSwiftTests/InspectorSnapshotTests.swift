@@ -100,7 +100,7 @@ struct InspectorSnapshotTests {
 @Suite("Inspector rows belong to their block")
 struct InspectorRowIdentityTests {
     @Test("The same-looking row on another block, or another pin, is not the same row")
-    func rowsAreNotEqualAcrossOwners() {
+    @MainActor func rowsAreNotEqualAcrossOwners() {
         let first = SignalRow(name: "X (Value)", value: "0", isHigh: false, isInput: true, owner: 1, pin: 0)
         #expect(first == SignalRow(name: "X (Value)", value: "0", isHigh: false, isInput: true, owner: 1, pin: 0))
         #expect(first != SignalRow(name: "X (Value)", value: "0", isHigh: false, isInput: true, owner: 2, pin: 0),

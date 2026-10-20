@@ -585,7 +585,7 @@ struct DbNetProtocolTests {
         #expect(DbNetFrame.parseSerial([0x99, 0x01]) == .failure(.badMarker(0x99)))
 
         // A long frame shorter than its own header is rejected outright.
-        var short: [UInt8] = [0x68, 0x09, 0x09, 0x68, 0x01, 0x1F, 0x45]
+        let short: [UInt8] = [0x68, 0x09, 0x09, 0x68, 0x01, 0x1F, 0x45]
         #expect(DbNetFrame.parseSerial(short) == .failure(.tooShort))
 
         // And one long enough to have a header, but claiming more data than it carries, is a length

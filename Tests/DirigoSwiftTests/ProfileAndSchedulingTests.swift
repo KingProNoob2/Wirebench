@@ -235,7 +235,6 @@ struct ThreadSchedulingTests {
 
         let block = unresolved[0].block
         #expect(block is UnresolvedBlock)
-        let placeholder = block as? UnresolvedBlock
 
         // Running must not fabricate a result from the input.
         engine.run(ticks: 5)

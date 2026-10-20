@@ -97,7 +97,7 @@ struct ProgramBuilderTests {
 
     @Test("Records that overrun the sentinel are refused")
     func refusesOverlongPrograms() throws {
-        let template = try PLCProgramTable(bytes: try Self.realBytes())
+        _ = try PLCProgramTable(bytes: try Self.realBytes())
         // 0xC4 - 0x40 = 132 bytes of room; each module costs 2 + 2n.
         let tooMany = (0..<40).map { _ in PLCProgramBuilder.Module(id: 1, flag: 0, values: [0, 0, 0, 0]) }
         let builder = PLCProgramBuilder(modules: tooMany)

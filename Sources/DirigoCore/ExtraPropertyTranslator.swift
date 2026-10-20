@@ -13,8 +13,6 @@ public struct ExtraPropertyExportResult: Sendable {
     public let project: PCCProject
     /// One line per extra property touched, ready to show the user.
     public let notes: [String]
-    /// True when something was removed, so a caller can style the outcome as a warning.
-    public var removedAnything: Bool { !notes.isEmpty }
 }
 
 /// Turns this app's extra properties into things the original Dirigo understands.
@@ -92,10 +90,5 @@ public enum ExtraPropertyTranslator {
         }
 
         return ExtraPropertyExportResult(project: output, notes: notes)
-    }
-
-    /// True when the project carries no extra properties, so a caller can skip the work entirely.
-    public static func hasExtraProperties(_ project: PCCProject) -> Bool {
-        project.modules.contains { !$0.extraPropertyNames.isEmpty }
     }
 }

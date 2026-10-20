@@ -186,45 +186,38 @@ extension PCCProject {
     public mutating func removeInterfacePin(moduleId: Int, pin: Int) -> Bool {
         guard let index = modules.firstIndex(where: { $0.id == moduleId }),
               let kind = MacroInterface.kind(of: modules[index]) else { return false }
+        let isInputs = kind == .inputs
+        guard (isInputs ? modules[index].outPins : modules[index].inPins).indices.contains(pin) else { return false }
         let sheet = modules[index].page
         let callIds = Set(calls(ofSheet: sheet).map(\.id))
 
-        switch kind {
-        case .inputs:
-            guard modules[index].outPins.indices.contains(pin) else { return false }
+        // `Inputs` hands values out of the sheet (its output pins) and each call takes them in (input pins); `Outputs`
+        // is the mirror image.
+        if isInputs {
             modules[index].outPins.remove(at: pin)
             for p in modules[index].outPins.indices { modules[index].outPins[p].id = p }
-            // Inside the sheet: wires leaving the removed pin go, later pins shift down.
-            inConnections.removeAll { $0.outModuleId == moduleId && $0.outPinId == pin }
-            for c in inConnections.indices where inConnections[c].outModuleId == moduleId && inConnections[c].outPinId > pin {
-                inConnections[c].outPinId -= 1
-            }
-            // At the calls: the wires and constants of the matching input pin.
-            inConnections.removeAll { callIds.contains($0.inModuleId) && $0.inPinId == pin }
-            for c in inConnections.indices where callIds.contains(inConnections[c].inModuleId) && inConnections[c].inPinId > pin {
-                inConnections[c].inPinId -= 1
-            }
-            for m in modules.indices where callIds.contains(modules[m].id) && modules[m].inPins.indices.contains(pin) {
-                modules[m].inPins.remove(at: pin)
-            }
-        case .outputs:
-            guard modules[index].inPins.indices.contains(pin) else { return false }
+        } else {
             modules[index].inPins.remove(at: pin)
             for p in modules[index].inPins.indices { modules[index].inPins[p].id = p }
-            inConnections.removeAll { $0.inModuleId == moduleId && $0.inPinId == pin }
-            for c in inConnections.indices where inConnections[c].inModuleId == moduleId && inConnections[c].inPinId > pin {
-                inConnections[c].inPinId -= 1
-            }
-            inConnections.removeAll { callIds.contains($0.outModuleId) && $0.outPinId == pin }
-            for c in inConnections.indices where callIds.contains(inConnections[c].outModuleId) && inConnections[c].outPinId > pin {
-                inConnections[c].outPinId -= 1
-            }
-            for m in modules.indices where callIds.contains(modules[m].id) && modules[m].outPins.indices.contains(pin) {
-                modules[m].outPins.remove(at: pin)
-            }
+        }
+        closeGap(in: [moduleId], pin: pin, outputSide: isInputs)
+        closeGap(in: callIds, pin: pin, outputSide: !isInputs)
+        for m in modules.indices where callIds.contains(modules[m].id) {
+            if isInputs, modules[m].inPins.indices.contains(pin) { modules[m].inPins.remove(at: pin) }
+            if !isInputs, modules[m].outPins.indices.contains(pin) { modules[m].outPins.remove(at: pin) }
         }
         syncCalls(ofSheet: sheet)
         return true
+    }
+
+    /// Drops the wires on one pin of each module in `ids` and renumbers the wires on the pins after it.
+    private mutating func closeGap(in ids: Set<Int>, pin: Int, outputSide: Bool) {
+        func module(_ c: Connection) -> Int { outputSide ? c.outModuleId : c.inModuleId }
+        func pinOf(_ c: Connection) -> Int { outputSide ? c.outPinId : c.inPinId }
+        inConnections.removeAll { ids.contains(module($0)) && pinOf($0) == pin }
+        for i in inConnections.indices where ids.contains(module(inConnections[i])) && pinOf(inConnections[i]) > pin {
+            if outputSide { inConnections[i].outPinId -= 1 } else { inConnections[i].inPinId -= 1 }
+        }
     }
 
     /// Renames a macro sheet: its page, the modules on it, and the `MACRO_NAME` of every call.

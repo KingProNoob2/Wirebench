@@ -150,7 +150,7 @@ struct PlayLoopTests {
         try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
 
         let model = AppModel()
-        try model.loadProject(url: url)
+        model.loadProject(url: url)
         model.play()
         try await Task.sleep(nanoseconds: 400_000_000)
         let settled = model.simulationVersion

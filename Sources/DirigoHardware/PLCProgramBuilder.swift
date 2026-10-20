@@ -59,9 +59,6 @@ public struct PLCProgramBuilder: Sendable {
         /// correction it records — `0xC0xx` is a constant, not "unassigned" — is worth the rename.
         @available(*, deprecated, renamed: "constant(_:)")
         public static let unassigned: UInt16 = 0xC000
-
-        /// A data slot: `0x1000 + n` for an int, `0x2000 + n` for a long, `0x3000 + n` for a float.
-        public static func dataSlot(_ index: Int) -> UInt16 { 0x1000 + UInt16(index) }
     }
 
     public var modules: [Module]

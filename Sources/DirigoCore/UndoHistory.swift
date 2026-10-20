@@ -74,9 +74,4 @@ public struct UndoHistory: Sendable {
         redoStack.removeAll()
         lastRecorded = nil
     }
-
-    /// Ends the current coalescing group, so the next edit starts a fresh undo step.
-    public mutating func endGroup() {
-        lastRecorded = nil
-    }
 }

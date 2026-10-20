@@ -20,7 +20,7 @@ struct UploadSpeedTests {
             guard openpty(&m, &s, &nameBuffer, nil, nil) == 0 else { throw POSIXError(.EIO) }
             Darwin.close(s)                       // the slave is reopened by path, as the app does
             master = m
-            slavePath = String(cString: nameBuffer)
+            slavePath = String(decoding: nameBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             _ = fcntl(m, F_SETFL, fcntl(m, F_GETFL) | O_NONBLOCK)
             Thread.detachNewThread { [self] in serve() }
         }

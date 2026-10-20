@@ -31,7 +31,6 @@ public enum PLCProgramOptimizer {
         public var cyclesAfter: Int
         /// How many modules changed place.
         public var moved: Int
-        public var isChange: Bool { !removed.isEmpty || moved > 0 }
     }
 
     /// Classes with no effect of their own: their records matter only through what reads their outputs.
@@ -57,7 +56,6 @@ public enum PLCProgramOptimizer {
         for wire in wires where wire.outModule != wire.inModule {
             readers[wire.outModule, default: []].append(wire.inModule)
         }
-        let byId = Dictionary(allModules.map { ($0.umisteni, $0) }, uniquingKeysWith: { first, _ in first })
         let inProgram = Set(ordered.map(\.umisteni))
 
         // 1. Backward from everything that is not a pure module in the program: it is kept, and so is what feeds it.
@@ -70,7 +68,7 @@ public enum PLCProgramOptimizer {
         while changed {
             changed = false
             for module in ordered where !live.contains(module.umisteni) {
-                if (readers[module.umisteni] ?? []).contains(where: { live.contains($0) && byId[$0] != nil }) {
+                if (readers[module.umisteni] ?? []).contains(where: live.contains) {
                     live.insert(module.umisteni)
                     changed = true
                 }

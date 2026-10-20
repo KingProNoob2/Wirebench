@@ -27,7 +27,7 @@ struct BlockSearchTests {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("search-\(UUID()).pcc")
         try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
         let model = AppModel()
-        try model.loadProject(url: url)
+        model.loadProject(url: url)
         return model
     }
 

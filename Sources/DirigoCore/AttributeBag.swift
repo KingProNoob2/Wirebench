@@ -79,22 +79,6 @@ public struct AttributeBag: Sendable, Equatable, Hashable {
         order.removeAll()
         storage.removeAll()
     }
-
-    /// Sets `key` only when it is not already present, appending it at the end.
-    public mutating func setIfAbsent(_ key: String, _ value: String) {
-        guard storage[key] == nil else { return }
-        order.append(key)
-        storage[key] = value
-    }
-
-    /// Reorders the bag so that the given keys come first, in the given order; anything else
-    /// keeps its relative order afterwards. Used to emit modelled attributes in the position
-    /// Dirigo itself uses.
-    public mutating func moveToFront(_ key: String) {
-        guard let idx = order.firstIndex(of: key), idx != 0 else { return }
-        order.remove(at: idx)
-        order.insert(key, at: 0)
-    }
 }
 
 extension AttributeBag: ExpressibleByDictionaryLiteral {

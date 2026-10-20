@@ -16,7 +16,7 @@ struct SheetTextTests {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("text-\(UUID()).pcc")
         try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
         let model = AppModel()
-        try model.loadProject(url: url)
+        model.loadProject(url: url)
         return model
     }
 
@@ -116,7 +116,7 @@ struct SheetTextTests {
         try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
 
         let model = AppModel()
-        try model.loadProject(url: url)
+        model.loadProject(url: url)
         model.renameModule(id: 1, name: "Renamed")          // rebuilds the whole runtime
 
         let after = PCCSerializer().serialize(project: model.project!)
