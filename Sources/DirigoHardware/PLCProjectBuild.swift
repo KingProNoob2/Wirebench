@@ -25,32 +25,40 @@ public struct PLCProjectBuild: Equatable, Sendable {
         /// What the optimising pass did, when it ran.
         public var optimization: Optimization?
 
-        /// The summary both front ends show, in the same words.
+        /// The counts in one line. The app shows them as tiles, so only the command line prints this.
+        public var countsLine: String {
+            "\(compiledModules)/\(moduleCount) modules, \(recordBytes) B of records, \(dataSlots) data slots, "
+                + "\(terminals) terminals, \(symbolRows) symbol rows."
+        }
+
+        /// The notes both front ends show, in the same words: only what the counts do not already say.
         public var lines: [String] {
-            var out = [
-                "\(compiledModules) of \(moduleCount) modules compiled, \(recordBytes) bytes of records."
-                    + (displayModules > 0 ? " \(displayModules) display module(s) write no record." : ""),
-                "\(dataSlots) data slot(s), \(terminals) terminal(s), \(symbolRows) symbol row(s).",
-            ]
-            if !unshaped.isEmpty {
-                out.append("\(unshaped.count) class(es) have no record shape yet: "
-                           + unshaped.prefix(6).joined(separator: ", ")
-                           + (unshaped.count > 6 ? ", …" : ""))
-                out.append("   modules: " + unshapedModules.prefix(8).joined(separator: ", ")
-                           + (unshapedModules.count > 8 ? ", …" : ""))
+            func list(_ names: [String], _ limit: Int) -> String {
+                names.prefix(limit).joined(separator: ", ") + (names.count > limit ? ", …" : "")
             }
-            if let optimization {
-                var line = "Optimised: \(optimization.bytesSaved) byte(s) saved"
-                if optimization.bytesSaved > 0, !optimization.removedModules.isEmpty {
-                    line += ", \(optimization.removedModules.count) unused module(s) dropped"
-                }
-                line += "; a value crosses the program in \(optimization.cyclesAfter) cycle(s) instead of \(optimization.cyclesBefore)."
-                out.append(line)
+            var out: [String] = []
+            if displayModules > 0 {
+                out.append("\(displayModules) display module(s) are not part of the program.")
+            }
+            if !unshaped.isEmpty {
+                out.append("Not compiled yet: \(list(unshapedModules, 8)) (\(list(unshaped, 6))).")
             }
             if !macros.isEmpty {
-                out.append("\(macros.count) macro module(s) were left out: "
-                           + macros.prefix(4).joined(separator: ", ")
-                           + (macros.count > 4 ? ", …" : ""))
+                out.append("Macros left out: \(list(macros, 4)).")
+            }
+            if let optimization {
+                var changes: [String] = []
+                if optimization.bytesSaved > 0 {
+                    changes.append("saved \(optimization.bytesSaved) B")
+                }
+                if !optimization.removedModules.isEmpty {
+                    changes.append("dropped \(optimization.removedModules.count) module(s)")
+                }
+                if optimization.cyclesAfter < optimization.cyclesBefore {
+                    changes.append("settles in \(optimization.cyclesAfter) cycle(s) instead of \(optimization.cyclesBefore)")
+                }
+                out.append(changes.isEmpty ? "Optimiser: nothing to improve."
+                                           : "Optimiser: " + changes.joined(separator: ", ") + ".")
             }
             return out
         }

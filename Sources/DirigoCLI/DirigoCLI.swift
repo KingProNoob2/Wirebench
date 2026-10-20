@@ -96,7 +96,8 @@ struct DirigoCLI {
                                                 Show the hardware profile and SystemCmd catalogue
           dirigo-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet]
                                                 Compile the project to <name>.pbd and <name>.csv.
-                                                --optimize drops unused gates and puts the records in dataflow
+                                                --optimize drops unused and switched-off (En = 0) logic and math,
+                                                and puts the records in dataflow
                                                 order, so values settle in fewer PLC cycles.
                                                 --template carries a real export's table, header and
                                                 profile into the build. Exits 1 if any module's class
@@ -487,7 +488,7 @@ struct DirigoCLI {
             if !quiet {
                 print("\nBuild of \(url.lastPathComponent)")
                 print(String(repeating: "-", count: 72))
-                for line in build.report.lines { print("  " + line) }
+                for line in [build.report.countsLine] + build.report.lines { print("  " + line) }
                 print(String(repeating: "-", count: 72))
                 print("  \(binaryURL.path)  (\(binary.count) bytes)")
                 print("  \(csvURL.path)  (\(build.report.symbolRows) rows)")

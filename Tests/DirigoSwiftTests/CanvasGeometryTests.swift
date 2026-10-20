@@ -128,3 +128,62 @@ struct CanvasTransformTests {
                 "without the conversion the hit test misses — the original defect")
     }
 }
+
+@Suite("Grid snapping")
+@MainActor
+struct GridSnapTests {
+    @Test("Values round to the nearest grid line")
+    func rounding() {
+        #expect(GridSnap.snap(0) == 0)
+        #expect(GridSnap.snap(15) == 0)
+        #expect(GridSnap.snap(17) == 32)
+        #expect(GridSnap.snap(-20) == -32)
+        #expect(GridSnap.snap(100, step: 25) == 100)
+    }
+
+    @Test("Moving a module snaps only when the model's toggle is on")
+    func modelMove() {
+        let model = AppModel()
+        var project = PCCProject(name: "snap")
+        project.modules = [CanvasGeometryTests.module(1, x: 10, y: 10, inPins: 0, outPins: 1)]
+        model.project = project
+
+        model.snapToGrid = false
+        model.updateModulePosition(id: 1, deltaX: 5, deltaY: 7)
+        #expect(model.project?.modules[0].x == 15)
+        #expect(model.project?.modules[0].y == 17)
+
+        model.snapToGrid = true
+        model.updateModulePosition(id: 1, deltaX: 20, deltaY: 20)
+        #expect(model.project?.modules[0].x == 32)
+        #expect(model.project?.modules[0].y == 32)
+        model.snapToGrid = false
+    }
+}
+
+@Suite("Group move")
+@MainActor
+struct GroupMoveTests {
+    @Test("A group moves together, and selecting outside it ends the group")
+    func groupMove() {
+        let model = AppModel()
+        var project = PCCProject(name: "group")
+        project.modules = [CanvasGeometryTests.module(1, x: 10, y: 10, inPins: 0, outPins: 1),
+                           CanvasGeometryTests.module(2, x: 100, y: 50, inPins: 1, outPins: 0),
+                           CanvasGeometryTests.module(3, x: 300, y: 300, inPins: 1, outPins: 0)]
+        model.project = project
+        model.selectedModuleIds = [1, 2]
+        model.selectedModuleId = 1
+        #expect(model.selectedModuleIds == [1, 2])
+
+        model.snapToGrid = true
+        model.moveModules([1, 2], lead: 1, deltaX: 20, deltaY: 20)   // lead snaps 10 -> 32 (+22)
+        model.snapToGrid = false
+        #expect(model.project?.modules[0].x == 32)
+        #expect(model.project?.modules[1].x == 122)
+        #expect(model.project?.modules[2].x == 300)
+
+        model.selectedModuleId = 3
+        #expect(model.selectedModuleIds.isEmpty)
+    }
+}

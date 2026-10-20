@@ -3,15 +3,29 @@ import SwiftUI
 @main
 struct DirigoApp: App {
     @State private var model = AppModel()
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
         WindowGroup {
             MainView(model: model)
                 .frame(minWidth: 1000, minHeight: 650)
+                .preferredColorScheme(model.appearance.colorScheme)
                 // Documents opened from Finder or `open` arrive here.
                 .onOpenURL { url in
-                    model.loadProject(url: url)
+                    if model.confirmDiscardingChanges() { model.loadProject(url: url) }
                 }
+                .onAppear {
+                    // Unsaved work is asked about before Quit, New and Open replace it.
+                    appDelegate.model = model
+                    model.confirmDiscardingChanges = { [weak model] in
+                        // Only ever called from menu and view actions, which run on the main thread.
+                        MainActor.assumeIsolated { model.map(UnsavedChanges.confirm) ?? true }
+                    }
+                }
+        }
+        Settings {
+            SettingsView(model: model)
+                .preferredColorScheme(model.appearance.colorScheme)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
@@ -105,6 +119,12 @@ struct DirigoApp: App {
                     .disabled(model.project == nil)
 
                 Divider()
+
+                Button("Organize Blocks") {
+                    model.organizeBlocks()
+                }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(model.project == nil)
 
                 Button("Reset Wire Routing") {
                     model.resetWireRouting()

@@ -130,6 +130,84 @@ struct WireRoutingTests {
         #expect(Self.isOrthogonal(points))
     }
 
+    @Test("A block sitting on a straight run is routed around, not through")
+    func horizontalRunAvoidsBlock() {
+        let src = CGPoint(x: 0, y: 100)
+        let dst = CGPoint(x: 600, y: 100)
+        let obstacle = CGRect(x: 290, y: 40, width: 120, height: 200)
+        let points = WireRouter.route(from: src, to: dst, obstacles: [obstacle], clearBelow: 400)
+        #expect(points.first == src)
+        #expect(points.last == dst)
+        #expect(Self.isOrthogonal(points))
+        #expect(WireRouter.crossings(points, obstacles: [obstacle], ends: []) == 0)
+        // Into the target heading right, as every cable does.
+        #expect(points[points.count - 2].y == dst.y && points[points.count - 2].x < dst.x)
+    }
+
+    @Test("A backward cable does not cut across the blocks it connects")
+    func backwardAvoidsOwnBlocks() {
+        // Source block on the right, target on the left, a third block under the detour's leg.
+        let source = CGRect(x: 400, y: 80, width: 110, height: 80)
+        let target = CGRect(x: 100, y: 200, width: 110, height: 80)
+        let other = CGRect(x: 500, y: 150, width: 110, height: 200)
+        let src = CGPoint(x: source.maxX, y: 100)
+        let dst = CGPoint(x: target.minX, y: 220)
+        let points = WireRouter.route(from: src, to: dst, obstacles: [other],
+                                      clearAbove: 54, clearBelow: 306, ends: [source, target])
+        #expect(Self.isOrthogonal(points))
+        #expect(WireRouter.crossings(points, obstacles: [other], ends: [source, target]) == 0)
+    }
+
+    @Test("Where blocks overlap, the cable keeps its simple shape rather than looping")
+    func overlappingBlocksKeepSimpleShape() {
+        // Two blocks closer together than a stub, with a third lying across both pins.
+        let source = CGRect(x: 322, y: 266, width: 110, height: 97)
+        let target = CGRect(x: 448, y: 266, width: 110, height: 63)
+        let cover = CGRect(x: 420, y: 280, width: 50, height: 40)
+        let src = CGPoint(x: source.maxX, y: 299)
+        let dst = CGPoint(x: target.minX, y: 299)
+        let points = WireRouter.route(from: src, to: dst, obstacles: [cover], clearBelow: 400,
+                                      ends: [source, target])
+        #expect(points.allSatisfy { $0.x >= src.x && $0.x <= dst.x })
+    }
+
+    @Test("Without searching, a cable keeps the simple shape even across a block")
+    func searchingOffKeepsSimpleShape() {
+        let src = CGPoint(x: 0, y: 100)
+        let dst = CGPoint(x: 600, y: 100)
+        let obstacle = CGRect(x: 290, y: 40, width: 120, height: 200)
+        let points = WireRouter.route(from: src, to: dst, obstacles: [obstacle], clearBelow: 400,
+                                      searching: false)
+        #expect(points.allSatisfy { $0.y == 100 })
+    }
+
+    @Test("Every corner gets the same radius, even one right next to a pin's stub point")
+    func cornersRoundEvenly() {
+        // The corridor sits 4 units before the target's stub point, at (196, 110).
+        let points = [CGPoint(x: 100, y: 400), CGPoint(x: 118, y: 400), CGPoint(x: 192, y: 400),
+                      CGPoint(x: 192, y: 110), CGPoint(x: 196, y: 110), CGPoint(x: 214, y: 110)]
+        var radii: [CGFloat] = []
+        WireRouter.roundedPath(points).applyWithBlock { element in
+            let e = element.pointee
+            guard e.type == .addQuadCurveToPoint else { return }
+            let control = e.points[0], end = e.points[1]
+            radii.append(abs(end.x - control.x) + abs(end.y - control.y))
+        }
+        #expect(radii == [7, 7])
+    }
+
+    @Test("Lanes still separate cables that had to be routed around a block")
+    func lanesApplyToSearchedRoutes() {
+        let src = CGPoint(x: 0, y: 100)
+        let dst = CGPoint(x: 600, y: 100)
+        let obstacle = CGRect(x: 290, y: 40, width: 120, height: 200)
+        let plain = WireRouter.route(from: src, to: dst, obstacles: [obstacle], clearBelow: 400)
+        let laned = WireRouter.route(from: src, to: dst, lane: 6, obstacles: [obstacle], clearBelow: 400)
+        #expect(plain != laned)
+        #expect(Self.isOrthogonal(laned))
+        #expect(laned.first == src && laned.last == dst)
+    }
+
 }
 
 @Suite("Project page ('paper size')")

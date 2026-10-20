@@ -582,7 +582,7 @@ public final class BlockRegistry: @unchecked Sendable {
 register(guid: IntVarBlock.guid) { mod in
             // No parameter pin any more, so the initial value lives in an attribute.
             let raw = mod.paramPins.first?.value.asInt ?? mod.rawAttributes["INIT_VALUE"].flatMap { Int($0) } ?? 0
-            return IntVarBlock(initialValue: Int32(raw))
+            return IntVarBlock(initialValue: Int32(clamping: raw))
         }
         register(typeName: "intvar") { mod in
             let initVal = mod.paramPins.first?.value.asInt32 ?? 0
@@ -631,8 +631,8 @@ register(guid: FloatVarBlock.guid) { mod in
         register(typeName: "fswitch") { mod in ISwitchBlock(inputCount: max(1, mod.inPins.count - 2), isFloat: true) }
         register(guid: UUID(uuidString: "4C867BD2-4C26-431F-82CE-DE8ECC656E88")!) { mod in ISwitchBlock(inputCount: max(1, mod.inPins.count - 2), isFloat: false) }
         register(typeName: "lswitch") { mod in ISwitchBlock(inputCount: max(1, mod.inPins.count - 2), isFloat: false) }
-        register(guid: UUID(uuidString: "57C24D25-B6DC-44D7-9DEA-85215732687C")!) { mod in IntVarBlock(initialValue: Int32(mod.rawAttributes["INIT_VALUE"].flatMap { Int($0) } ?? 0)) }
-        register(typeName: "longvar") { mod in IntVarBlock(initialValue: Int32(mod.rawAttributes["INIT_VALUE"].flatMap { Int($0) } ?? 0)) }
+        register(guid: UUID(uuidString: "57C24D25-B6DC-44D7-9DEA-85215732687C")!) { mod in IntVarBlock(initialValue: Int32(clamping: mod.rawAttributes["INIT_VALUE"].flatMap { Int($0) } ?? 0)) }
+        register(typeName: "longvar") { mod in IntVarBlock(initialValue: Int32(clamping: mod.rawAttributes["INIT_VALUE"].flatMap { Int($0) } ?? 0)) }
         register(guid: UUID(uuidString: "4EBC4D35-5F55-416E-B939-6D2640FD3E96")!) { mod in ComparatorBlock() }
         register(typeName: "lcomparator") { mod in ComparatorBlock() }
         register(guid: UUID(uuidString: "BC2C94BA-D36C-4323-9650-4BEC5A5C32F3")!) { mod in MoveBlock() }

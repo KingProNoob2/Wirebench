@@ -364,6 +364,11 @@ public struct MainView: View {
                 )
             }
 
+            Toggle(isOn: $model.snapToGrid) {
+                Label("Snap to Grid", systemImage: "squareshape.split.3x3")
+            }
+            .help("Snap blocks to the grid when moving or adding them")
+
             Button {
                 model.openProjectFile()
             } label: {

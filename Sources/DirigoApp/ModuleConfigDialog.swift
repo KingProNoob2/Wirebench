@@ -55,6 +55,9 @@ public struct ModuleConfigDialog: View {
 
     // Case
     @State private var caseValuesText: String = ""
+    /// A switch container's cases, each keeping its id, and whether it has a default branch.
+    @State private var switchCases: [ConstructContainers.Case] = []
+    @State private var switchHasDefault = true
 
     // Dynamic Pin Counts (ISwitch, Int2Bits, Logic, Demux)
     @State private var inputCount: Int = 2
@@ -183,13 +186,14 @@ public struct ModuleConfigDialog: View {
         case boolVar, pulseGen, singlePulse, counter, advCounter, timer, ramp, range, mean, intVar, floatVar
         case div, rs, dateTime, pwm, caseValues, switchInputs, int2Bits, bits2Int, demux, logic
         case digitalInputs, digitalOutputs, parameters, none
-        case macroInterface, macroCall, systemCmd
+        case macroInterface, macroCall, systemCmd, switchCases
 
         init(_ mod: PCCModule) {
             // A macro's own blocks are recognised by what they are, not by what the sheet's author named them.
             if MacroInterface.kind(of: mod) != nil { self = .macroInterface; return }
             if MacroCalls.target(of: mod) != nil { self = .macroCall; return }
             if mod.guid == SystemCmdBlock.guid { self = .systemCmd; return }
+            if ConstructContainers.isContainer(mod) && mod.guid == ConstructContainers.switchGuid { self = .switchCases; return }
             let n = mod.name.filter { !$0.isNumber }.lowercased()
             func has(_ words: String...) -> Bool { words.contains { n.contains($0) } }
             if has("boolvar", "tlacitko", "prepinac", "roztoct") || mod.guid == BoolVarBlock.guid { self = .boolVar }
@@ -326,6 +330,32 @@ public struct ModuleConfigDialog: View {
                 Stepper("PWM Step Count (N): \(pwmSteps)", value: $pwmSteps, in: 2...65536)
                 hint("Standard value is 256 steps. Operating range of analog inputs AO0..AO7 is 0 to N.")
             }
+        case .switchCases:
+            Section("Cases") {
+                // Rows are keyed by case id, not position: index-bound rows crash SwiftUI when one is removed.
+                ForEach($switchCases, id: \.id) { $item in
+                    HStack {
+                        TextField("Values (e.g. 1, 5..7, 9)", text: $item.values)
+                            .font(.system(.body, design: .monospaced))
+                        Text(memberCountLabel(arm: item.id))
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button { moveCase(item.id, by: -1) } label: { Image(systemName: "chevron.up") }
+                            .disabled(switchCases.first?.id == item.id)
+                        Button { moveCase(item.id, by: 1) } label: { Image(systemName: "chevron.down") }
+                            .disabled(switchCases.last?.id == item.id)
+                        Button(role: .destructive) { switchCases.removeAll { $0.id == item.id } } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                }
+                Button("Add Case", systemImage: "plus") {
+                    switchCases.append(.init(id: ConstructContainers.newCaseId(among: switchCases), values: ""))
+                }
+                .buttonStyle(.borderless)
+                Toggle("Default branch", isOn: $switchHasDefault)
+                hint("Blocks are put into a case from their right-click menu. Blocks of a removed case move to the default branch, or out of the switch if there is none.")
+            }
         case .caseValues:
             Section("Case Values & Ranges") {
                 TextField("Values (e.g. 1, 5..7, 9)", text: $caseValuesText)
@@ -438,15 +468,15 @@ public struct ModuleConfigDialog: View {
                 // A command the project uses but the profile does not list (`zelznice.pcc`'s `Pwm` on a P3) stays selectable.
                 let options = current.map { c in catalogue.contains { $0.command == c.command && $0.text == c.text } ? catalogue : [c] + catalogue } ?? catalogue
                 Picker("Command", selection: Binding<String>(
-                    get: { current.map { "\($0.command)|\($0.text)" } ?? "" },
+                    get: { current?.selectionTag ?? "" },
                     set: { tag in
                         model.setSystemCommand(moduleId: moduleId,
-                                               to: catalogue.first { "\($0.command)|\($0.text)" == tag })
+                                               to: catalogue.first { $0.selectionTag == tag })
                     }
                 )) {
                     Text("None — set the command word on the Cmd pin").tag("")
                     ForEach(options, id: \.mnemonic) { info in
-                        Text("\(info.title)  ·  \(info.text)").tag("\(info.command)|\(info.text)")
+                        Text("\(info.title)  ·  \(info.text)").tag(info.selectionTag)
                     }
                 }
                 if let current {
@@ -587,6 +617,10 @@ public struct ModuleConfigDialog: View {
             self.pwmSteps = s
         }
 
+        // Switch container
+        self.switchCases = ConstructContainers.cases(of: mod)
+        self.switchHasDefault = mod.rawAttributes["DEFAULT"] == "1"
+
         // Case
         self.caseValuesText = mod.rawAttributes["VALUES"] ?? mod.rawAttributes["CASE_VALUES"] ?? ""
 
@@ -639,6 +673,20 @@ public struct ModuleConfigDialog: View {
         for (i, p) in mod.paramPins.enumerated() {
             genericParamValues[i] = p.value.description
         }
+    }
+
+    private func moveCase(_ id: String, by offset: Int) {
+        guard let i = switchCases.firstIndex(where: { $0.id == id }),
+              switchCases.indices.contains(i + offset) else { return }
+        switchCases.swapAt(i, i + offset)
+    }
+
+    /// "2 blocks" for the blocks in one case of the switch being edited; empty when there are none.
+    private func memberCountLabel(arm: String) -> String {
+        let count = model.project?.modules.filter {
+            $0.rawAttributes["IN_CONTAINER"] == "\(moduleId)" && $0.rawAttributes["ARM"] == arm
+        }.count ?? 0
+        return count == 0 ? "" : count == 1 ? "1 block" : "\(count) blocks"
     }
 
     private func applyChanges() {
@@ -700,6 +748,14 @@ public struct ModuleConfigDialog: View {
             setParam(0, pwmSteps)
             model.setModuleRawAttribute(id: moduleId, key: "PWM_STEPS", value: "\(pwmSteps)")
             (runtimeNode?.block as? EightPWMBlock)?.pwmSteps = pwmSteps
+        case .switchCases:
+            // `|` and `:` are the format's separators, never part of a value list. A case left empty is removed.
+            let cases = switchCases.map { item -> ConstructContainers.Case in
+                var clean = item
+                clean.values = item.values.filter { $0 != "|" && $0 != ":" }.trimmingCharacters(in: .whitespaces)
+                return clean
+            }.filter { !$0.values.isEmpty }
+            model.setSwitchCases(of: moduleId, to: cases, hasDefault: switchHasDefault)
         case .caseValues:
             model.setModuleRawAttribute(id: moduleId, key: "VALUES", value: caseValuesText)
         case .switchInputs, .bits2Int, .logic:

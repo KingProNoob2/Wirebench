@@ -17,6 +17,12 @@ public final class SimulationEngine: @unchecked Sendable {
                     executionSchedule[tid]?[idx].block = newBlock
                 }
             }
+            // `step()` runs this flattened copy, so it must see the new block too.
+            for t in scheduledThreads.indices {
+                if let idx = scheduledThreads[t].nodes.firstIndex(where: { $0.module.id == moduleId }) {
+                    scheduledThreads[t].nodes[idx].block = newBlock
+                }
+            }
         }
     }
 
@@ -40,6 +46,9 @@ public final class SimulationEngine: @unchecked Sendable {
     public let profile: PLCProfile?
     public let scheduling: ThreadScheduling
     public private(set) var nodes: [Int: RuntimeNode] = [:] // Module ID -> Node
+    /// The node ids in ascending order, fixed when the runtime is built, so `pinsDigest` — which runs after every tick —
+    /// does not sort the ids again each time.
+    private var digestOrder: [Int] = []
     public private(set) var executionSchedule: [Int: [RuntimeNode]] = [:] // ThreadID -> Sorted Nodes
     /// The same schedule, flattened in thread order and built once per runtime.
     ///
@@ -78,7 +87,7 @@ public final class SimulationEngine: @unchecked Sendable {
     /// decides whether to *look*, and the comparison decides what is true.
     public func pinsDigest() -> UInt64 {
         var digest: UInt64 = 0xcbf2_9ce4_8422_2325     // FNV-1a offset basis
-        for id in nodes.keys.sorted() {
+        for id in digestOrder {
             guard let node = nodes[id] else { continue }
             mix(&digest, UInt64(bitPattern: Int64(id)))
             for value in node.block.inPins { mixPinValue(&digest, value) }
@@ -144,7 +153,7 @@ public final class SimulationEngine: @unchecked Sendable {
         scheduling: ThreadScheduling = .everyTick
     ) {
         self.project = project
-        self.runtime = MacroInstancing.instanced(project)
+        self.runtime = ConstructContainers.expanded(MacroInstancing.instanced(project))
         self.profile = profile
         self.scheduling = scheduling
         self.cycleDelayMs = Double(max(1, project.appOptions.cycleDelay))
@@ -196,6 +205,8 @@ public final class SimulationEngine: @unchecked Sendable {
             let tid = mod.threadId
             executionSchedule[tid, default: []].append(node)
         }
+
+        digestOrder = nodes.keys.sorted()
 
         // 2. Sort execution schedule by module ORDER, and flatten it once
         for (tid, list) in executionSchedule {

@@ -26,7 +26,7 @@ public enum PinValue: Hashable, Sendable, Codable, CustomStringConvertible {
         case .int16(let v): return Int(v)
         case .int32(let v): return Int(v)
         case .int64(let v): return Int(v)
-        case .float(let v): return Int(v)
+        case .float(let v): return Int(Self.saturating(v))
         case .undefined: return 0
         }
     }
@@ -37,9 +37,19 @@ public enum PinValue: Hashable, Sendable, Codable, CustomStringConvertible {
         case .int16(let v): return Int32(v)
         case .int32(let v): return v
         case .int64(let v): return Int32(truncatingIfNeeded: v)
-        case .float(let v): return Int32(v)
+        case .float(let v): return Self.saturating(v)
         case .undefined: return 0
         }
+    }
+
+    /// A float as an `Int32`, truncated toward zero. `Int32(v)` traps on NaN, infinity and anything out
+    /// of range — all of which float arithmetic produces (`FMul` overflowing, a large typed value) — so
+    /// those clamp to the range, and NaN reads as 0.
+    static func saturating(_ v: Float) -> Int32 {
+        if v.isNaN { return 0 }
+        if v >= 2_147_483_648 { return .max }
+        if v <= -2_147_483_648 { return .min }
+        return Int32(v)
     }
 
     public var asFloat: Float {

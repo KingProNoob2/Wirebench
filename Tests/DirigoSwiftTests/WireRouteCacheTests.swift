@@ -58,4 +58,19 @@ struct WireRouteCacheTests {
         }
         #expect(builds == 20)
     }
+
+    @Test("During a drag, cables the drag does not move keep their settled path")
+    func holdsSettledPathsDuringADrag() {
+        let cache = WireRouteCache()
+        let settled = [CGPoint.zero, CGPoint(x: 10, y: 0)]
+        cache.beginFrame(key: 1)
+        _ = cache.points(for: "a") { settled }
+
+        // A drag frame: new geometry, but "a" is not attached to the moving block.
+        cache.beginFrame(key: 2)
+        var builds = 0
+        let held = cache.points(for: "a", holdSettled: true) { builds += 1; return [.zero] }
+        #expect(held == settled)
+        #expect(builds == 0)
+    }
 }

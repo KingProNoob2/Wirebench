@@ -11,6 +11,8 @@ public struct CanvasView: View {
     /// True while the current card drag is drawing a wire rather than moving the card. Decided once,
     /// when the drag starts, so a gesture cannot change its mind halfway through.
     @State private var isDrawingWire = false
+    /// The selection rectangle being dragged on the empty sheet, in viewport coordinates.
+    @State private var marquee: CGRect?
 
     /// Routed wire paths, kept between frames.
     ///
@@ -87,17 +89,28 @@ public struct CanvasView: View {
                 }
                 .contentShape(Rectangle())
                 .gesture(
-                    DragGesture()
+                    // Primary button: a selection rectangle. (The middle button pans: `TouchpadNSView`.)
+                    DragGesture(minimumDistance: 2, coordinateSpace: .named("CanvasViewport"))
                         .onChanged { value in
-                            model.panOffset = CGSize(
-                                width: model.dragStartPan.width + value.translation.width,
-                                height: model.dragStartPan.height + value.translation.height
-                            )
+                            marquee = CGRect(from: value.startLocation, to: value.location)
+                            // Live, so what is highlighted always matches the rectangle on screen.
+                            selectModules(in: CGRect(from: contentPoint(from: value.startLocation),
+                                                     to: contentPoint(from: value.location)))
                         }
-                        .onEnded { _ in
-                            model.dragStartPan = model.panOffset
+                        .onEnded { value in
+                            marquee = nil
                         }
                 )
+                .overlay {
+                    if let marquee {
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.12))
+                            .overlay(Rectangle().strokeBorder(Color.accentColor, lineWidth: 1))
+                            .frame(width: marquee.width, height: marquee.height)
+                            .position(x: marquee.midX, y: marquee.midY)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
                 if model.project == nil {
                     emptyState
@@ -170,6 +183,8 @@ public struct CanvasView: View {
         let byId = Dictionary(project.modules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         ZStack(alignment: .topLeading) {
+            containerRegions(pageModules)
+
             // Both layers take plain values and are `Equatable`, so on a simulation tick SwiftUI
             // only re-renders the ones whose inputs actually changed.
             WireLayer(wires: routedWires(project: project,
@@ -199,6 +214,32 @@ public struct CanvasView: View {
     /// in the "CanvasViewport" space, already scaled and panned — has to be mapped back before it can
     /// be compared with `inPinPoint`/`outPinPoint`, which are in content space. Without this the drop
     /// hit-test only ever matched at 100% zoom with no pan.
+    /// Selects the blocks on this page that the rectangle (content coordinates) touches.
+    private func selectModules(in rect: CGRect) {
+        let hit = (model.project?.modules ?? []).filter {
+            $0.page == model.selectedPage
+                && rect.intersects(CGRect(x: $0.x, y: $0.y,
+                                          width: ModuleCardView.cardWidth(for: $0),
+                                          height: ModuleCardView.cardHeight(for: $0)))
+        }.map(\.id)
+        let texts = model.textAnnotations(onPage: model.selectedPage).filter { entry in
+            let node = entry.graphic.nodes.first
+            let size = CGFloat(entry.graphic.fontSize ?? 11)
+            // Close to the drawn chip: monospaced glyphs plus the chip's padding.
+            // The text can be several lines: width follows the longest, height the line count.
+            let lines = (entry.graphic.text ?? "").split(separator: "\n", omittingEmptySubsequences: false)
+            let chip = CGRect(x: node?.x ?? 0, y: node?.y ?? 0,
+                              width: CGFloat(lines.map(\.count).max() ?? 0) * size * 0.6 + 16,
+                              height: CGFloat(max(1, lines.count)) * size * 1.25 + 10)
+            return rect.intersects(chip)
+        }.map(\.index)
+        model.editingAnnotationIndex = nil
+        model.selectedAnnotationIndices = Set(texts)
+        model.selectedAnnotationIndex = texts.first
+        model.selectedModuleIds = Set(hit)
+        model.selectedModuleId = hit.first
+    }
+
     private func contentPoint(from viewport: CGPoint) -> CGPoint {
         CanvasTransform.contentPoint(from: viewport, zoom: model.zoomScale, pan: model.panOffset)
     }
@@ -230,6 +271,50 @@ public struct CanvasView: View {
             .allowsHitTesting(false)
     }
 
+    /// The block's menu entries for `If` / `Switch` containers: where it can go, and out of the one it is in.
+    private func containerActions(for mod: PCCModule) -> [ModuleCardView.ContainerAction] {
+        var actions = model.containerChoices(for: mod.id).map { choice in
+            ModuleCardView.ContainerAction(title: "Move into \(choice.container.name) ▸ \(choice.arm.label)") {
+                model.setContainer(of: mod.id, to: (choice.container.id, choice.arm.id))
+            }
+        }
+        if let modules = model.project?.modules,
+           let owner = ConstructContainers.container(of: mod, in: modules) {
+            actions.append(.init(title: "Take out of \(owner.name)") { model.setContainer(of: mod.id, to: nil) })
+        }
+        return actions
+    }
+
+    /// A dashed frame and label behind the blocks of each branch of each container on the page.
+    @ViewBuilder
+    private func containerRegions(_ pageModules: [PCCModule]) -> some View {
+        ForEach(pageModules.filter(ConstructContainers.isContainer), id: \.id) { owner in
+            ForEach(ConstructContainers.arms(of: owner), id: \.id) { arm in
+                let frames = pageModules
+                    .filter { $0.rawAttributes["IN_CONTAINER"] == "\(owner.id)" && $0.rawAttributes["ARM"] == arm.id }
+                    // Where the cards are drawn, drag included, so the frame moves with them.
+                    .map { CGRect(x: $0.x + (dragOffsets[$0.id]?.width ?? 0), y: $0.y + (dragOffsets[$0.id]?.height ?? 0),
+                                  width: ModuleCardView.cardWidth(for: $0), height: ModuleCardView.cardHeight(for: $0)) }
+                if let first = frames.first {
+                    let box = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -14, dy: -22)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.tint(forCategory: "Main"), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                        .background(Theme.tint(forCategory: "Main").opacity(0.05),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(alignment: .topLeading) {
+                            Text("\(owner.name) · \(arm.label)")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 10).padding(.top, 4)
+                        }
+                        .frame(width: box.width, height: box.height)
+                        .offset(x: box.minX, y: box.minY)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+
     /// One block card. Extracted from the `ForEach` body because the combined expression — the card
     /// plus its gesture, context menu and position modifiers, plus the wiring closures — exceeded the
     /// Swift type-checker's budget and stopped the file compiling.
@@ -253,7 +338,7 @@ public struct CanvasView: View {
             isSearchMatch: searchMatches.contains(mod.id),
             isRenaming: model.renamingModuleId == mod.id,
             segments: snapshot?.segments ?? [],
-            isSelected: model.selectedModuleId == mod.id,
+            isSelected: model.selectedModuleId == mod.id || model.selectedModuleIds.contains(mod.id),
             renderScale: renderScale,
             onSelect: { model.selectedModuleId = mod.id },
             onToggleInput: { pinIdx in
@@ -286,7 +371,8 @@ public struct CanvasView: View {
             onBeginRename: { model.renamingModuleId = mod.id },
             onRename: { newName in model.renameModule(id: mod.id, name: newName) },
             onCancelRename: { model.renamingModuleId = nil },
-            onDelete: { _ = model.deleteModule(id: mod.id) }
+            onDelete: { _ = model.deleteModule(id: mod.id) },
+            containerActions: containerActions(for: mod)
         )
         // Skip the card entirely when nothing it draws has changed.
         .equatable()
@@ -310,11 +396,18 @@ public struct CanvasView: View {
                         pendingWire?.point = contentPoint(from: value.location)
                         return
                     }
-                    model.selectedModuleId = mod.id
-                    dragOffsets[mod.id] = CGSize(
+                    if !model.selectedModuleIds.contains(mod.id) { model.selectedModuleId = mod.id }
+                    let group = model.selectedModuleIds.contains(mod.id) ? model.selectedModuleIds : [mod.id]
+                    let raw = CGSize(
                         width: value.translation.width / model.zoomScale,
                         height: value.translation.height / model.zoomScale
                     )
+                    // With snapping on the card previews the position it will land on.
+                    var shown = raw
+                    if let snapped = model.snappedPosition(id: mod.id, deltaX: raw.width, deltaY: raw.height) {
+                        shown = CGSize(width: snapped.x - mod.x, height: snapped.y - mod.y)
+                    }
+                    for id in group { dragOffsets[id] = shown }
                 }
                 .onEnded { value in
                     if isDrawingWire {
@@ -328,12 +421,13 @@ public struct CanvasView: View {
                         }
                         return
                     }
-                    model.updateModulePosition(
-                        id: mod.id,
+                    let group = model.selectedModuleIds.contains(mod.id) ? model.selectedModuleIds : [mod.id]
+                    model.moveModules(
+                        group, lead: mod.id,
                         deltaX: Double(value.translation.width / model.zoomScale),
                         deltaY: Double(value.translation.height / model.zoomScale)
                     )
-                    dragOffsets.removeValue(forKey: mod.id)
+                    for id in group { dragOffsets.removeValue(forKey: id) }
                 }
         )
         .position(
@@ -439,10 +533,15 @@ public struct CanvasView: View {
             let lane = Double(index % 4) * 3.0
 
             let wireKey = "\(conn.outModuleId).\(conn.outPinId)->\(conn.inModuleId).\(conn.inPinId)"
-            let points: [CGPoint] = routeCache.points(for: wireKey) {
+            // During a drag only the cables of the blocks being moved follow, in their simple shape;
+            // the rest hold still. Everything is routed properly again once the drag ends.
+            let isDragging = !dragOffsets.isEmpty
+            let isMoving = dragOffsets[srcMod.id] != nil || dragOffsets[dstMod.id] != nil
+            let points: [CGPoint] = routeCache.points(for: wireKey, holdSettled: isDragging && !isMoving) {
                 routingPoints(conn: conn, src: src, dst: dst, lane: lane,
                               srcMod: srcMod, dstMod: dstMod,
-                              srcDrag: srcDrag, dstDrag: dstDrag, obstacles: obstacles)
+                              srcDrag: srcDrag, dstDrag: dstDrag, obstacles: obstacles,
+                              searching: !isDragging)
             }
 
             wires.append(RoutedWire(
@@ -474,7 +573,8 @@ public struct CanvasView: View {
         dstMod: PCCModule,
         srcDrag: CGSize,
         dstDrag: CGSize,
-        obstacles: [Int: CGRect]
+        obstacles: [Int: CGRect],
+        searching: Bool
     ) -> [CGPoint] {
         if conn.points.count >= 2 {
             return [src] + conn.points.map { CGPoint(x: src.x + $0.x, y: src.y + $0.y) } + [dst]
@@ -489,7 +589,9 @@ public struct CanvasView: View {
         return WireRouter.route(from: src, to: dst, lane: lane,
                                obstacles: others,
                                clearAbove: min(srcTop, dstTop) - 26,
-                               clearBelow: max(srcBottom, dstBottom) + 26)
+                               clearBelow: max(srcBottom, dstBottom) + 26,
+                               ends: [obstacles[conn.outModuleId], obstacles[conn.inModuleId]].compactMap { $0 },
+                               searching: searching)
     }
 
     /// Everything routing depends on, and nothing that a tick changes.
@@ -542,7 +644,7 @@ public struct CanvasView: View {
 
     @ViewBuilder
     private func annotationView(_ graphic: ProjectGraphic, index: Int) -> some View {
-        let isSelected = model.selectedAnnotationIndex == index
+        let isSelected = model.selectedAnnotationIndex == index || model.selectedAnnotationIndices.contains(index)
         let isEditing = model.editingAnnotationIndex == index
         let size = CGFloat(graphic.fontSize ?? 11)
 
@@ -575,8 +677,10 @@ public struct CanvasView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { model.beginEditingAnnotation(at: index) }
-        .onTapGesture { model.selectedAnnotationIndex = index }
+        // Simultaneous, not a count-2 / count-1 `onTapGesture` pair: that pair holds the single tap back
+        // until the double-click window has passed, which is a visible lag before the selection.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { model.beginEditingAnnotation(at: index) })
+        .simultaneousGesture(TapGesture().onEnded { model.selectedAnnotationIndex = index })
         .contextMenu {
             Button("Edit Text") { model.beginEditingAnnotation(at: index) }
             Button("Delete Text", systemImage: "trash", role: .destructive) {
@@ -670,13 +774,22 @@ struct WireLayer: View, Equatable {
 
 // MARK: - Grid
 
+/// Snapping of module positions to the drafting grid's base pitch (`CanvasGrid`'s base step, in canvas units).
+public enum GridSnap {
+    public static let step: Double = 32
+
+    public static func snap(_ value: Double, step: Double = GridSnap.step) -> Double {
+        (value / step).rounded() * step
+    }
+}
+
 /// The drafting grid. Two tiers keep it readable at any zoom: fine cells that fade out as you
 /// zoom away, and a coarser ruled grid with dots at its intersections.
 public struct CanvasGrid: View {
     public var zoomScale: CGFloat = 1.0
     public var panOffset: CGSize = .zero
 
-    private static let baseStep: CGFloat = 32
+    private static let baseStep = CGFloat(GridSnap.step)
     private static let majorEvery = 5
 
     public init(zoomScale: CGFloat = 1.0, panOffset: CGSize = .zero) {
@@ -848,11 +961,20 @@ public final class TouchpadNSView: NSView {
     public override func hitTest(_ point: NSPoint) -> NSView? {
         guard bounds.contains(point) else { return nil }
         if let type = NSApp.currentEvent?.type {
-            if type == .magnify || type == .scrollWheel || type == .smartMagnify {
+            if type == .magnify || type == .scrollWheel || type == .smartMagnify
+                || type == .otherMouseDown || type == .otherMouseDragged || type == .otherMouseUp {
                 return self
             }
         }
         return nil
+    }
+
+    // Middle button (the third): drag the sheet.
+    public override func otherMouseDragged(with event: NSEvent) {
+        guard let model = model, event.buttonNumber == 2 else { return }
+        model.panOffset.width += event.deltaX
+        model.panOffset.height += event.deltaY
+        model.dragStartPan = model.panOffset
     }
 
     public override func magnify(with event: NSEvent) {
@@ -868,7 +990,11 @@ public final class TouchpadNSView: NSView {
         let loc = convert(event.locationInWindow, from: nil)
         let anchor = CGPoint(x: loc.x, y: loc.y)
 
-        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
+        // A trackpad scroll comes with gesture phases (fingers down, momentum); a mouse wheel, even a
+        // smooth-scrolling one, has none. Wheel scrolling zooms (unless the setting is off); the
+        // trackpad pans, and ⌘/⌥ zoom either.
+        let isTrackpad = !event.phase.isEmpty || !event.momentumPhase.isEmpty
+        if (model.scrollZooms && !isTrackpad) || event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
             let delta = event.scrollingDeltaY
             guard abs(delta) > 0.001 else { return }
             let factor: CGFloat
@@ -879,8 +1005,8 @@ public final class TouchpadNSView: NSView {
             }
             model.zoomBy(factor: factor, anchor: anchor)
         } else {
-            let dx = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : event.scrollingDeltaX * 12
-            let dy = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 12
+            let dx = event.scrollingDeltaX
+            let dy = event.scrollingDeltaY
             model.panOffset.width += dx
             model.panOffset.height += dy
             model.dragStartPan = model.panOffset
@@ -905,6 +1031,8 @@ public final class TouchpadNSView: NSView {
 final class WireRouteCache {
     private var key: Int?
     private var routes: [String: [CGPoint]] = [:]
+    /// The last path routed for each cable outside a drag, which survives `beginFrame`.
+    private var settled: [String: [CGPoint]] = [:]
 
     /// Number of paths actually computed, for tests and for anyone profiling this later.
     private(set) var routeCount = 0
@@ -915,11 +1043,25 @@ final class WireRouteCache {
         routes.removeAll()
     }
 
-    func points(for id: String, _ build: () -> [CGPoint]) -> [CGPoint] {
+    /// - Parameter holdSettled: reuse the cable's last settled path instead of routing it again. For
+    ///   cables a drag does not move, so they hold still while it lasts.
+    func points(for id: String, holdSettled: Bool = false, _ build: () -> [CGPoint]) -> [CGPoint] {
         if let cached = routes[id] { return cached }
+        if holdSettled, let held = settled[id] {
+            routes[id] = held
+            return held
+        }
         let made = build()
         routes[id] = made
+        if !holdSettled { settled[id] = made }
         routeCount += 1
         return made
+    }
+}
+
+private extension CGRect {
+    /// The rectangle spanned by two opposite corners, in either order.
+    init(from a: CGPoint, to b: CGPoint) {
+        self.init(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 }

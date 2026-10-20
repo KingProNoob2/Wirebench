@@ -123,6 +123,15 @@ public struct ModuleCardView: View, Equatable {
     public var onCancelRename: (() -> Void)?
     public var onDelete: (() -> Void)?
 
+    /// "Move into … / Take out of …" entries for the block's menu, when `If` / `Switch` containers are on the sheet.
+    public struct ContainerAction: Identifiable {
+        public let title: String
+        public let run: () -> Void
+        public var id: String { title }
+        public init(title: String, run: @escaping () -> Void) { self.title = title; self.run = run }
+    }
+    public var containerActions: [ContainerAction] = []
+
     @State private var isHeldLocally = false
     @State private var renameDraft: String = ""
     @FocusState private var isRenameFocused: Bool
@@ -150,7 +159,8 @@ public struct ModuleCardView: View, Equatable {
         onBeginRename: (() -> Void)? = nil,
         onRename: ((String) -> Void)? = nil,
         onCancelRename: (() -> Void)? = nil,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        containerActions: [ContainerAction] = []
     ) {
         self.module = module
         self.inValues = inValues
@@ -174,6 +184,7 @@ public struct ModuleCardView: View, Equatable {
         self.onRename = onRename
         self.onCancelRename = onCancelRename
         self.onDelete = onDelete
+        self.containerActions = containerActions
     }
 
     /// Closures are deliberately excluded: they are recreated on every pass but capture only the
@@ -189,6 +200,7 @@ public struct ModuleCardView: View, Equatable {
             && lhs.isSearchMatch == rhs.isSearchMatch
             && lhs.isRenaming == rhs.isRenaming
             && lhs.renderScale == rhs.renderScale
+            && lhs.containerActions.map(\.title) == rhs.containerActions.map(\.title)
     }
 
     // MARK: - Derived
@@ -490,7 +502,7 @@ public struct ModuleCardView: View, Equatable {
         .overlay {
             RoundedRectangle(cornerRadius: Theme.chipRadius * s, style: .continuous)
                 .strokeBorder(
-                    isHigh ? Theme.signalHigh.opacity(0.65) : Color.white.opacity(0.18),
+                    isHigh ? Theme.signalHigh.opacity(0.65) : Color.primary.opacity(0.18),
                     lineWidth: 0.75 * s
                 )
         }
@@ -598,6 +610,13 @@ public struct ModuleCardView: View, Equatable {
                 onOpenMacro?("*" + macroName)
             } label: {
                 Label("Open Macro (*\(macroName))", systemImage: "arrow.up.right.square")
+            }
+        }
+
+        if !containerActions.isEmpty {
+            Divider()
+            ForEach(containerActions) { action in
+                Button(action.title, action: action.run)
             }
         }
 

@@ -110,7 +110,7 @@ struct PinEditTests {
                 "an in-range toggle must still work")
     }
 
-    @Test("A click clears a set pin, and the next click sets it")
+    @Test("A click clears a set pin, and the next click brings its value back")
     func clickToggles() throws {
         let model = try Self.load(Self.switchProject())
         func pin(_ index: Int) -> PinValue? { model.getNode(id: 1)?.block.inPins[index] }
@@ -119,9 +119,25 @@ struct PinEditTests {
         model.toggleModuleInput(moduleId: 1, pinIndex: 3)
         #expect(pin(3)?.description == "0", "a set pin clears")
         model.toggleModuleInput(moduleId: 1, pinIndex: 3)
-        #expect(pin(3)?.description == "1", "and a clear pin sets")
-        // The kind survived: an integer pin stayed an integer rather than becoming a Boolean.
+        #expect(pin(3) == .int32(8), "the value it had comes back, as an integer")
+        // A pin that was never set has nothing to remember, so it sets to 1.
+        model.toggleModuleInput(moduleId: 1, pinIndex: 1)
+        #expect(pin(1) == .int32(1))
+    }
+
+    @Test("A value typed while the pin is cleared is what the next clear and set come back to")
+    func typedValueReplacesRemembered() throws {
+        let model = try Self.load(Self.switchProject())
+        func pin(_ index: Int) -> PinValue? { model.getNode(id: 1)?.block.inPins[index] }
+
+        model.toggleModuleInput(moduleId: 1, pinIndex: 3)          // 8 -> 0
+        model.setModuleInput(moduleId: 1, pinIndex: 3, value: .int32(0))
+        model.toggleModuleInput(moduleId: 1, pinIndex: 3)          // typed over: nothing remembered
         #expect(pin(3) == .int32(1))
+        model.setModuleInput(moduleId: 1, pinIndex: 3, value: .int32(5))
+        model.toggleModuleInput(moduleId: 1, pinIndex: 3)          // 5 -> 0
+        model.toggleModuleInput(moduleId: 1, pinIndex: 3)          // -> 5
+        #expect(pin(3) == .int32(5))
     }
 
     @Test("A typed value is written, kept as its own kind, and saved to the document")

@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import os
 import DirigoCore
 import DirigoLibrary
 import DirigoEngine
@@ -70,13 +69,20 @@ public final class AppModel: @unchecked Sendable {
         project = snapshot.project
         selectedModuleId = snapshot.selectedModuleId
         selectedPage = snapshot.selectedPage
+        // Text objects are selected by index, and the restored array may hold different ones there.
+        clearAnnotationSelection()
         isRestoringUndo = false
         engine = installEngine(project: snapshot.project)
         refreshSnapshots()
         isDocumentEdited = true
     }
     public var selectedPage: String = "main"
-    public var selectedModuleId: Int?
+    public var selectedModuleId: Int? {
+        // Selecting a block outside the marquee group (or nothing) ends the group.
+        didSet { if let id = selectedModuleId, selectedModuleIds.contains(id) { return }; selectedModuleIds = [] }
+    }
+    /// Blocks picked together with the selection rectangle; they move and delete as one. Empty for a plain selection.
+    public var selectedModuleIds: Set<Int> = []
     public var isPlaying: Bool = false
     /// How fast simulated time runs, as a multiple of the *base speed*: 1.0 — shown as 100% — is a tenth of the
     /// PLC's real time. At the PLC's own speed a fast project (a 71 ms `Tick` thread driving the dice or the
@@ -515,15 +521,8 @@ public final class AppModel: @unchecked Sendable {
 
     /// The simulation moved: refresh the values the canvas draws — and, only if they really moved,
     /// tell the views. A settled simulation therefore stops invalidating anything at all.
-    /// TEMPORARY: signpost logger for the tick-path measurement.
-    static let diagLog = OSLog(subsystem: "com.dirigo.DirigoApp", category: "diag")
-
     public func simulationDidChange() {
-        // TEMPORARY signpost: measures how long one tick's UI update takes.
-        let signpostID = OSSignpostID(log: Self.diagLog)
-        os_signpost(.begin, log: Self.diagLog, name: "tickUI", signpostID: signpostID)
         if refreshSnapshots() { bumpSimulationVersion() }
-        os_signpost(.end, log: Self.diagLog, name: "tickUI", signpostID: signpostID)
     }
 
     private func bumpSimulationVersion() {
@@ -539,6 +538,43 @@ public final class AppModel: @unchecked Sendable {
 
     public var currentFileURL: URL? = nil
     public var isDocumentEdited: Bool = false
+
+    /// The project as last opened, created or saved, with its layout left out (`content(of:)`).
+    private var savedContent: PCCProject?
+
+    /// Whether anything that matters changed since the last save: blocks, wires, values, names, pages, text.
+    /// Layout does not count — moving blocks or text, *Organize Blocks*, re-routing wires — so closing after
+    /// only tidying the sheet does not ask to save.
+    public var hasSignificantChanges: Bool {
+        guard let project else { return false }
+        return Self.content(of: project) != savedContent
+    }
+
+    /// The project without where things are on the sheet.
+    static func content(of project: PCCProject) -> PCCProject {
+        var copy = project
+        copy.projectPath = ""
+        for i in copy.modules.indices {
+            copy.modules[i].x = 0
+            copy.modules[i].y = 0
+        }
+        for i in copy.inConnections.indices {
+            copy.inConnections[i].points = []
+            copy.inConnections[i].nameX = 0
+            copy.inConnections[i].nameY = 0
+        }
+        for i in copy.paramConnections.indices {
+            copy.paramConnections[i].points = []
+            copy.paramConnections[i].nameX = 0
+            copy.paramConnections[i].nameY = 0
+        }
+        for i in copy.graphics.indices { copy.graphics[i].nodes = [] }
+        return copy
+    }
+
+    /// Asked before the open project is replaced (*New*, *Open*): `true` to go ahead. The app sets this to a
+    /// Save / Don't Save / Cancel dialog; the model itself never shows one, so on its own it always goes ahead.
+    public var confirmDiscardingChanges: () -> Bool = { true }
 
     public var projectTitle: String {
         if let currentFileURL = currentFileURL {
@@ -565,6 +601,7 @@ public final class AppModel: @unchecked Sendable {
     }
 
     public func createNewProject() {
+        guard confirmDiscardingChanges() else { return }
         pause()
         let newProj = PCCProject(
             name: "Untitled",
@@ -578,10 +615,13 @@ public final class AppModel: @unchecked Sendable {
         self.currentFileURL = nil
         self.selectedPage = "main"
         self.selectedModuleId = nil
+        clearAnnotationSelection()
+        clearedPinValues = [:]
         self.engine = installEngine(project: newProj)
         self.tickCount = 0
         self.simulationVersion = 0
         self.isDocumentEdited = false
+        savedContent = Self.content(of: newProj)
         resetZoom()
     }
 
@@ -602,11 +642,15 @@ public final class AppModel: @unchecked Sendable {
             self.currentFileURL = url
             self.selectedPage = proj.pages.first?.caption ?? "main"
             self.selectedModuleId = nil
+            clearAnnotationSelection()
+            // Module ids mean other blocks in another document.
+            clearedPinValues = [:]
             self.engine = installEngine(project: proj)
         refreshSnapshots()
             self.tickCount = 0
             self.simulationVersion = 0
             self.isDocumentEdited = false
+            savedContent = Self.content(of: proj)
             // The canvas has not been laid out yet, so its viewport size is still the placeholder.
             // Fitting to that produces a wrong zoom and pan; defer until the view reports a real
             // size (see `performPendingZoomToFit`).
@@ -621,6 +665,7 @@ public final class AppModel: @unchecked Sendable {
     /// Asks the view for a file. The panel itself belongs to the view layer now.
     @MainActor
     public func openProjectFile() {
+        guard confirmDiscardingChanges() else { return }
         pendingFilePanel = .open
     }
 
@@ -660,19 +705,27 @@ public final class AppModel: @unchecked Sendable {
         let centre = point ?? viewportCentreInCanvas()
 
         // Nudge down-right while the spot is taken, so repeated insertions do not stack.
-        var spot = centre
+        var spot = snapToGrid ? CGPoint(x: GridSnap.snap(centre.x), y: GridSnap.snap(centre.y)) : centre
         while project.modules.contains(where: {
             $0.page == selectedPage && abs($0.x - spot.x) < 24 && abs($0.y - spot.y) < 24
         }) {
-            spot.x += 28
-            spot.y += 22
+            spot.x += snapToGrid ? GridSnap.step : 28
+            spot.y += snapToGrid ? GridSnap.step : 22
         }
 
-        let module = BlockFactory.makeModule(
+        var module = BlockFactory.makeModule(
             guid: guid, id: id, name: name,
             x: spot.x, y: spot.y,
             order: order, threadId: threadForNewBlocks, page: selectedPage
         )
+        // A new `If` / `Switch` is a container; ones read from a file stay the marker blocks they were.
+        if guid == ConstructContainers.ifGuid || guid == ConstructContainers.switchGuid {
+            module.rawAttributes["CONTAINER"] = "1"
+            if guid == ConstructContainers.switchGuid {
+                ConstructContainers.setCases([.init(id: "c1", values: "1")], of: &module)
+                module.rawAttributes["DEFAULT"] = "1"
+            }
+        }
         project.modules.append(module)
         self.project = project
         self.selectedModuleId = id
@@ -692,6 +745,64 @@ public final class AppModel: @unchecked Sendable {
             x: (viewportSize.width / 2 - panOffset.width) / scale,
             y: (viewportSize.height / 2 - panOffset.height) / scale
         )
+    }
+
+    // MARK: - Containers
+
+    /// Puts a block into a branch of an `If` / `Switch` container (`nil` takes it out). Refuses anything that would
+    /// make a container hold itself.
+    public func setContainer(of id: Int, to container: (id: Int, arm: String)?) {
+        guard var project, let index = project.modules.firstIndex(where: { $0.id == id }) else { return }
+        if let container {
+            guard container.id != id,
+                  let owner = project.modules.first(where: { $0.id == container.id }),
+                  ConstructContainers.isContainer(owner),
+                  ConstructContainers.arms(of: owner).contains(where: { $0.id == container.arm }),
+                  !ConstructContainers.wouldCycle(moving: id, into: container.id, in: project.modules) else { return }
+            project.modules[index].rawAttributes["IN_CONTAINER"] = "\(container.id)"
+            project.modules[index].rawAttributes["ARM"] = container.arm
+        } else {
+            project.modules[index].rawAttributes.removeValue(forKey: "IN_CONTAINER")
+            project.modules[index].rawAttributes.removeValue(forKey: "ARM")
+        }
+        self.project = project
+        isDocumentEdited = true
+        self.engine = installEngine(project: project)
+    }
+
+    /// Replaces a switch container's cases and whether it has a default branch, as one undoable edit.
+    ///
+    /// Cases are matched by id, so a case whose values changed or that moved keeps its blocks. Blocks of a case
+    /// that is gone — or of the default branch, if that is turned off — move to the default branch if there is
+    /// one, and otherwise out of the switch onto the sheet. Nothing is deleted.
+    public func setSwitchCases(of id: Int, to cases: [ConstructContainers.Case], hasDefault: Bool) {
+        guard var project, let index = project.modules.firstIndex(where: { $0.id == id }),
+              ConstructContainers.isContainer(project.modules[index]),
+              project.modules[index].guid == ConstructContainers.switchGuid else { return }
+        ConstructContainers.setCases(cases, of: &project.modules[index])
+        project.modules[index].rawAttributes["DEFAULT"] = hasDefault ? "1" : "0"
+        let owner = project.modules[index]
+        for i in project.modules.indices where project.modules[i].rawAttributes["IN_CONTAINER"] == "\(id)" {
+            let arm = project.modules[i].rawAttributes["ARM"] ?? ""
+            if let home = ConstructContainers.rehome(arm: arm, in: owner) {
+                project.modules[i].rawAttributes["ARM"] = home
+            } else {
+                project.modules[i].rawAttributes.removeValue(forKey: "IN_CONTAINER")
+                project.modules[i].rawAttributes.removeValue(forKey: "ARM")
+            }
+        }
+        self.project = project
+        isDocumentEdited = true
+        self.engine = installEngine(project: project)
+    }
+
+    /// Container, or not: the "Move into" entries of a block's menu.
+    public func containerChoices(for id: Int) -> [(container: PCCModule, arm: ConstructContainers.Arm)] {
+        guard let project else { return [] }
+        return project.modules
+            .filter { $0.page == selectedPage && $0.id != id && ConstructContainers.isContainer($0)
+                      && !ConstructContainers.wouldCycle(moving: id, into: $0.id, in: project.modules) }
+            .flatMap { owner in ConstructContainers.arms(of: owner).map { (container: owner, arm: $0) } }
     }
 
     /// Deletes a block and its cables. Undoable, so there is no confirmation step — that is what
@@ -719,9 +830,62 @@ public final class AppModel: @unchecked Sendable {
     }
 
     /// Deletes whatever is selected.
+    ///
+    /// Only blocks on the page being shown: a selection survives switching pages, and must not delete
+    /// something invisible from another one.
     public func deleteSelectedModule() {
-        guard let selectedModuleId else { return }
-        _ = deleteModule(id: selectedModuleId)
+        guard let selectedModuleId, var project else { return }
+        let ids = selectedModuleIds.union([selectedModuleId])
+        let onPage = project.modules.filter { ids.contains($0.id) && $0.page == selectedPage }.map(\.id)
+        guard !onPage.isEmpty else { return }
+        for id in onPage { _ = project.deleteModule(id: id) }
+        // One edit and one engine rebuild for the whole group, not one per block.
+        self.project = project
+        self.selectedModuleId = nil
+        if let configuringModuleId, onPage.contains(configuringModuleId) { self.configuringModuleId = nil }
+        self.engine = installEngine(project: project)
+        self.isDocumentEdited = true
+    }
+
+    /// Lays the current page out so signals flow left to right (`AutoLayout`), as one undoable edit.
+    ///
+    /// Hand-drawn wire routes on the page are reset too: they are offsets from the source pin, so they would
+    /// no longer fit blocks that have moved. Text objects stay where they are.
+    @MainActor
+    public func organizeBlocks() {
+        guard var project else { return }
+        let onPage = project.modules.filter { $0.page == selectedPage }
+        guard !onPage.isEmpty else { return }
+        let ids = Set(onPage.map(\.id))
+        let byId = Dictionary(onPage.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        let nodes = onPage.map {
+            AutoLayout.Node(id: $0.id,
+                            size: CGSize(width: ModuleCardView.cardWidth(for: $0),
+                                         height: ModuleCardView.cardHeight(for: $0)),
+                            order: $0.order)
+        }
+        let edges = project.inConnections
+            .filter { ids.contains($0.outModuleId) && ids.contains($0.inModuleId) }
+            .map { AutoLayout.Edge(from: $0.outModuleId, to: $0.inModuleId,
+                                   fromPinY: ModuleCardView.outPinPoint(for: byId[$0.outModuleId]!, pinIndex: $0.outPinId).y
+                                       - byId[$0.outModuleId]!.y,
+                                   toPinY: ModuleCardView.inPinPoint(for: byId[$0.inModuleId]!, pinIndex: $0.inPinId).y
+                                       - byId[$0.inModuleId]!.y) }
+            + project.paramConnections
+            .filter { ids.contains($0.outModuleId) && ids.contains($0.inModuleId) }
+            .map { AutoLayout.Edge(from: $0.outModuleId, to: $0.inModuleId) }
+        let origin = CGPoint(x: onPage.map(\.x).min()!, y: onPage.map(\.y).min()!)
+
+        let placed = AutoLayout.positions(nodes: nodes, edges: edges, origin: origin)
+        for index in project.modules.indices {
+            guard let point = placed[project.modules[index].id] else { continue }
+            project.modules[index].x = snapToGrid ? GridSnap.snap(point.x) : point.x
+            project.modules[index].y = snapToGrid ? GridSnap.snap(point.y) : point.y
+        }
+        _ = project.resetWireRouting(onPage: selectedPage)
+        self.project = project
+        self.isDocumentEdited = true
     }
 
     /// Tidy hand-drawn wire routes on the current page back to Dirigo's default, mirroring the
@@ -752,11 +916,14 @@ public final class AppModel: @unchecked Sendable {
         pendingFilePanel = .export
     }
 
-    /// What the export panel should suggest as a name.
+    /// What the export panel should suggest as a name — without the extension, which the panel adds.
+    ///
+    /// `.pcc` and `.pbd` are not types macOS knows, so a panel cannot tell that a suggested `x.pcc` already
+    /// ends in its type's extension, and appends it again: `x.pcc.pcc`. The same holds for the names below.
     public var exportDefaultName: String {
         let base = currentFileURL?.deletingPathExtension().lastPathComponent
             ?? (project?.name ?? "project")
-        return base + "-dirigo.pcc"
+        return base + "-dirigo"
     }
 
     /// Writes the prepared export, once the user has chosen where.
@@ -771,7 +938,8 @@ public final class AppModel: @unchecked Sendable {
         let translation = ExtraPropertyTranslator.translate(result.project,
                                                             declarations: ExtraPropertyCatalog.byGuid)
 
-        var output = translation.project
+        // `If` / `Switch` containers become Dirigo's marker blocks, which is all the original knows.
+        var output = ConstructContainers.expanded(translation.project)
         output.projectPath = url.path
         do {
             let xml = PCCSerializer().serialize(project: output)
@@ -804,12 +972,11 @@ public final class AppModel: @unchecked Sendable {
 
     }
 
-    /// What the save panel should suggest as a name.
+    /// What the save panel should suggest as a name, without the extension (see `exportDefaultName`).
     public var saveAsDefaultName: String {
         let base = currentFileURL?.lastPathComponent
             ?? ((project?.name.isEmpty == false) ? project!.name : "Untitled")
-        let named = base.hasSuffix(".pcc") ? base : base + ".pcc"
-        return named
+        return base.hasSuffix(".pcc") ? String(base.dropLast(4)) : base
     }
 
     /// Called once the save panel has a destination.
@@ -832,6 +999,7 @@ public final class AppModel: @unchecked Sendable {
         self.project = project
         self.currentFileURL = url
         self.isDocumentEdited = false
+        savedContent = Self.content(of: project)
     }
 
     public func zoomIn(anchor: CGPoint? = nil) {
@@ -1095,10 +1263,45 @@ public final class AppModel: @unchecked Sendable {
 
     /// Moves a module. The workspace is unbounded — Dirigo's fixed A3 sheet is only a *reference*
     /// here; `exportForDirigo()` is what reconciles an oversized layout with it.
-    public func updateModulePosition(id: Int, deltaX: Double, deltaY: Double) {
+    public func updateModulePosition(id: Int, deltaX: Double, deltaY: Double, snapped: Bool = true) {
         guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
-        project?.modules[idx].x += deltaX
-        project?.modules[idx].y += deltaY
+        let moved = (snapped ? snappedPosition(id: id, deltaX: deltaX, deltaY: deltaY) : nil) ?? CGPoint(
+            x: project!.modules[idx].x + deltaX, y: project!.modules[idx].y + deltaY)
+        project?.modules[idx].x = moved.x
+        project?.modules[idx].y = moved.y
+    }
+
+    /// Light, dark or follow the system. Remembered between launches.
+    var appearance: AppearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "appearance") }
+    }
+
+    /// Moves `ids` together by a drag of `lead`: the lead block lands where `updateModulePosition` would put it
+    /// (snapped, if on) and the others shift by the same amount.
+    public func moveModules(_ ids: Set<Int>, lead: Int, deltaX: Double, deltaY: Double) {
+        guard let leadModule = project?.modules.first(where: { $0.id == lead }) else { return }
+        let before = CGPoint(x: leadModule.x, y: leadModule.y)
+        updateModulePosition(id: lead, deltaX: deltaX, deltaY: deltaY)
+        guard let after = project?.modules.first(where: { $0.id == lead }) else { return }
+        for id in ids where id != lead {
+            updateModulePosition(id: id, deltaX: after.x - before.x, deltaY: after.y - before.y, snapped: false)
+        }
+    }
+
+    /// Whether the scroll wheel zooms (otherwise it pans). Remembered between launches.
+    public var scrollZooms: Bool = UserDefaults.standard.object(forKey: "scrollZooms") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(scrollZooms, forKey: "scrollZooms") }
+    }
+
+    /// Whether module moves and new blocks land on the canvas grid. Remembered between launches.
+    public var snapToGrid: Bool = UserDefaults.standard.object(forKey: "snapToGrid") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(snapToGrid, forKey: "snapToGrid") }
+    }
+
+    /// Where a module ends up when moved by a delta with snapping on; `nil` when snapping is off.
+    public func snappedPosition(id: Int, deltaX: Double, deltaY: Double) -> CGPoint? {
+        guard snapToGrid, let module = project?.modules.first(where: { $0.id == id }) else { return nil }
+        return CGPoint(x: GridSnap.snap(module.x + deltaX), y: GridSnap.snap(module.y + deltaY))
     }
 
     public var configuringModuleId: Int? = nil
@@ -1127,7 +1330,19 @@ public final class AppModel: @unchecked Sendable {
     /// parameter edit is. Then it makes the change visible straight away rather than at the next tick,
     /// on whichever backend is running — while paused that means one step, and while playing the value is
     /// simply pushed into the core for the next one.
+    /// A pin of a module, for `clearedPinValues`.
+    struct PinKey: Hashable {
+        var module: Int
+        var pin: Int
+    }
+
+    /// The value an input pin had when a click cleared it, so the next click restores it. Only for this
+    /// session: a typed value replaces it, and a new document starts without any.
+    private var clearedPinValues: [PinKey: PinValue] = [:]
+
     public func setModuleInput(moduleId: Int, pinIndex: Int, value: PinValue) {
+        // A value written directly is the new one to come back to, not the one cleared before it.
+        clearedPinValues[PinKey(module: moduleId, pin: pinIndex)] = nil
         // `pinIndex >= 0` is not decoration: every one of these guards used to check only the upper
         // bound, so a negative index passed it and subscripted the arrays out of bounds — a trap, not a
         // wrong value. See `rejectsOutOfRangePinIndices`.
@@ -1292,8 +1507,20 @@ public final class AppModel: @unchecked Sendable {
     ///
     /// A graphic has no id of its own, so an index is the only handle there is. It stays valid for as
     /// long as the array is not restructured, and every path that restructures it clears these.
-    public var selectedAnnotationIndex: Int?
+    public var selectedAnnotationIndex: Int? {
+        // As with blocks: selecting a text object outside the marquee group (or nothing) ends the group.
+        didSet { if let i = selectedAnnotationIndex, selectedAnnotationIndices.contains(i) { return }; selectedAnnotationIndices = [] }
+    }
+    /// Text objects picked together with the selection rectangle. Empty for a plain selection.
+    public var selectedAnnotationIndices: Set<Int> = []
     public var editingAnnotationIndex: Int?
+
+    /// Drops every text selection — for when the graphics array is replaced and the indices mean nothing.
+    private func clearAnnotationSelection() {
+        selectedAnnotationIndex = nil
+        selectedAnnotationIndices = []
+        editingAnnotationIndex = nil
+    }
 
     /// The text objects on a page, each with the index it has in the project's array — which is what
     /// the canvas needs in order to select or delete one.
@@ -1357,7 +1584,8 @@ public final class AppModel: @unchecked Sendable {
               let project,
               project.graphics.indices.contains(index),
               project.graphics[index].page == selectedPage else { return }
-        deleteAnnotation(at: index)
+        // Highest index first, so the removals do not shift the ones still to go.
+        for i in selectedAnnotationIndices.union([index]).sorted(by: >) { deleteAnnotation(at: i) }
     }
 
     // MARK: - Pages
@@ -1648,10 +1876,12 @@ public final class AppModel: @unchecked Sendable {
             eightDI.togglePin(pinIndex)
         } else if pinIndex < node.block.inPins.count {
             // A click clears a set pin and sets a clear one, keeping the value's *kind* so a switch's
-            // `X3 = 8` becomes `0` and then `1` instead of turning into a Boolean.
+            // `X3 = 8` becomes `0` — and the next click brings the `8` back, not a `1`.
             let current = node.block.inPins[pinIndex]
-            setModuleInput(moduleId: moduleId, pinIndex: pinIndex,
-                           value: current.asBool ? Self.zero(like: current) : Self.one(like: current))
+            let key = PinKey(module: moduleId, pin: pinIndex)
+            let next = current.asBool ? Self.zero(like: current) : (clearedPinValues[key] ?? Self.one(like: current))
+            setModuleInput(moduleId: moduleId, pinIndex: pinIndex, value: next)
+            if current.asBool { clearedPinValues[key] = current }
             return
         } else if pinIndex < node.block.outPins.count {
             let current = node.block.outPins[pinIndex].asBool
@@ -1729,7 +1959,9 @@ public final class AppModel: @unchecked Sendable {
         public var table: [UInt8] { build.table }
         public var symbolCSV: String { build.symbolCSV }
 
-        public var summary: String { ([templateNote] + build.report.lines).joined(separator: "\n") }
+        public var summary: String {
+            ([templateNote] + build.report.lines).filter { !$0.isEmpty }.joined(separator: "\n")
+        }
     }
 
     /// The last build, kept so the exporters and the report sheet can use it without recompiling.
@@ -1737,7 +1969,7 @@ public final class AppModel: @unchecked Sendable {
     /// Whether the report sheet is up.
     public var isShowingBuildReport = false
 
-    /// Whether builds run the optimising pass (`PLCProgramOptimizer`): records in dataflow order, unread gates dropped.
+    /// Whether builds run the optimising pass (`PLCProgramOptimizer`): records in dataflow order, unread or switched-off logic and math dropped.
     /// On by default; remembered between launches.
     public var optimizeProgram: Bool = UserDefaults.standard.object(forKey: "optimizeProgram") as? Bool ?? true {
         didSet { UserDefaults.standard.set(optimizeProgram, forKey: "optimizeProgram") }
@@ -1765,7 +1997,7 @@ public final class AppModel: @unchecked Sendable {
                            message: "The build template is not a 256-byte table.")
             return nil
         }
-        let xml = PCCSerializer().serialize(project: project)
+        let xml = PCCSerializer().serialize(project: ConstructContainers.expanded(project))
         do {
             let build = try PLCProjectBuild.compile(xml: xml,
                                                     classForGUID: BlockTypeCatalog.classNamesByGUID,
@@ -1775,11 +2007,7 @@ public final class AppModel: @unchecked Sendable {
                                                            header: buildTemplateImage?.header)
             let report = BuildReport(
                 build: build,
-                templateNote: buildTemplateImage == nil
-                    ? "Header: this app's default (import a .pbd to carry Dirigo's own across); the layout words and "
-                      + "thread table are derived from the program."
-                    : "Header: taken from the imported program binary; the layout words and thread table are "
-                      + "derived from the program.",
+                templateNote: buildTemplateImage == nil ? "" : "Header from the imported .pbd.",
                 programBinary: binary)
             buildReport = report
             return report
@@ -1818,10 +2046,9 @@ public final class AppModel: @unchecked Sendable {
         Task { await upload(table: table) }
     }
 
-    /// The name the program-binary panel suggests.
+    /// The name the program-binary panel suggests, without the extension (see `exportDefaultName`).
     public var programBinaryDefaultName: String {
-        let base = currentFileURL?.deletingPathExtension().lastPathComponent ?? (project?.name ?? "program")
-        return base + ".pbd"
+        currentFileURL?.deletingPathExtension().lastPathComponent ?? (project?.name ?? "program")
     }
 
     /// The name the symbol-table panel suggests.

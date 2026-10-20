@@ -11,9 +11,11 @@ import Foundation
 ///
 /// Two passes:
 ///
-/// 1. **Dead records.** A pure module — a gate, a conversion — whose outputs lead nowhere that is read is dropped
-///    from the table. Anything with an effect or something watching it (a counter, an output, a variable, a
-///    display, a block this pass does not know) keeps everything that feeds it.
+/// 1. **Dead records.** A pure module — a gate, arithmetic, a comparison, a selector, a conversion — whose outputs
+///    lead nowhere that is read is dropped from the table. So is a pure module that is switched off: its `En` is
+///    unwired and set to 0, so it never runs, and whatever reads it reads the value its output always had. Anything
+///    with an effect or something watching it (a counter, an output, a variable, a display, a block this pass does
+///    not know) keeps everything that feeds it; a switched-off module keeps nothing.
 /// 2. **Order.** Within each thread, records are sorted so that every module comes after the modules that feed it,
 ///    keeping the original order wherever nothing says otherwise. A loop has no such order, so a loop is left as
 ///    it was written: its first module in the original order goes first.
@@ -34,10 +36,26 @@ public enum PLCProgramOptimizer {
     }
 
     /// Classes with no effect of their own: their records matter only through what reads their outputs.
+    ///
+    /// Each writes nothing but its own out-pins, from its inputs alone (a selector or demux with `En = 0` keeps its
+    /// last output, which again matters only to a reader). Blocks with memory — filters, ramps, means, counters,
+    /// timers — are left out even though they too write only their outputs, because their value builds up over
+    /// time and someone may be watching it. `Switch2` / `Switch8` are left out for want of documentation.
     static let pure: Set<String> = [
         "TMAnd", "TMOr", "TMNot", "TMXor", "TMYes", "TMComparator", "TMBits2Int", "TMInt2Bits",
         "TMIntAnd", "TMIntOr", "TMIntXor", "TMIntNot", "TMIntAdd", "TMIntSub", "TMIntMul", "TMIntNeg", "TMIntAbs",
+        "TMIntInc", "TMDiv", "TMShl", "TMLimiter",
+        "TMLongAdd", "TMLongSub", "TMLongAnd", "TMLongOr", "TMLongXor", "TMLongNot", "TMLongNegation", "TMLongAbs",
+        "TMLongInc", "TMLLimiter",
+        "TMFloatAdd", "TMFloatSub", "TMFloatMul", "TMFloatDiv", "TMFloatNeg", "TMFAbs", "TMFloatSqrt", "TMFMod",
+        "TMSin", "TMCos", "TMArcSin", "TMArcCos",
+        "TMIntSwitch", "TMFloatSwitch", "TMLongSwitch",
+        "TMIntDemultiplexer", "TMFloatDemultiplexer", "TMLongDemultiplexer",
+        "TMLComparator", "TMMultiComparator", "TMInRange", "TMCalibratedTransform", "TMEncodeDate", "TMDecodeDate",
     ]
+
+    /// The pure classes whose first in-pin is `En` ("=0: not executed"), so a constant 0 there switches them off.
+    static let enabledByFirstPin: Set<String> = pure.subtracting(["TMYes", "TMInt2Bits", "TMLimiter", "TMLLimiter"])
 
     /// - Parameters:
     ///   - ordered: `PLCProjectCompiler.recordOrder`'s modules — expansion order, grouped by thread.
@@ -58,7 +76,14 @@ public enum PLCProgramOptimizer {
         }
         let inProgram = Set(ordered.map(\.umisteni))
 
+        // Switched off: pure, `En` not wired, and its constant 0.
+        let wiredEn = Set(wires.filter { !$0.isParam && $0.inPin == 0 }.map(\.inModule))
+        let switchedOff = Set(ordered.filter {
+            cls($0).map(enabledByFirstPin.contains) == true && !wiredEn.contains($0.umisteni) && $0.inValues.first == 0
+        }.map(\.umisteni))
+
         // 1. Backward from everything that is not a pure module in the program: it is kept, and so is what feeds it.
+        //    A switched-off module is never kept, so it keeps nothing alive either.
         var live = Set<UInt8>()
         for module in allModules {
             let isPureInProgram = inProgram.contains(module.umisteni) && cls(module).map(pure.contains) == true
@@ -67,7 +92,7 @@ public enum PLCProgramOptimizer {
         var changed = true
         while changed {
             changed = false
-            for module in ordered where !live.contains(module.umisteni) {
+            for module in ordered where !live.contains(module.umisteni) && !switchedOff.contains(module.umisteni) {
                 if (readers[module.umisteni] ?? []).contains(where: live.contains) {
                     live.insert(module.umisteni)
                     changed = true

@@ -44,7 +44,7 @@ struct BuildReportSheet: View {
             .frame(minHeight: 90)
 
             Toggle("Optimize program", isOn: optimize)
-                .help("Put the records in dataflow order, so a value reaches everything that reads it in the cycle it is made, and drop gates nothing reads. Addresses do not change.")
+                .help("Order the records so values settle in fewer cycles, and drop logic and math that nothing reads or that is switched off. Addresses do not change.")
 
             Divider()
 

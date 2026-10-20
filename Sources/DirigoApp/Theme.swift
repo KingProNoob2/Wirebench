@@ -29,7 +29,7 @@ enum Theme {
 
     /// A flat hairline edge. This used to be a light-to-dark specular gradient; gradients were
     /// removed by request, so panels now get a single subtle stroke.
-    static var panelStroke: Color { Color.white.opacity(0.14) }
+    static var panelStroke: Color { Color.primary.opacity(0.14) }
 
     static var softShadow: Color { Color.black.opacity(0.28) }
 
@@ -55,6 +55,25 @@ enum Theme {
         default:
             if category.hasPrefix("Main") { return .accentColor }
             return .accentColor
+        }
+    }
+}
+
+// MARK: - Appearance
+
+/// The app's light/dark choice. `system` follows macOS; the others override it.
+enum AppearanceMode: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    /// `nil` leaves the choice to the system.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 }
@@ -172,7 +191,7 @@ struct PinBead: View {
             .fill(isHigh ? tint : Color.primary.opacity(0.18))
             .overlay {
                 Circle().strokeBorder(
-                    isHigh ? Color.white.opacity(0.50) : Color.white.opacity(0.16),
+                    isHigh ? Color.white.opacity(0.50) : Color.primary.opacity(0.16),
                     lineWidth: 0.5 * scale
                 )
             }
