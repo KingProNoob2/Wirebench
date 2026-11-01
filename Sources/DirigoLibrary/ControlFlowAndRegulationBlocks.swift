@@ -475,9 +475,6 @@ public final class SwitchBlock: FunctionBlock, @unchecked Sendable {
 
     public init() {}
 
-    /// The selector, or `nil` when the construct is inactive (the original's `0x80000000` sentinel).
-    public var selector: Int? { inPins.count > 1 ? inPins[1].asInt : nil }
-
     public func process(sample: SampleContext) {}
     public func reset() {}
 }

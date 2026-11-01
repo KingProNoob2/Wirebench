@@ -86,7 +86,7 @@ public struct ModuleConfigDialog: View {
         model.project?.modules.first(where: { $0.id == moduleId })
     }
 
-    private var runtimeNode: SimulationEngine.RuntimeNode? {
+    private var runtimeNode: RuntimeNode? {
         model.getNode(id: moduleId)
     }
 
@@ -97,7 +97,7 @@ public struct ModuleConfigDialog: View {
             HStack(spacing: 12) {
                 let info = targetModule.flatMap { BlockTypeCatalog.info(forGuid: $0.guid) }
                 let tint = Theme.tint(forCategory: info?.category ?? "")
-                let typeName = targetModule.flatMap { model.getNode(id: $0.id).map { type(of: $0.block).typeName } }
+                let typeName = targetModule.flatMap { BlockRegistry.shared.resolvedTypeName(for: $0) }
 
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 18, weight: .semibold))
@@ -534,43 +534,46 @@ public struct ModuleConfigDialog: View {
     private func loadCurrentValues() {
         guard let mod = targetModule else { return }
 
+        // The block's type, and its live pins where the simulation holds a value the document does not.
+        let live = runtimeNode?.block
+        let params = live?.paramPins ?? mod.paramPins.map(\.value)
+        let delphiClass = BlockRole.delphiClass(of: mod) ?? ""
+
         // BoolVar
-        if let boolVar = runtimeNode?.block as? BoolVarBlock {
-            self.boolVarMode = boolVar.mode
-            self.boolVarInitialState = boolVar.outPins.first?.asBool ?? false
-        } else if let simulMode = mod.simulMode {
-            self.boolVarMode = BoolVarBlock.Mode(rawValue: simulMode) ?? .pushButton
+        if let mode = BlockRole.boolVarMode(of: mod) {
+            self.boolVarMode = mode
+            self.boolVarInitialState = live?.outPins.first?.asBool ?? false
         }
 
         // PulseGen & SinglePulse & PulseLength
-        if let pulseGen = runtimeNode?.block as? PulseGenBlock {
-            if pulseGen.paramPins.count > 0 { self.pulseGenTOn = max(1, pulseGen.paramPins[0].asInt) }
-            if pulseGen.paramPins.count > 1 { self.pulseGenTOff = max(1, pulseGen.paramPins[1].asInt) }
-        } else if let singlePulse = runtimeNode?.block as? SinglePulseBlock {
-            if singlePulse.paramPins.count > 0 { self.pulseGenTOn = max(1, singlePulse.paramPins[0].asInt) }
-        } else if let pulseLen = runtimeNode?.block as? PulseLengthBlock {
-            if pulseLen.paramPins.count > 0 { self.pulseGenTOn = max(1, pulseLen.paramPins[0].asInt) }
-        } else {
+        switch delphiClass {
+        case "TMPulseGenerator":
+            if params.count > 0 { self.pulseGenTOn = max(1, params[0].asInt) }
+            if params.count > 1 { self.pulseGenTOff = max(1, params[1].asInt) }
+        case "TMSinglePulse", "TMPulseLength":
+            if params.count > 0 { self.pulseGenTOn = max(1, params[0].asInt) }
+        default:
             if mod.paramPins.count > 0 { self.pulseGenTOn = max(1, mod.paramPins[0].value.asInt) }
             if mod.paramPins.count > 1 { self.pulseGenTOff = max(1, mod.paramPins[1].value.asInt) }
         }
 
         // Counter & AdvCounter
-        if let counter = runtimeNode?.block as? CounterBlock {
-            if counter.paramPins.count > 0 { self.counterStep = counter.paramPins[0].asInt }
-        } else if let advCounter = runtimeNode?.block as? AdvCounterBlock {
-            if advCounter.paramPins.count > 0 { self.counterPreset = advCounter.paramPins[0].asInt }
-            if advCounter.paramPins.count > 1 { self.counterMax = advCounter.paramPins[1].asInt }
-            if advCounter.paramPins.count > 2 { self.counterMin = advCounter.paramPins[2].asInt }
-            if advCounter.paramPins.count > 3 { self.counterStep = advCounter.paramPins[3].asInt }
-        } else if mod.paramPins.count >= 1 {
-            self.counterStep = mod.paramPins[0].value.asInt
+        switch delphiClass {
+        case "TMCounter":
+            if params.count > 0 { self.counterStep = params[0].asInt }
+        case "TMAdvCounter":
+            if params.count > 0 { self.counterPreset = params[0].asInt }
+            if params.count > 1 { self.counterMax = params[1].asInt }
+            if params.count > 2 { self.counterMin = params[2].asInt }
+            if params.count > 3 { self.counterStep = params[3].asInt }
+        default:
+            if mod.paramPins.count >= 1 { self.counterStep = mod.paramPins[0].value.asInt }
         }
 
-        // Timer
-        if let timer = runtimeNode?.block as? TimerBlock {
-            self.timerMode = timer.mode
-            if timer.paramPins.count > 0 { self.timerPreset = max(1, timer.paramPins[0].asInt) }
+        // Timer: the mode is the module's `MODE` attribute, as the registry reads it.
+        if delphiClass == "TMTimer" {
+            self.timerMode = TimerBlock.Mode(rawValue: Int(mod.rawAttributes["MODE"] ?? "0") ?? 0) ?? .onDelay
+            if params.count > 0 { self.timerPreset = max(1, params[0].asInt) }
         }
 
         // Ramp
@@ -586,16 +589,16 @@ public struct ModuleConfigDialog: View {
         }
 
         // Mean
-        if let mean = runtimeNode?.block as? MeanBlock, mean.paramPins.count > 0 {
-            self.meanWindow = max(1, mean.paramPins[0].asInt)
+        if delphiClass == "TMMean", params.count > 0 {
+            self.meanWindow = max(1, params[0].asInt)
         }
 
-        // Variables
-        if let intVar = runtimeNode?.block as? IntVarBlock, intVar.outPins.count > 0 {
-            self.intVarValue = intVar.outPins[0].asInt
+        // Variables: the value is the variable's output.
+        if BlockRole.isIntVariable(mod), let value = live?.outPins.first {
+            self.intVarValue = value.asInt
         }
-        if let floatVar = runtimeNode?.block as? FloatVarBlock, floatVar.outPins.count > 0 {
-            self.floatVarValue = Double(floatVar.outPins[0].asFloat)
+        if BlockRole.isFloatVariable(mod), let value = live?.outPins.first {
+            self.floatVarValue = Double(value.asFloat)
         }
 
         // Div Modulo
@@ -609,8 +612,10 @@ public struct ModuleConfigDialog: View {
         self.dateTimeShowSOD = mod.rawAttributes["SHOW_SOD"]?.lowercased() == "true" || mod.rawAttributes["SOD_VISIBLE"]?.lowercased() == "true"
 
         // 8xPWM
-        if let pwm = runtimeNode?.block as? EightPWMBlock {
-            self.pwmSteps = pwm.pwmSteps
+        if delphiClass == "TMPWMOutputs" {
+            // As the registry configures the block: a legacy param pin, else `PWM_STEPS`, else 256.
+            self.pwmSteps = max(2, mod.paramPins.first?.value.asInt
+                ?? mod.rawAttributes["PWM_STEPS"].flatMap { Int($0) } ?? 256)
         } else if let s = mod.paramPins.first?.value.asInt {
             self.pwmSteps = s
         } else if let sStr = mod.rawAttributes["PWM_STEPS"], let s = Int(sStr) {
@@ -706,7 +711,7 @@ public struct ModuleConfigDialog: View {
         switch Kind(mod) {
         case .boolVar:
             model.updateBoolVarMode(id: moduleId, mode: boolVarMode)
-            (runtimeNode?.block as? BoolVarBlock)?.setOutput(boolVarInitialState)
+            model.setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(boolVarInitialState))
         case .pulseGen:
             model.updatePulseGenTiming(id: moduleId, tOn: pulseGenTOn, tOff: pulseGenTOff)
         case .singlePulse:
@@ -719,7 +724,9 @@ public struct ModuleConfigDialog: View {
             setParam(2, counterMin)
             setParam(3, counterStep)
         case .timer:
-            (runtimeNode?.block as? TimerBlock)?.mode = timerMode
+            // Stored on the module, where the core and a reopened file both read it.
+            model.setModuleRawAttribute(id: moduleId, key: "MODE", value: "\(timerMode.rawValue)")
+            model.reconfigureModule(id: moduleId)
             setParam(0, timerPreset)
         case .ramp:
             setParam(0, rampStepUp)
@@ -733,10 +740,10 @@ public struct ModuleConfigDialog: View {
             // `IntVar` has no parameters — the help gives it a single output — so the initial
             // value is stored as an attribute and pushed into the live block.
             model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(intVarValue)")
-            (model.getNode(id: moduleId)?.block as? IntVarBlock)?.setValue(Int32(intVarValue))
+            model.setVariableValue(moduleId: moduleId, value: intVarValue)
         case .floatVar:
             model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(floatVarValue)")
-            (model.getNode(id: moduleId)?.block as? FloatVarBlock)?.setValue(Float(floatVarValue))
+            model.setFloatVariableValue(moduleId: moduleId, value: Float(floatVarValue))
         case .div:
             model.updateDivModuloVisible(id: moduleId, isVisible: divModuloVisible)
         case .rs:
@@ -747,7 +754,6 @@ public struct ModuleConfigDialog: View {
         case .pwm:
             setParam(0, pwmSteps)
             model.setModuleRawAttribute(id: moduleId, key: "PWM_STEPS", value: "\(pwmSteps)")
-            (runtimeNode?.block as? EightPWMBlock)?.pwmSteps = pwmSteps
         case .switchCases:
             // `|` and `:` are the format's separators, never part of a value list. A case left empty is removed.
             let cases = switchCases.map { item -> ConstructContainers.Case in

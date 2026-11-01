@@ -106,8 +106,6 @@ public final class IntVarBlock: FunctionBlock, WritableVariable, @unchecked Send
         setValue(Int32(truncatingIfNeeded: newValue.asInt))
     }
 
-    public var currentValue: Int32 { value }
-
     public func process(sample: SampleContext) {
         outPins[0] = .int32(value)
     }
@@ -144,8 +142,6 @@ public final class FloatVarBlock: FunctionBlock, WritableVariable, @unchecked Se
         setValue(newValue.asFloat)
     }
 
-    public var currentValue: Float { value }
-
     public func process(sample: SampleContext) {
         outPins[0] = .float(value)
     }
@@ -157,33 +153,6 @@ public final class FloatVarBlock: FunctionBlock, WritableVariable, @unchecked Se
 
 
 // MARK: - Array Management Blocks
-public final class ArrayManager: @unchecked Sendable {
-    public static let shared = ArrayManager()
-    private var arrays: [Int: [Int32]] = [:]
-    private let lock = NSLock()
-
-    public func get(id: Int, index: Int) -> Int32 {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let arr = arrays[id], index >= 0 && index < arr.count else { return 0 }
-        return arr[index]
-    }
-
-    public func set(id: Int, index: Int, value: Int32) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard var arr = arrays[id], index >= 0 && index < arr.count else { return }
-        arr[index] = value
-        arrays[id] = arr
-    }
-
-    public func clear() {
-        lock.lock()
-        defer { lock.unlock() }
-        arrays.removeAll()
-    }
-}
-
 public final class CreateArrayBlock: FunctionBlock, @unchecked Sendable {
     public static let guid = UUID(uuidString: "E71AED20-3AF5-4AC2-85F6-3760AB5C3746")!
     public static let typeName = "CreateIntArray"

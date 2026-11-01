@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <deque>
 #include <limits>
 #include <map>
 #include <unordered_map>
@@ -36,14 +38,61 @@ inline bool asBool(const DirigoValue &v) {
     }
 }
 
+/// `PinValue.saturating`: a float as an Int32, truncated toward zero, clamped to the range, NaN as 0.
+inline int32_t saturatingInt32(double f) {
+    const float v = static_cast<float>(f);
+    if (std::isnan(v)) return 0;
+    if (v >= 2147483648.0f) return std::numeric_limits<int32_t>::max();
+    if (v <= -2147483648.0f) return std::numeric_limits<int32_t>::min();
+    return static_cast<int32_t>(v);
+}
+
+/// `PinValue.asInt`.
 inline int64_t asInt(const DirigoValue &v) {
     switch (v.kind) {
         case DIRIGO_VALUE_BOOL:
         case DIRIGO_VALUE_INT16:
         case DIRIGO_VALUE_INT32: return v.i;
         case DIRIGO_VALUE_INT64: return v.i64;
-        case DIRIGO_VALUE_FLOAT: return static_cast<int64_t>(v.f);
+        case DIRIGO_VALUE_FLOAT: return saturatingInt32(v.f);
         default: return 0;
+    }
+}
+
+/// `PinValue.asInt32`: an Int64 truncates, a float saturates.
+inline int32_t asInt32(const DirigoValue &v) {
+    switch (v.kind) {
+        case DIRIGO_VALUE_BOOL:
+        case DIRIGO_VALUE_INT16:
+        case DIRIGO_VALUE_INT32: return v.i;
+        case DIRIGO_VALUE_INT64: return static_cast<int32_t>(v.i64);
+        case DIRIGO_VALUE_FLOAT: return saturatingInt32(v.f);
+        default: return 0;
+    }
+}
+
+/// `PinValue.asFloat`, which is a Swift `Float`: every result is rounded to single precision.
+inline float asFloat(const DirigoValue &v) {
+    switch (v.kind) {
+        case DIRIGO_VALUE_BOOL:
+        case DIRIGO_VALUE_INT16:
+        case DIRIGO_VALUE_INT32: return static_cast<float>(v.i);
+        case DIRIGO_VALUE_INT64: return static_cast<float>(v.i64);
+        case DIRIGO_VALUE_FLOAT: return static_cast<float>(v.f);
+        default: return 0.0f;
+    }
+}
+
+/// `PinValue ==`: the kind is part of the value, so `.bool(true)` is not `.int32(1)`, and NaN is unequal.
+inline bool valuesEqual(const DirigoValue &a, const DirigoValue &b) {
+    if (a.kind != b.kind) return false;
+    switch (a.kind) {
+        case DIRIGO_VALUE_BOOL:
+        case DIRIGO_VALUE_INT16:
+        case DIRIGO_VALUE_INT32: return a.i == b.i;
+        case DIRIGO_VALUE_INT64: return a.i64 == b.i64;
+        case DIRIGO_VALUE_FLOAT: return static_cast<float>(a.f) == static_cast<float>(b.f);
+        default: return true;
     }
 }
 
@@ -61,11 +110,39 @@ inline DirigoValue int32Value(int32_t value) {
     return v;
 }
 
+/// A float pin. Stored as a double for the C ABI, but always a value a Swift `Float` can hold.
 inline DirigoValue floatValue(double value) {
     DirigoValue v{};
     v.kind = DIRIGO_VALUE_FLOAT;
-    v.f = value;
+    v.f = static_cast<float>(value);
     return v;
+}
+
+/// Days since 1 Jan 1980 for a proleptic Gregorian date — `DirigoEpoch.days`, by Howard Hinnant's
+/// `days_from_civil`. A day past the end of its month rolls into the next, as `Calendar.date(from:)` does.
+inline int64_t daysSince1980(int64_t year, int64_t month, int64_t day) {
+    auto fromCivil = [](int64_t y, int64_t m, int64_t d) {
+        y -= m <= 2;
+        const int64_t era = (y >= 0 ? y : y - 399) / 400;
+        const int64_t yoe = y - era * 400;
+        const int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+        const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        return era * 146097 + doe - 719468;
+    };
+    return fromCivil(year, month, 1) + (day - 1) - fromCivil(1980, 1, 1);
+}
+
+/// The inverse: the calendar date `days` after 1 Jan 1980 (`civil_from_days`).
+inline void civilFrom1980(int64_t days, int64_t &year, int64_t &month, int64_t &day) {
+    const int64_t z = days + 3652 + 719468;     /* 1980-01-01 is 3652 days after the Unix epoch */
+    const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    const int64_t doe = z - era * 146097;
+    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const int64_t mp = (5 * doy + 2) / 153;
+    day = doy - (153 * mp + 2) / 5 + 1;
+    month = mp + (mp < 10 ? 3 : -9);
+    year = yoe + era * 400 + (month <= 2);
 }
 
 inline DirigoValue undefinedValue() {
@@ -87,6 +164,19 @@ struct Module {
     int32_t currentCount = 0;      /* Counter */
     int32_t intValue = 0;          /* IntVar: the variable itself, not a pin */
     bool lastTr = false;           /* Counter: for the 0->1 edge */
+    int32_t variant = 0;           /* DirigoModuleDesc.variant */
+    int64_t config[4] = {0, 0, 0, 0};
+    int64_t remaining = 0;         /* SinglePulse */
+    int64_t total = 0;             /* SinglePulse; PulseLen's active cycles; AdvCounter's value */
+    double filterValue = 0;        /* Filter */
+    std::deque<int64_t> history;   /* Mean */
+    DirigoValue lastValue{};       /* Trigger; `undefined` until it has run */
+    bool processedOnce = false;    /* Trigger; DelayFilter's "armed" */
+    bool flagA = false;            /* WaterRegulator's open latch, HystComparator's "greater", StepDriver's commanded */
+    bool flagB = false;            /* WaterRegulator's close latch, HystComparator's "less" */
+    int64_t s[3] = {0, 0, 0};      /* StepDriver: position, speed, target */
+    double floatVar = 0;           /* FloatVar: the variable itself, not a pin */
+    std::vector<std::pair<int64_t, int64_t>> caseRanges;   /* Case */
 };
 
 struct Connection {
@@ -121,22 +211,41 @@ struct DirigoSim {
     std::vector<std::vector<size_t>> schedule;   /* by thread id, in ORDER */
     std::vector<int32_t> threadIds;              /* ascending */
     std::map<int32_t, double> threadElapsedMs;
+    /// Thread periods from the hardware profile.
+    std::map<int32_t, double> threadIntervalMs;
+    /// How many times each thread has run.
+    std::map<int32_t, uint64_t> threadRunCounts;
     uint64_t tickCount = 0;
     double cycleDelayMs = 1;
     bool profileScheduling = false;
+
+    /// The PLC's array data area, addressed by `Id` (`IntArrayStore`). Doubles, so one array can be read as
+    /// Int, Long or Float, as in the original's single data area.
+    std::map<int64_t, std::vector<double>> arrays;
+
+    /* Construct state (the Swift `condStack` and friends), reset at the start of every step. */
+    int64_t condStack = 0;
+    std::vector<size_t> constructStack;
+    std::map<size_t, std::pair<bool, int64_t>> switchSelector;   /* captured?, value */
+    std::map<size_t, bool> switchMatched;
 };
 
 namespace {
 
+/// A thread's period: the profile's when it gives one, otherwise the project's cycle.
 double intervalMs(const DirigoSim *sim, int32_t threadId) {
-    (void)threadId;                       /* no profile is loaded here; the project's cycle governs */
+    auto found = sim->threadIntervalMs.find(threadId);
+    if (found != sim->threadIntervalMs.end() && found->second > 0) return found->second;
     return std::max(1.0, sim->cycleDelayMs);
 }
 
 /// One module, mirroring its Swift block's `process(sample:)` exactly — including the `En = 0` rule,
 /// which holds the output rather than clearing it (docs/spec/blocks-datapath.md §0.5).
-void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock) {
+void processModule(DirigoSim *sim, Module &m, const Sample &sample, const DirigoWallClock &clock) {
     (void)sample;
+    /* Every kind below writes outputs and nothing else a reader can see (`Set` works in the step loop, not
+       here), so a module without out pins has nothing to do — and the cases may then index `outPins[0]`. */
+    if (m.outPins.empty()) return;
     switch (m.kind) {
         case DIRIGO_BLOCK_NOT: {
             const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
@@ -297,7 +406,7 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
                 if (!m.outPins.empty()) m.outPins[0] = m.inPins[target];
             } else if (!m.outPins.empty()) {
                 /* "If the Sw input is outside the range 0 to (N-1), output Y is cleared." */
-                m.outPins[0] = m.outPins[0].kind == DIRIGO_VALUE_FLOAT ? floatValue(0) : int32Value(0);
+                m.outPins[0] = m.variant == 1 ? floatValue(0) : int32Value(0);
             }
             return;
         }
@@ -334,11 +443,23 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
                so this writes as many of the six values as the module actually has. */
             const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
             if (!enabled) return;
-            const int32_t values[6] = {
-                clock.days, clock.hour, clock.minute, clock.second, clock.dayOfWeek,
-                clock.hour * 3600 + clock.minute * 60 + clock.second,
+            /* `DateTimeBlock`: the step's instant plus the module's offset (a legacy param pin wins over
+               the `OFFS` attribute), split in UTC. Days count whole days since 1980 and truncate toward
+               zero, as `Calendar.dateComponents([.day], from:to:)` does; the time of day and the weekday
+               come from the calendar day the instant falls in. */
+            const int64_t offset = m.paramPins.empty() ? m.config[0] : asInt(m.paramPins[0]);
+            const int64_t secs = static_cast<int64_t>(std::floor(clock.unixSeconds)) + offset;
+            const int64_t since1980 = secs - 315532800;            /* 1980-01-01T00:00:00Z */
+            const int64_t unixDay = secs >= 0 ? secs / 86400 : -((-secs + 86399) / 86400);
+            const int64_t sod = secs - unixDay * 86400;
+            const int64_t values[6] = {
+                since1980 / 86400, sod / 3600, (sod / 60) % 60, sod % 60,
+                ((unixDay + 3) % 7 + 7) % 7,                      /* 1 Jan 1970 was a Thursday; 0 = Monday */
+                sod,
             };
-            for (size_t i = 0; i < m.outPins.size() && i < 6; ++i) m.outPins[i] = int32Value(values[i]);
+            for (size_t i = 0; i < m.outPins.size() && i < 6; ++i) {
+                m.outPins[i] = int32Value(static_cast<int32_t>(values[i]));
+            }
             return;
         }
         case DIRIGO_BLOCK_BITS2INT: {
@@ -357,14 +478,20 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
             return;
         }
         case DIRIGO_BLOCK_RS: {
-            /* A latch: `En = 0` holds. Reset priority, which is the block's default; a module that
-               overrides it is not read from the file yet (see the note in `dirigo_sim_create`). */
+            /* A latch: `En = 0` holds. Reset priority unless `variant` asks for set priority. Like the Swift
+               `RSBlock`, the state *is* the output pin: a value written into Q (by `Set`, or by hand) is
+               what the next pass keeps. */
             if (!m.inPins.empty() && !asBool(m.inPins[0])) return;      /* holds */
             const bool setIn = m.inPins.size() > 1 ? asBool(m.inPins[1]) : false;
             const bool resetIn = m.inPins.size() > 2 ? asBool(m.inPins[2]) : false;
-            if (resetIn) m.lastTr = false;          /* reuse of the 1-bit state field, as Counter does */
-            else if (setIn) m.lastTr = true;
-            if (!m.outPins.empty()) m.outPins[0] = boolean(m.lastTr);
+            if (m.outPins.empty()) return;
+            if (m.variant == 1) {
+                if (setIn) m.outPins[0] = boolean(true);
+                else if (resetIn) m.outPins[0] = boolean(false);
+            } else {
+                if (resetIn) m.outPins[0] = boolean(false);
+                else if (setIn) m.outPins[0] = boolean(true);
+            }
             return;
         }
         case DIRIGO_BLOCK_INTVAR: {
@@ -393,9 +520,547 @@ void processModule(Module &m, const Sample &sample, const DirigoWallClock &clock
             if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(a - b));
             return;
         }
+        case DIRIGO_BLOCK_YES: {
+            for (size_t i = 0; i < m.inPins.size() && i < m.outPins.size(); ++i) m.outPins[i] = m.inPins[i];
+            return;
+        }
+        case DIRIGO_BLOCK_SHL:
+        case DIRIGO_BLOCK_SAR: {
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            const int64_t value = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t shift = m.inPins.size() > 2
+                ? std::max<int64_t>(0, std::min<int64_t>(31, asInt(m.inPins[2]))) : 0;
+            const int64_t shifted = m.kind == DIRIGO_BLOCK_SHL
+                ? static_cast<int64_t>(static_cast<uint64_t>(value) << shift) : value >> shift;
+            m.outPins[0] = int32Value(static_cast<int32_t>(shifted));
+            return;
+        }
+        case DIRIGO_BLOCK_EXT: {
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            const int64_t value = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t offset = m.inPins.size() > 2
+                ? std::max<int64_t>(0, std::min<int64_t>(31, asInt(m.inPins[2]))) : 0;
+            const int64_t length = m.inPins.size() > 3
+                ? std::max<int64_t>(1, std::min<int64_t>(32 - offset, asInt(m.inPins[3]))) : 16;
+            const int64_t mask = (static_cast<int64_t>(1) << length) - 1;
+            m.outPins[0] = int32Value(static_cast<int32_t>((value >> offset) & mask));
+            return;
+        }
+        case DIRIGO_BLOCK_INS: {
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            const int64_t target = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t value = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            const int64_t offset = m.inPins.size() > 3
+                ? std::max<int64_t>(0, std::min<int64_t>(31, asInt(m.inPins[3]))) : 0;
+            const int64_t length = m.inPins.size() > 4
+                ? std::max<int64_t>(1, std::min<int64_t>(32 - offset, asInt(m.inPins[4]))) : 16;
+            const int64_t mask = ((static_cast<int64_t>(1) << length) - 1) << offset;
+            const int64_t inserted = (target & ~mask)
+                | (static_cast<int64_t>(static_cast<uint64_t>(value) << offset) & mask);
+            m.outPins[0] = int32Value(static_cast<int32_t>(inserted));
+            return;
+        }
+        case DIRIGO_BLOCK_SINGLEPULSE: {
+            const bool twoPins = m.inPins.size() >= 2;
+            const bool enabled = twoPins ? asBool(m.inPins[0]) : true;
+            const bool tr = twoPins ? asBool(m.inPins[1]) : (!m.inPins.empty() && asBool(m.inPins[0]));
+            const bool rising = !m.lastTr && tr;
+            m.lastTr = tr;
+            auto write = [&m](int64_t count, bool on) {
+                if (m.outPins.size() >= 2) { m.outPins[0] = int32Value(static_cast<int32_t>(count)); m.outPins[1] = boolean(on); }
+                else if (m.outPins.size() == 1) m.outPins[0] = boolean(on);
+            };
+            if (!enabled) {                                           /* `reset()` */
+                m.remaining = 0; m.total = 0; m.lastTr = false;
+                write(0, false);
+                return;
+            }
+            const int64_t tOn = m.paramPins.empty() ? 1 : std::max<int64_t>(1, asInt(m.paramPins[0]));
+            if (rising) { m.remaining = tOn; m.total = tOn; }
+            if (m.remaining > 0) {
+                write(m.total - m.remaining + 1, true);
+                m.remaining -= 1;
+            } else {
+                write(0, false);
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_PULSELEN: {
+            const bool twoPins = m.inPins.size() >= 2;
+            const bool enabled = twoPins ? asBool(m.inPins[0]) : true;
+            const bool input = twoPins ? asBool(m.inPins[1]) : (!m.inPins.empty() && asBool(m.inPins[0]));
+            if (!enabled) {                                           /* `reset()` */
+                m.total = 0; m.lastTr = false;
+                if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
+                return;
+            }
+            if (input) {
+                m.total += 1;
+                if (!m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(m.total));
+            } else {
+                if (m.lastTr && !m.outPins.empty()) m.outPins[0] = int32Value(static_cast<int32_t>(m.total));
+                m.total = 0;
+            }
+            m.lastTr = input;
+            return;
+        }
+        case DIRIGO_BLOCK_IABS:
+        case DIRIGO_BLOCK_IINC:
+        case DIRIGO_BLOCK_INEG: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t x = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t y = m.kind == DIRIGO_BLOCK_IABS ? (x < 0 ? -x : x)
+                            : m.kind == DIRIGO_BLOCK_IINC ? x + 1 : -x;
+            m.outPins[0] = int32Value(static_cast<int32_t>(y));
+            return;
+        }
+        case DIRIGO_BLOCK_IADD:
+        case DIRIGO_BLOCK_IMUL: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t a = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t b = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            m.outPins[0] = int32Value(static_cast<int32_t>(m.kind == DIRIGO_BLOCK_IADD ? a + b : a * b));
+            return;
+        }
+        case DIRIGO_BLOCK_LIMITER: {
+            /* No En on this block: pin 0 is X. */
+            const int64_t x = m.inPins.empty() ? 0 : asInt(m.inPins[0]);
+            const int64_t maximum = m.paramPins.size() > 0 ? asInt(m.paramPins[0]) : 0;
+            const int64_t minimum = m.paramPins.size() > 1 ? asInt(m.paramPins[1]) : 0;
+            m.outPins[0] = int32Value(static_cast<int32_t>(std::min(std::max(x, minimum), maximum)));
+            return;
+        }
+        case DIRIGO_BLOCK_CALIBTRANSF: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t x = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            if (m.paramPins.size() < 6) return;
+            const int64_t xMax = asInt(m.paramPins[0]), xMid = asInt(m.paramPins[1]), xMin = asInt(m.paramPins[2]);
+            const int64_t yMax = asInt(m.paramPins[3]), yMid = asInt(m.paramPins[4]), yMin = asInt(m.paramPins[5]);
+            auto interpolate = [x](int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
+                return x1 == x0 ? y0 : y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+            };
+            int64_t result;
+            if (x <= xMin) result = yMin;
+            else if (x <= xMid) result = interpolate(xMin, yMin, xMid, yMid);
+            else if (x <= xMax) result = interpolate(xMid, yMid, xMax, yMax);
+            else result = yMax;
+            m.outPins[0] = int32Value(static_cast<int32_t>(result));
+            return;
+        }
+        case DIRIGO_BLOCK_MEAN: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const bool trigger = m.inPins.size() > 1 && asBool(m.inPins[1]);
+            const int64_t value = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            const size_t window = static_cast<size_t>(std::max<int64_t>(1, m.config[0]));
+            if (trigger) {
+                m.history.push_back(value);
+                while (m.history.size() > window) m.history.pop_front();
+            }
+            if (m.history.empty()) return;                          /* no samples yet: hold */
+            int64_t sum = 0;
+            for (int64_t v : m.history) sum += v;
+            m.outPins[0] = int32Value(static_cast<int32_t>(sum / static_cast<int64_t>(m.history.size())));
+            return;
+        }
+        case DIRIGO_BLOCK_FLOATMATH: {
+            /* The legacy block computes in `Float` throughout, so every step is single precision here. */
+            const float a = m.inPins.size() > 0 ? asFloat(m.inPins[0]) : 0.0f;
+            const float b = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0f;
+            float y = 0.0f;
+            switch (m.variant) {
+                case DIRIGO_FMATH_SUB: y = a - b; break;
+                case DIRIGO_FMATH_MUL: y = a * b; break;
+                case DIRIGO_FMATH_DIV: y = b != 0.0f ? a / b : 0.0f; break;
+                case DIRIGO_FMATH_SQRT: y = a >= 0.0f ? std::sqrt(a) : 0.0f; break;
+                case DIRIGO_FMATH_SIN: y = std::sin(a); break;
+                case DIRIGO_FMATH_COS: y = std::cos(a); break;
+                default: y = a + b; break;
+            }
+            m.outPins[0] = floatValue(y);
+            return;
+        }
+        case DIRIGO_BLOCK_LONGMATH: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            std::vector<int64_t> ops;
+            for (size_t i = 1; i < m.inPins.size(); ++i) ops.push_back(asInt(m.inPins[i]));
+            const int64_t first = ops.empty() ? 0 : ops[0];
+            int64_t result = 0;
+            switch (m.variant) {
+                case DIRIGO_LONG_ADD: for (int64_t v : ops) result += v; break;
+                case DIRIGO_LONG_SUB: result = first; for (size_t i = 1; i < ops.size(); ++i) result -= ops[i]; break;
+                case DIRIGO_LONG_ABS: result = first < 0 ? -first : first; break;
+                case DIRIGO_LONG_NEG: result = -first; break;
+                case DIRIGO_LONG_NOT: result = ~first; break;
+                case DIRIGO_LONG_INC: result = first + 1; break;
+                case DIRIGO_LONG_AND: result = first; for (size_t i = 1; i < ops.size(); ++i) result &= ops[i]; break;
+                case DIRIGO_LONG_OR: result = first; for (size_t i = 1; i < ops.size(); ++i) result |= ops[i]; break;
+                case DIRIGO_LONG_XOR: result = first; for (size_t i = 1; i < ops.size(); ++i) result ^= ops[i]; break;
+            }
+            for (DirigoValue &out : m.outPins) out = int32Value(static_cast<int32_t>(result));
+            return;
+        }
+        case DIRIGO_BLOCK_FLOATNUM: {
+            /* `FloatMathNumericBlock` widens each operand to Double, computes, and rounds back to Float. */
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            std::vector<double> ops;
+            for (size_t i = 1; i < m.inPins.size(); ++i) ops.push_back(static_cast<double>(asFloat(m.inPins[i])));
+            const double x = ops.empty() ? 0.0 : ops[0];
+            const double k = ops.size() > 1 ? ops[1]
+                           : (m.paramPins.empty() ? 1.0 : static_cast<double>(asFloat(m.paramPins[0])));
+            double result = 0.0;
+            switch (m.variant) {
+                case DIRIGO_FNUM_ADD: for (double v : ops) result += v; break;
+                case DIRIGO_FNUM_SUB: result = x; for (size_t i = 1; i < ops.size(); ++i) result -= ops[i]; break;
+                case DIRIGO_FNUM_MUL: result = 1.0; for (double v : ops) result *= v; break;
+                case DIRIGO_FNUM_DIV:
+                    result = x;
+                    for (size_t i = 1; i < ops.size(); ++i) if (ops[i] != 0.0) result /= ops[i];
+                    break;
+                case DIRIGO_FNUM_ABS: result = std::fabs(x); break;
+                case DIRIGO_FNUM_NEG: result = -x; break;
+                case DIRIGO_FNUM_SQRT: result = x < 0 ? 0.0 : std::sqrt(x); break;
+                case DIRIGO_FNUM_MOD: result = ops.size() > 1 && ops[1] != 0.0 ? std::fmod(x, ops[1]) : 0.0; break;
+                case DIRIGO_FNUM_SIN: result = std::sin(x * k); break;
+                case DIRIGO_FNUM_COS: result = std::cos(x * k); break;
+                case DIRIGO_FNUM_ASIN: result = x < -1 || x > 1 ? 0.0 : std::asin(x) * k; break;
+                case DIRIGO_FNUM_ACOS: result = x < -1 || x > 1 ? 0.0 : std::acos(x) * k; break;
+            }
+            for (DirigoValue &out : m.outPins) out = floatValue(result);
+            return;
+        }
+        case DIRIGO_BLOCK_MOVE: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const bool trigger = m.inPins.size() > 1 && asBool(m.inPins[1]);
+            const bool rising = trigger && !m.lastTr;
+            m.lastTr = trigger;
+            if (rising && m.inPins.size() > 2) m.outPins[0] = m.inPins[2];
+            return;
+        }
+        case DIRIGO_BLOCK_COPY: {
+            if (m.variant == 1) {
+                if (!m.inPins.empty() && !asBool(m.inPins[0])) return;   /* Wr = 0 holds */
+                for (size_t i = 0; i < m.outPins.size(); ++i) {
+                    if (i + 1 < m.inPins.size()) m.outPins[i] = m.inPins[i + 1];
+                }
+            } else {
+                for (size_t i = 0; i < m.inPins.size() && i < m.outPins.size(); ++i) m.outPins[i] = m.inPins[i];
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_ENCODEDATE: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t day = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 1;
+            const int64_t month = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 1;
+            const int64_t year = m.inPins.size() > 3 ? asInt(m.inPins[3]) : 2000;
+            if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1980 || year > 2190) return;   /* hold */
+            m.outPins[0] = int32Value(static_cast<int32_t>(daysSince1980(year, month, day)));
+            return;
+        }
+        case DIRIGO_BLOCK_DECODEDATE: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t days = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            int64_t year = 1980, month = 1, day = 1;
+            civilFrom1980(days, year, month, day);
+            if (m.outPins.size() > 0) m.outPins[0] = int32Value(static_cast<int32_t>(day));
+            if (m.outPins.size() > 1) m.outPins[1] = int32Value(static_cast<int32_t>(month));
+            if (m.outPins.size() > 2) m.outPins[2] = int32Value(static_cast<int32_t>(year));
+            if (m.outPins.size() > 3) m.outPins[3] = int32Value(static_cast<int32_t>(month * 100 + day));
+            return;
+        }
+        case DIRIGO_BLOCK_IDEMUX:
+        case DIRIGO_BLOCK_FDEMUX: {
+            /* "The values of the other Y outputs remain unchanged"; an out-of-range selector writes nothing. */
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t sel = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            if (sel < 0 || sel >= static_cast<int64_t>(m.outPins.size())) return;
+            if (m.kind == DIRIGO_BLOCK_IDEMUX) {
+                m.outPins[sel] = int32Value(m.inPins.size() > 2 ? asInt32(m.inPins[2]) : 0);
+            } else {
+                m.outPins[sel] = floatValue(m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0f);
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_ADVCOUNTER: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            auto in = [&m](size_t i) { return m.inPins.size() > i && asBool(m.inPins[i]); };
+            auto param = [&m](size_t i, int64_t fallback) {
+                return m.paramPins.size() > i ? asInt(m.paramPins[i]) : fallback;
+            };
+            const bool trigger = in(1), reset = in(2), preset = in(3), enableHigh = in(4), enableLow = in(5);
+            const int64_t presetValue = param(0, 0), maximum = param(1, 0), minimum = param(2, 0), step = param(3, 1);
+            const bool rising = trigger && !m.lastTr;
+            m.lastTr = trigger;
+            if (reset) m.total = 0;
+            else if (preset) m.total = presetValue;
+            else if (rising) m.total += step;
+            if (enableHigh && m.total > maximum) m.total = maximum;
+            if (enableLow && m.total < minimum) m.total = minimum;
+            if (m.outPins.size() > 0) m.outPins[0] = int32Value(static_cast<int32_t>(m.total));
+            if (m.outPins.size() > 1) m.outPins[1] = boolean(m.total >= maximum);
+            if (m.outPins.size() > 2) m.outPins[2] = boolean(m.total <= minimum);
+            return;
+        }
+        case DIRIGO_BLOCK_FILTER: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const double x = static_cast<double>(m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0);
+            const int64_t t = std::max<int64_t>(1, m.paramPins.empty() ? 10 : asInt(m.paramPins[0]));
+            m.filterValue += (x - m.filterValue) / static_cast<double>(t);
+            m.outPins[0] = int32Value(static_cast<int32_t>(std::round(m.filterValue)));
+            return;
+        }
+        case DIRIGO_BLOCK_IAND:
+        case DIRIGO_BLOCK_IOR:
+        case DIRIGO_BLOCK_IXOR: {
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            const int32_t a = m.inPins.size() > 1 ? asInt32(m.inPins[1]) : 0;
+            const int32_t b = m.inPins.size() > 2 ? asInt32(m.inPins[2]) : 0;
+            m.outPins[0] = int32Value(m.kind == DIRIGO_BLOCK_IAND ? (a & b) : m.kind == DIRIGO_BLOCK_IOR ? (a | b) : (a ^ b));
+            return;
+        }
+        case DIRIGO_BLOCK_INOT: {
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            m.outPins[0] = int32Value(~(m.inPins.size() > 1 ? asInt32(m.inPins[1]) : 0));
+            return;
+        }
+        case DIRIGO_BLOCK_TRIGGER: {
+            /* "Changed since the previous cycle", in either direction — and a change of *kind* counts. */
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            const DirigoValue current = m.inPins.size() > 1 ? m.inPins[1] : boolean(false);
+            if (!m.processedOnce) {
+                m.processedOnce = true;
+                m.lastValue = current;
+                std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+                return;
+            }
+            const bool changed = !valuesEqual(current, m.lastValue);
+            m.lastValue = current;
+            if (!m.outPins.empty()) m.outPins[0] = boolean(changed);
+            return;
+        }
+        case DIRIGO_BLOCK_CONSTOUT: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;      /* "not executed": hold */
+            for (size_t i = 0; i < m.outPins.size(); ++i) {
+                switch (m.variant) {
+                    case 1: m.outPins[i] = boolean(false); break;
+                    case 2: m.outPins[i] = floatValue(0); break;
+                    case 3: m.outPins[i] = i == 0 ? boolean(false) : int32Value(0); break;
+                    default: m.outPins[i] = int32Value(0); break;
+                }
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_DELAYFILTER: {
+            /* `remaining` is optional in the Swift (`nil` until first armed): `processedOnce` says it is set. */
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
+            const int64_t delay = std::max<int64_t>(0, m.paramPins.empty() ? 0 : asInt(m.paramPins[0]));
+            if (!input) {
+                m.remaining = delay; m.processedOnce = true;
+                m.lastTr = false;
+            } else if (!m.lastTr) {
+                const int64_t current = m.processedOnce ? m.remaining : delay;
+                const int64_t next = std::max<int64_t>(0, current - 1);
+                m.remaining = next; m.processedOnce = true;
+                if (next == 0) m.lastTr = true;
+            }
+            m.outPins[0] = int32Value(static_cast<int32_t>(m.processedOnce ? m.remaining : delay));
+            if (m.outPins.size() > 1) m.outPins[1] = boolean(m.lastTr);
+            return;
+        }
+        case DIRIGO_BLOCK_TIMER: {
+            /* `elapsedTicks` is `total`, `lastIn` is `lastTr`. */
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;
+            const bool currentIn = m.inPins.size() > 1 && asBool(m.inPins[1]);
+            const bool rst = m.inPins.size() > 2 && asBool(m.inPins[2]);
+            const int64_t pt = m.paramPins.empty() ? 10 : std::max<int64_t>(1, asInt(m.paramPins[0]));
+            auto setQ = [&m](bool q) { m.outPins[0] = boolean(q); };
+            if (rst) {                                                  /* `reset()`, then remember In */
+                m.total = 0;
+                setQ(false);
+                if (m.outPins.size() > 1) m.outPins[1] = int32Value(0);
+                m.lastTr = currentIn;
+                return;
+            }
+            switch (m.variant) {
+                case 1:                                                 /* on-delay, continuous */
+                    if (currentIn) { m.total += 1; setQ(m.total >= pt); } else setQ(false);
+                    break;
+                case 2: {                                               /* fixed pulse */
+                    const bool rising = !m.lastTr && currentIn;
+                    if (rising && m.total == 0) { m.total = 1; setQ(true); }
+                    else if (m.total > 0) {
+                        if (m.total < pt) { m.total += 1; setQ(true); }
+                        else { setQ(false); if (!currentIn) m.total = 0; }
+                    } else setQ(false);
+                    break;
+                }
+                case 3: {                                               /* truncated pulse */
+                    const bool rising = !m.lastTr && currentIn;
+                    if (rising) { m.total = 1; setQ(true); }
+                    else if (currentIn && m.total > 0 && m.total < pt) { m.total += 1; setQ(true); }
+                    else { m.total = 0; setQ(false); }
+                    break;
+                }
+                default:                                                /* on-delay */
+                    if (currentIn) { if (m.total < pt) m.total += 1; setQ(m.total >= pt); }
+                    else { m.total = 0; setQ(false); }
+                    break;
+            }
+            m.lastTr = currentIn;
+            if (m.outPins.size() > 1) m.outPins[1] = int32Value(static_cast<int32_t>(m.total));
+            return;
+        }
+        case DIRIGO_BLOCK_RAMP: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t x = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t up = std::max<int64_t>(0, m.paramPins.size() > 0 ? asInt(m.paramPins[0]) : 0);
+            const int64_t down = std::max<int64_t>(0, m.paramPins.size() > 1 ? asInt(m.paramPins[1]) : 0);
+            if (x > m.total) m.total = std::min(x, m.total + up);
+            else if (x < m.total) m.total = std::max(x, m.total - down);
+            m.outPins[0] = int32Value(static_cast<int32_t>(m.total));
+            return;
+        }
+        case DIRIGO_BLOCK_VALVE: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const bool open = m.inPins.size() > 1 && asBool(m.inPins[1]);
+            const bool close = m.inPins.size() > 2 && asBool(m.inPins[2]);
+            const int64_t step = m.paramPins.size() > 0 ? asInt(m.paramPins[0]) : 1;
+            const int64_t maximum = m.paramPins.size() > 1 ? asInt(m.paramPins[1]) : 0;
+            const int64_t minimum = m.paramPins.size() > 2 ? asInt(m.paramPins[2]) : 0;
+            if (open != close) m.total += open ? step : -step;
+            if (m.total > maximum) m.total = maximum;
+            if (m.total < minimum) m.total = minimum;
+            m.outPins[0] = int32Value(static_cast<int32_t>(m.total));
+            return;
+        }
+        case DIRIGO_BLOCK_WATERREG: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t temperature = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t required = m.paramPins.size() > 0 ? asInt(m.paramPins[0]) : 0;
+            const int64_t band = m.paramPins.size() > 1 ? asInt(m.paramPins[1]) : 0;
+            const int64_t half = m.paramPins.size() > 2 ? asInt(m.paramPins[2]) : 0;
+            const bool cooling = m.paramPins.size() > 3 && asBool(m.paramPins[3]);
+            const int64_t delta = temperature - required;
+            if (delta > band + half) m.flagB = true;
+            if (delta < band - half) m.flagB = false;
+            if (delta < -band - half) m.flagA = true;
+            if (delta > -band + half) m.flagA = false;
+            m.outPins[0] = boolean(cooling ? m.flagB : m.flagA);
+            if (m.outPins.size() > 1) m.outPins[1] = boolean(cooling ? m.flagA : m.flagB);
+            return;
+        }
+        case DIRIGO_BLOCK_STEPDRV: {
+            /* position, speed, target in `s`; `flagA` is "commanded". */
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            auto inInt = [&m](size_t i, int64_t fallback) { return m.inPins.size() > i ? asInt(m.inPins[i]) : fallback; };
+            const bool start = m.inPins.size() > 1 && asBool(m.inPins[1]);
+            const bool preset = m.inPins.size() > 2 && asBool(m.inPins[2]);
+            const int64_t requested = inInt(3, 0), startSpeed = inInt(4, 32);
+            const int64_t accel = std::max<int64_t>(1, inInt(5, 64));
+            const int64_t posit = inInt(6, 0), prpos = inInt(7, 0);
+            int64_t &position = m.s[0], &speed = m.s[1], &target = m.s[2];
+            if (preset && speed == 0) position = prpos;
+            if (start) { target = posit; m.flagA = true; }
+            if (requested == 0) speed = std::max<int64_t>(0, speed - accel);
+            else if (speed < requested) speed = speed >= startSpeed ? std::min(requested, speed + accel) : requested;
+            else if (speed > requested) speed = std::max(requested, speed - accel);
+            const int64_t distance = target - position;
+            if (speed > 0 && distance != 0 && m.flagA) {
+                const int64_t step = std::min(distance < 0 ? -distance : distance, speed);
+                position += distance > 0 ? step : -step;
+                if (position == target) m.flagA = false;
+            }
+            m.outPins[0] = boolean(speed > 0 && (target - position) != 0 && m.flagA);
+            if (m.outPins.size() > 1) m.outPins[1] = int32Value(static_cast<int32_t>(speed));
+            if (m.outPins.size() > 2) m.outPins[2] = int32Value(static_cast<int32_t>(position));
+            return;
+        }
+        case DIRIGO_BLOCK_HYSTCOMP: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t a = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t b = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            const int64_t half = std::max<int64_t>(0, m.paramPins.empty() ? 0 : asInt(m.paramPins[0]));
+            if (a > b + half) { m.flagA = true; m.flagB = false; }
+            else if (a < b - half) { m.flagB = true; m.flagA = false; }
+            m.outPins[0] = boolean(m.flagA);
+            if (m.outPins.size() > 1) m.outPins[1] = boolean(a >= b - half && a <= b + half);
+            if (m.outPins.size() > 2) m.outPins[2] = boolean(m.flagB);
+            return;
+        }
+        case DIRIGO_BLOCK_MCOMPARE: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t x = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            int32_t ordinal = 0;
+            for (size_t i = 0; i < m.paramPins.size(); ++i) {
+                if (asInt(m.paramPins[i]) == x) { ordinal = static_cast<int32_t>(i + 1); break; }
+            }
+            m.outPins[0] = int32Value(ordinal);
+            return;
+        }
+        case DIRIGO_BLOCK_IF:
+            m.outPins[0] = m.inPins.empty() ? boolean(true) : m.inPins[0];
+            return;
+        case DIRIGO_BLOCK_ENDIF:
+            m.outPins[0] = boolean(true);
+            return;
+        case DIRIGO_BLOCK_FLOATVAR:
+            m.outPins[0] = floatValue(m.floatVar);
+            return;
+        case DIRIGO_BLOCK_CREATEARRAY: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t id = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t length = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 16;
+            /* `IntArrayStore.create`: Id 0...15, a positive length; the same length keeps the contents. */
+            bool ok = false;
+            if (id >= 0 && id <= 15 && length > 0) {
+                auto existing = sim->arrays.find(id);
+                if (existing == sim->arrays.end() || existing->second.size() != static_cast<size_t>(length)) {
+                    sim->arrays[id] = std::vector<double>(static_cast<size_t>(length), 0.0);
+                }
+                ok = true;
+            }
+            m.outPins[0] = boolean(ok);
+            return;
+        }
+        case DIRIGO_BLOCK_READARRAY:
+        case DIRIGO_BLOCK_WRITEARRAY: {
+            if (!m.inPins.empty() && !asBool(m.inPins[0])) return;
+            const int64_t id = m.inPins.size() > 1 ? asInt(m.inPins[1]) : 0;
+            const int64_t index = m.inPins.size() > 2 ? asInt(m.inPins[2]) : 0;
+            auto array = sim->arrays.find(id);
+            const bool inRange = array != sim->arrays.end() && index >= 0
+                && index < static_cast<int64_t>(array->second.size());
+            /* An element read back: Float as itself, otherwise truncated through Int to Int32. */
+            auto element = [&m](double stored) {
+                if (m.variant == 1) return floatValue(static_cast<float>(stored));
+                const double clamped = std::isfinite(stored)
+                    ? std::max(-9.2e18, std::min(9.2e18, stored)) : 0.0;
+                return int32Value(static_cast<int32_t>(static_cast<int64_t>(clamped)));
+            };
+            if (m.kind == DIRIGO_BLOCK_READARRAY) {
+                /* "If the array Id or the Index is outside the permitted range, the value 0 is written." */
+                m.outPins[0] = element(inRange ? array->second[static_cast<size_t>(index)] : 0.0);
+                return;
+            }
+            const double stored = m.variant == 1
+                ? static_cast<double>(m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 0.0f)
+                : static_cast<double>(m.inPins.size() > 3 ? asInt(m.inPins[3]) : 0);
+            if (inRange) {                                             /* out of range: Y holds */
+                array->second[static_cast<size_t>(index)] = stored;
+                m.outPins[0] = element(stored);
+            }
+            return;
+        }
         case DIRIGO_BLOCK_PASSIVE:
         case DIRIGO_BLOCK_MACRO_IO:
-            /* Both compute nothing. A macro interface's pins are written by `propagateMacroCalls`. */
+        case DIRIGO_BLOCK_ELSE:
+        case DIRIGO_BLOCK_SWITCHCASE:
+        case DIRIGO_BLOCK_CASE:
+        case DIRIGO_BLOCK_DEFAULT:
+        case DIRIGO_BLOCK_ENDSWITCH:
+        case DIRIGO_BLOCK_SETIDX:
+            /* Compute nothing here. A macro interface's pins are written by `propagateMacroCalls`; the
+               construct markers act in the step loop, and `SetIdx` writes through there too. */
             return;
         default:
             return;                                                  /* unresolved: holds everything */
@@ -409,6 +1074,16 @@ void resetModule(Module &m) {
     m.pulseRemaining = 0;
     m.currentCount = 0;
     m.lastTr = false;
+    m.remaining = 0;
+    m.total = 0;
+    m.filterValue = 0;
+    m.history.clear();
+    m.lastValue = undefinedValue();
+    m.processedOnce = false;
+    m.flagA = false;
+    m.flagB = false;
+    m.s[0] = m.s[1] = m.s[2] = 0;
+    /* `m.floatVar`, like `intValue`, is the variable's data and survives a reset. */
     /* `m.intValue` is deliberately *not* cleared: `IntVar.reset` restores its stored value, because a
        variable is data, not transient state. */
     std::fill(m.inPins.begin(), m.inPins.end(), boolean(false));
@@ -424,8 +1099,11 @@ void resetModule(Module &m) {
         case DIRIGO_BLOCK_COUNTER:
         case DIRIGO_BLOCK_COMPARATOR:
         case DIRIGO_BLOCK_INT2BITS:
-        case DIRIGO_BLOCK_SYSTEMCMD:
         case DIRIGO_BLOCK_SWITCH:
+            /* `ISwitchBlock.reset`: a zero of the switch's own element type. */
+            if (!m.outPins.empty()) m.outPins[0] = m.variant == 1 ? floatValue(0) : int32Value(0);
+            return;
+        case DIRIGO_BLOCK_SYSTEMCMD:
         case DIRIGO_BLOCK_INRANGE:
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             return;
@@ -438,8 +1116,48 @@ void resetModule(Module &m) {
         case DIRIGO_BLOCK_DIV:
         case DIRIGO_BLOCK_INTSUB:
         case DIRIGO_BLOCK_EQUITHERM:
+        case DIRIGO_BLOCK_SHL:
+        case DIRIGO_BLOCK_SAR:
+        case DIRIGO_BLOCK_EXT:
+        case DIRIGO_BLOCK_INS:
+        case DIRIGO_BLOCK_PULSELEN:
+        case DIRIGO_BLOCK_IABS:
+        case DIRIGO_BLOCK_IINC:
+        case DIRIGO_BLOCK_INEG:
+        case DIRIGO_BLOCK_IADD:
+        case DIRIGO_BLOCK_IMUL:
+        case DIRIGO_BLOCK_LIMITER:
+        case DIRIGO_BLOCK_CALIBTRANSF:
+        case DIRIGO_BLOCK_MEAN:
+        case DIRIGO_BLOCK_MOVE:
+        case DIRIGO_BLOCK_ENCODEDATE:
+        case DIRIGO_BLOCK_FILTER:
+        case DIRIGO_BLOCK_IAND:
+        case DIRIGO_BLOCK_IOR:
+        case DIRIGO_BLOCK_IXOR:
+        case DIRIGO_BLOCK_INOT:
             /* `WT` resets to an *int* zero, not the boolean default: the kind of a pin is part of the
                value, and the differential test compares the kinds. */
+            if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
+            return;
+        case DIRIGO_BLOCK_YES:
+        case DIRIGO_BLOCK_LONGMATH:
+        case DIRIGO_BLOCK_COPY:
+        case DIRIGO_BLOCK_IDEMUX:
+        case DIRIGO_BLOCK_DECODEDATE:
+            std::fill(m.outPins.begin(), m.outPins.end(), int32Value(0));
+            return;
+        case DIRIGO_BLOCK_FLOATMATH:
+        case DIRIGO_BLOCK_FLOATNUM:
+        case DIRIGO_BLOCK_FDEMUX:
+            std::fill(m.outPins.begin(), m.outPins.end(), floatValue(0));
+            return;
+        case DIRIGO_BLOCK_SINGLEPULSE:
+            if (m.outPins.size() >= 2) { m.outPins[0] = int32Value(0); m.outPins[1] = boolean(false); }
+            else std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+            return;
+        case DIRIGO_BLOCK_ADVCOUNTER:
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
             return;
         default:
@@ -498,18 +1216,15 @@ void writeThroughConnection(DirigoSim *sim, const Connection &c, const DirigoVal
         if (!producer.outPins.empty()) producer.outPins[0] = int32Value(producer.intValue);
         return;
     }
-
-    /* The Swift writes through `WritableVariable` when the producer conforms to it — which only
-       `IntVar` and `FloatVar` do (`BoolVar` deliberately does not, so a written pin is simply not
-       undone because `BoolVar.process` never overwrites its output). Neither of those two kinds is
-       ported here yet, so there is nothing to add for this case; when one is ported it needs a branch
-       here, or a written value would be discarded the moment the producer next ran. */
-    if (c.toParamPins) {
-        if (c.inPin >= 0 && static_cast<size_t>(c.inPin) < producer.paramPins.size()) {
-            producer.paramPins[c.inPin] = value;
-        }
+    /* The other `WritableVariable`: `FloatVarBlock.writeVariable` stores `value.asFloat`. */
+    if (producer.kind == DIRIGO_BLOCK_FLOATVAR) {
+        producer.floatVar = asFloat(value);
+        if (!producer.outPins.empty()) producer.outPins[0] = floatValue(producer.floatVar);
         return;
     }
+
+    /* Anything else recomputes its outputs anyway, so its output pin is all there is to write — the Swift
+       `writeThrough` writes `source.block.outPins[outPinId]`, whatever the connection's destination kind. */
     if (c.outPin >= 0 && static_cast<size_t>(c.outPin) < producer.outPins.size()) {
         producer.outPins[c.outPin] = value;
     }
@@ -531,7 +1246,8 @@ void applySetWriteThrough(DirigoSim *sim, size_t index) {
     if (incoming == sim->incomingByModule.end()) return;
     for (size_t connectionIndex : incoming->second) {
         const Connection &c = sim->connections[connectionIndex];
-        if (c.inPin < 2) continue;                      /* `where conn.inPinId >= 2` */
+        /* `inConnectionMap` holds in-pin connections only, so a param connection is never written back. */
+        if (c.toParamPins || c.inPin < 2) continue;    /* `where conn.inPinId >= 2` */
         writeThroughConnection(sim, c, value);
     }
 }
@@ -553,6 +1269,10 @@ void propagateMacroCalls(DirigoSim *sim) {
             /* Caller inPins -> subpage Inputs outPins. The interface module has no inPins of its own. */
             const size_t n = std::min(caller.inPins.size(), iface.outPins.size());
             for (size_t i = 0; i < n; ++i) iface.outPins[i] = caller.inPins[i];
+        } else if (bridge.kind == DIRIGO_MACRO_PARAMS) {
+            /* Caller paramPins -> subpage Params outPins. */
+            const size_t n = std::min(caller.paramPins.size(), iface.outPins.size());
+            for (size_t i = 0; i < n; ++i) iface.outPins[i] = caller.paramPins[i];
         } else if (bridge.kind == DIRIGO_MACRO_OUTPUTS) {
             /* Subpage Outputs inPins -> caller outPins. */
             const size_t n = std::min(iface.inPins.size(), caller.outPins.size());
@@ -561,11 +1281,127 @@ void propagateMacroCalls(DirigoSim *sim) {
     }
 }
 
+/// One connection's value into its consumer: the Swift `propagateWiresOnce` body for one wire.
+void carry(DirigoSim *sim, const Connection &c) {
+    auto src = sim->indexById.find(c.outModule);
+    auto dst = sim->indexById.find(c.inModule);
+    if (src == sim->indexById.end() || dst == sim->indexById.end()) return;
+    const Module &from = sim->modules[src->second];
+    Module &to = sim->modules[dst->second];
+    if (c.outPin < 0 || static_cast<size_t>(c.outPin) >= from.outPins.size() || c.inPin < 0) return;
+    DirigoValue value = from.outPins[c.outPin];
+    if (c.toParamPins) {
+        if (static_cast<size_t>(c.inPin) < to.paramPins.size()) to.paramPins[c.inPin] = value;
+    } else if (static_cast<size_t>(c.inPin) < to.inPins.size()) {
+        if (c.inverted) value = boolean(!asBool(value));
+        to.inPins[c.inPin] = value;
+    }
+}
+
+/// The whole-project sweep, wire by wire **in file order** — in-pin connections, then param connections —
+/// as the Swift walks `runtime.inConnections` and then `runtime.paramConnections`. Walking module by module
+/// instead gave a different answer whenever two wires fed one pin.
 void propagate(DirigoSim *sim) {
     for (int32_t sweep = 0; sweep < sim->macroSweeps; ++sweep) {
         propagateMacroCalls(sim);
-        for (size_t i = 0; i < sim->modules.size(); ++i) propagateFrom(sim, i);
+        for (const Connection &c : sim->connections) carry(sim, c);
         propagateMacroCalls(sim);
+    }
+}
+
+/// `SimulationEngine.pullInputs`: refreshes a module's inputs from its producers' *current* outputs just
+/// before it runs. Pushing alone is not equivalent: a `Set` that writes a producer's output mid-pass is
+/// seen by every consumer that runs after it, because they pull.
+void pullInputs(DirigoSim *sim, size_t index) {
+    auto incoming = sim->incomingByModule.find(sim->modules[index].id);
+    if (incoming == sim->incomingByModule.end()) return;
+    for (size_t connectionIndex : incoming->second) carry(sim, sim->connections[connectionIndex]);
+}
+
+/// `SetIdx`: writes `X` through the one P pin its `Idx` input selects (`SetIdxBlock.targetPinIndex`).
+void applySetIdxWriteThrough(DirigoSim *sim, size_t index) {
+    Module &self = sim->modules[index];
+    if (self.inPins.size() <= 3) return;
+    const int64_t idx = asInt(self.inPins[1]);
+    const int64_t selectable = static_cast<int64_t>(self.inPins.size()) - 3;
+    if (idx < 0 || idx >= selectable) return;                  /* "no write takes place" */
+    const int32_t target = static_cast<int32_t>(3 + idx);
+    const DirigoValue value = self.inPins[2];
+    auto incoming = sim->incomingByModule.find(self.id);
+    if (incoming == sim->incomingByModule.end()) return;
+    for (size_t connectionIndex : incoming->second) {
+        const Connection &c = sim->connections[connectionIndex];
+        if (!c.toParamPins && c.inPin == target) writeThroughConnection(sim, c, value);
+    }
+}
+
+/// The construct bookkeeping the Swift `stepNode` does before its gate, for every module. It is never
+/// gated itself: an `If` in a false branch still pushes its bit and an `EndIf` still pops, or the stack
+/// would lose its balance and every later block would be skipped for the rest of the pass.
+void constructBookkeeping(DirigoSim *sim, size_t index) {
+    Module &m = sim->modules[index];
+    const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
+    auto topIs = [sim](int32_t kind) {
+        return !sim->constructStack.empty() && sim->modules[sim->constructStack.back()].kind == kind;
+    };
+    switch (m.kind) {
+        case DIRIGO_BLOCK_IF:
+        case DIRIGO_BLOCK_SWITCHCASE: {
+            /* `b := (not InPinEnabled) xor Inverted`, pushed as the innermost condition. */
+            const bool holds = (!enabled) != (m.variant == 1);
+            sim->condStack = static_cast<int64_t>(static_cast<uint64_t>(sim->condStack) << 1) | (holds ? 1 : 0);
+            sim->constructStack.push_back(index);
+            if (m.kind == DIRIGO_BLOCK_SWITCHCASE) {
+                sim->switchMatched[index] = false;
+                /* The selector is captured only while the switch's own bit is clear. */
+                const bool captured = (sim->condStack & 1) == 0 && m.inPins.size() > 1;
+                sim->switchSelector[index] = {captured, captured ? asInt(m.inPins[1]) : 0};
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_ELSE:
+            if (topIs(DIRIGO_BLOCK_IF)) sim->condStack ^= 1;
+            return;
+        case DIRIGO_BLOCK_ENDIF:
+        case DIRIGO_BLOCK_ENDSWITCH:
+            if (topIs(m.kind == DIRIGO_BLOCK_ENDSWITCH ? DIRIGO_BLOCK_SWITCHCASE : DIRIGO_BLOCK_IF)) {
+                sim->constructStack.pop_back();
+                sim->condStack >>= 1;
+            }
+            return;
+        case DIRIGO_BLOCK_CASE: {
+            /* Bit 0 := "this case did not match". */
+            if (topIs(DIRIGO_BLOCK_SWITCHCASE)) {
+                const size_t top = sim->constructStack.back();
+                const auto selector = sim->switchSelector[top];
+                bool matched = false;
+                if (selector.first) {
+                    for (const auto &range : m.caseRanges) {
+                        if (selector.second >= range.first && selector.second <= range.second) { matched = true; break; }
+                    }
+                }
+                if (matched) sim->switchMatched[top] = true;
+                sim->condStack |= 1;
+                if (matched) sim->condStack &= ~static_cast<int64_t>(1);
+            } else {
+                sim->condStack |= 1;
+            }
+            return;
+        }
+        case DIRIGO_BLOCK_DEFAULT: {
+            /* Runs only when the switch captured a selector and no case matched it. */
+            if (topIs(DIRIGO_BLOCK_SWITCHCASE)) {
+                const size_t top = sim->constructStack.back();
+                const bool runs = sim->switchSelector[top].first && !sim->switchMatched[top];
+                sim->condStack |= 1;
+                if (runs) sim->condStack &= ~static_cast<int64_t>(1);
+            } else {
+                sim->condStack |= 1;
+            }
+            return;
+        }
+        default:
+            return;
     }
 }
 
@@ -587,11 +1423,17 @@ DirigoSim *dirigo_sim_create(const DirigoModuleDesc *modules, int32_t count,
         m.order = d.order;
         m.threadId = d.threadId;
         m.kind = d.kind;
+        m.variant = d.variant;
+        for (int c = 0; c < 4; ++c) m.config[c] = d.config[c];
         m.inPins.assign(static_cast<size_t>(std::max(0, d.inCount)), boolean(false));
         m.paramPins.assign(static_cast<size_t>(std::max(0, d.paramCount)), int32Value(0));
         m.outPins.assign(static_cast<size_t>(std::max(0, d.outCount)), boolean(false));
         for (int32_t p = 0; p < d.inCount && d.initialIn; ++p) m.inPins[p] = d.initialIn[p];
         for (int32_t p = 0; p < d.outCount && d.initialOut; ++p) m.outPins[p] = d.initialOut[p];
+        /* A variable's value is its state, and the block was built holding its configured initial value
+           in Y. Without this the state stayed 0 and the first pass overwrote the initial value. */
+        if (m.kind == DIRIGO_BLOCK_INTVAR && !m.outPins.empty()) m.intValue = asInt32(m.outPins[0]);
+        if (m.kind == DIRIGO_BLOCK_FLOATVAR && !m.outPins.empty()) m.floatVar = asFloat(m.outPins[0]);
         sim->indexById[m.id] = sim->modules.size();
         /* A module that has never run is due immediately, and the order within a thread is ORDER. */
         if (static_cast<int32_t>(sim->schedule.size()) <= m.threadId) {
@@ -665,12 +1507,25 @@ void dirigo_sim_set_wall_clock(DirigoSim *sim, DirigoWallClock clock) {
     sim->wallClock = clock;
 }
 
+void dirigo_sim_set_thread_interval(DirigoSim *sim, int32_t threadId, double intervalMs) {
+    if (sim) sim->threadIntervalMs[threadId] = intervalMs;
+}
+
+void dirigo_sim_set_case_ranges(DirigoSim *sim, int32_t index, const int64_t *ranges, int32_t count) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    Module &m = sim->modules[index];
+    m.caseRanges.clear();
+    for (int32_t i = 0; i < count && ranges; ++i) m.caseRanges.emplace_back(ranges[2 * i], ranges[2 * i + 1]);
+}
+
 void dirigo_sim_destroy(DirigoSim *sim) { delete sim; }
 
 void dirigo_sim_reset(DirigoSim *sim) {
     if (!sim) return;
     sim->tickCount = 0;
     sim->threadElapsedMs.clear();
+    sim->threadRunCounts.clear();
+    sim->arrays.clear();             /* the data area is the PLC's, and a reset clears it */
     for (Module &m : sim->modules) resetModule(m);
 }
 
@@ -700,9 +1555,11 @@ double dirigo_sim_ms_until_run(const DirigoSim *sim) {
     return soonest == std::numeric_limits<double>::max() ? 0 : soonest;
 }
 
-int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
-    if (!sim) return 0;
+/// The step loop. `forceAll` runs every thread whatever its timer, and leaves the timers alone.
+static int32_t stepImpl(DirigoSim *sim, double deltaMs, bool forceAll) {
     sim->tickCount += 1;
+    sim->condStack = 0;
+    sim->constructStack.clear();
     /* The caller's delta is taken as given, to a thousandth of a millisecond, so a slowed simulation is slowed. */
     const double stepMs = std::max(0.001, deltaMs);
     propagate(sim);
@@ -711,7 +1568,7 @@ int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
     for (int32_t tid : sim->threadIds) {
         const double interval = intervalMs(sim, tid);
         bool isDue = true;
-        if (sim->profileScheduling) {
+        if (sim->profileScheduling && !forceAll) {
             auto it = sim->threadElapsedMs.find(tid);
             const double elapsed = (it == sim->threadElapsedMs.end() ? interval : it->second) + stepMs;
             if (elapsed + 1e-9 < interval) {
@@ -723,17 +1580,38 @@ int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
         }
         if (!isDue) continue;
         ranAny = true;
+        sim->threadRunCounts[tid] += 1;
         Sample sample{sim->tickCount, interval};
         for (size_t index : sim->schedule[tid]) {
-            processModule(sim->modules[index], sample, sim->wallClock);
+            /* `SimulationEngine.stepNode`, in its order: construct bookkeeping (never gated), then the gate,
+               then pull, process, write-through and push. */
+            constructBookkeeping(sim, index);
+            /* The engine-level gate: a module inside a false branch, or whose first in pin reads 0, does
+               not run and does not push, so all its outputs hold. That is not each block's own `En` rule —
+               it applies even where pin 0 is an operand (`Int2Bits`'s `X`) — and it reads pin 0 *before*
+               the pull, as the Swift does. */
+            const Module &gated = sim->modules[index];
+            if (sim->condStack != 0) continue;
+            if (!gated.inPins.empty() && !asBool(gated.inPins[0])) continue;
+            pullInputs(sim, index);
+            processModule(sim, sim->modules[index], sample, sim->wallClock);
+            const int32_t kind = sim->modules[index].kind;
+            if (kind == DIRIGO_BLOCK_SETIDX) applySetIdxWriteThrough(sim, index);
+            if (kind == DIRIGO_BLOCK_SET) applySetWriteThrough(sim, index);
             propagateFrom(sim, index);       /* the Swift engine pushes after every block */
-            if (sim->modules[index].kind == DIRIGO_BLOCK_SET) {
-                applySetWriteThrough(sim, index);
-            }
         }
     }
     if (ranAny) propagate(sim);
     return ranAny ? 1 : 0;
+}
+
+int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs) {
+    if (!sim) return 0;
+    return stepImpl(sim, deltaMs, false);
+}
+
+void dirigo_sim_evaluate_now(DirigoSim *sim) {
+    if (sim) stepImpl(sim, sim->cycleDelayMs, true);
 }
 
 uint64_t dirigo_sim_tick_count(const DirigoSim *sim) { return sim ? sim->tickCount : 0; }
@@ -782,8 +1660,70 @@ void dirigo_sim_set_out(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue 
     /* A variable's value is its *state*, not its pin: writing the pin alone is undone the next time the
        variable runs, so a value set by hand has to reach `intValue` too. */
     if (m.kind == DIRIGO_BLOCK_INTVAR && pin == 0) m.intValue = static_cast<int32_t>(asInt(value));
+    if (m.kind == DIRIGO_BLOCK_FLOATVAR && pin == 0) {
+        m.floatVar = asFloat(value);
+        m.outPins[0] = floatValue(m.floatVar);
+    }
 }
 
-int32_t dirigo_sim_portable_kind_count(void) { return 12; }
+void dirigo_sim_pulse_out(DirigoSim *sim, int32_t index, int32_t pin, int32_t cycles) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    Module &m = sim->modules[index];
+    if (pin < 0 || static_cast<size_t>(pin) >= m.outPins.size()) return;
+    m.outPins[pin] = boolean(true);
+    m.pulseRemaining = std::max(0, cycles);
+}
+
+void dirigo_sim_reset_module(DirigoSim *sim, int32_t index) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    Module &m = sim->modules[index];
+    const std::vector<DirigoValue> ins = m.inPins, params = m.paramPins;
+    resetModule(m);
+    m.inPins = ins;
+    m.paramPins = params;
+}
+
+void dirigo_sim_set_variant(DirigoSim *sim, int32_t index, int32_t variant) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    sim->modules[index].variant = variant;
+}
+
+void dirigo_sim_propagate(DirigoSim *sim) {
+    if (sim) propagate(sim);
+}
+
+uint64_t dirigo_sim_thread_run_count(const DirigoSim *sim, int32_t threadId) {
+    if (!sim) return 0;
+    auto found = sim->threadRunCounts.find(threadId);
+    return found == sim->threadRunCounts.end() ? 0 : found->second;
+}
+
+double dirigo_sim_thread_interval_ms(const DirigoSim *sim, int32_t threadId) {
+    return sim ? intervalMs(sim, threadId) : 0;
+}
+
+uint64_t dirigo_sim_pins_digest(const DirigoSim *sim) {
+    uint64_t digest = 0xcbf29ce484222325ULL;                    /* FNV-1a offset basis */
+    if (!sim) return digest;
+    auto mix = [&digest](uint64_t value) { digest = (digest ^ value) * 0x100000001b3ULL; };
+    auto mixValue = [&mix](const DirigoValue &v) {
+        mix(static_cast<uint64_t>(v.kind));
+        switch (v.kind) {
+            case DIRIGO_VALUE_INT64: mix(static_cast<uint64_t>(v.i64)); break;
+            case DIRIGO_VALUE_FLOAT: { double f = v.f; uint64_t bits; std::memcpy(&bits, &f, sizeof bits); mix(bits); break; }
+            case DIRIGO_VALUE_UNDEFINED: break;
+            default: mix(static_cast<uint64_t>(static_cast<uint32_t>(v.i))); break;
+        }
+    };
+    for (const Module &m : sim->modules) {
+        mix(static_cast<uint64_t>(static_cast<uint32_t>(m.id)));
+        for (const DirigoValue &v : m.inPins) mixValue(v);
+        for (const DirigoValue &v : m.paramPins) mixValue(v);
+        for (const DirigoValue &v : m.outPins) mixValue(v);
+    }
+    return digest;
+}
+
+int32_t dirigo_sim_portable_kind_count(void) { return DIRIGO_BLOCK_SETIDX; }
 
 }  // extern "C"

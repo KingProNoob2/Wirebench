@@ -21,6 +21,13 @@ public final class CxxSimulationCore {
     public let portedModuleCount: Int
     public let unresolvedModuleCount: Int
 
+    /// Each module's pin counts, as the core holds them. The core's module list is the *runtime* one — macro
+    /// copies and construct markers included — so these are looked up by module id rather than assumed from
+    /// the document.
+    private let pinCounts: [Int: (inputs: Int, params: Int, outputs: Int)]
+    /// The modules the core runs, in the order it was given them.
+    public let runtimeModules: [PCCModule]
+
     /// The block kinds the core implements, by the class the GUID maps to in the block table.
     /// Anything absent is inert — and a project with an inert module does not run here at all, because
     /// one unported block stops wires it carries from moving and would make the *ported* blocks look
@@ -59,7 +66,141 @@ public final class CxxSimulationCore {
         // Blocks whose pins *are* their behaviour: the I/O channels, and the displays that show them.
         case "TMDigitalInputs", "TMDigitalOutputs", "TDispValueModule", "TDispSegmentModule":
             return DIRIGO_BLOCK_PASSIVE
-        default: return nil
+        case "TMLComparator": return DIRIGO_BLOCK_COMPARATOR
+        case "TMLongSwitch", "TMFloatSwitch": return DIRIGO_BLOCK_SWITCH
+        case "TMYes": return DIRIGO_BLOCK_YES
+        case "TMShl": return DIRIGO_BLOCK_SHL
+        case "TMSar": return DIRIGO_BLOCK_SAR
+        case "TMExt": return DIRIGO_BLOCK_EXT
+        case "TMIns": return DIRIGO_BLOCK_INS
+        case "TMSinglePulse": return DIRIGO_BLOCK_SINGLEPULSE
+        case "TMPulseLength": return DIRIGO_BLOCK_PULSELEN
+        case "TMIntAbs": return DIRIGO_BLOCK_IABS
+        case "TMIntInc": return DIRIGO_BLOCK_IINC
+        case "TMIntNeg": return DIRIGO_BLOCK_INEG
+        case "TMIntAdd": return DIRIGO_BLOCK_IADD
+        case "TMIntMul": return DIRIGO_BLOCK_IMUL
+        case "TMLimiter", "TMLLimiter": return DIRIGO_BLOCK_LIMITER
+        case "TMCalibratedTransform": return DIRIGO_BLOCK_CALIBTRANSF
+        case "TMMean": return DIRIGO_BLOCK_MEAN
+        case "TMMove": return DIRIGO_BLOCK_MOVE
+        case "TMCopy": return DIRIGO_BLOCK_COPY
+        case "TMEncodeDate": return DIRIGO_BLOCK_ENCODEDATE
+        case "TMDecodeDate": return DIRIGO_BLOCK_DECODEDATE
+        case "TMIntDemultiplexer", "TMLongDemultiplexer": return DIRIGO_BLOCK_IDEMUX
+        case "TMFloatDemultiplexer": return DIRIGO_BLOCK_FDEMUX
+        case "TMAdvCounter": return DIRIGO_BLOCK_ADVCOUNTER
+        case "TMFilter": return DIRIGO_BLOCK_FILTER
+        case "TMIntAnd": return DIRIGO_BLOCK_IAND
+        case "TMIntOr": return DIRIGO_BLOCK_IOR
+        case "TMIntXor": return DIRIGO_BLOCK_IXOR
+        case "TMIntNot": return DIRIGO_BLOCK_INOT
+        case "TMTrigger": return DIRIGO_BLOCK_TRIGGER
+        // No unit attached: when they run they report "nothing read" (`configuration` picks the value).
+        case "TMAnalogInputs", "TMCnt", "TMIIC_16xAI", "TMIIC_8xAI", "TMIIC_9xDICounter", "TMIIC_9xDI",
+             "TMIRC", "TReadAnaChannel", "TMLogger", "TMReadDallas",
+             "TMDbnReadFloat", "TMDbnReadFloatMtx", "TMDbnReadInt", "TMDbnReadIntMtx", "TMDbnReadLong",
+             "TMDbnReadLongMtx", "TMDbnWriteFloat", "TMDbnWriteFloatMtx", "TMDbnWriteInt", "TMDbnWriteIntMtx",
+             "TMDbnWriteLong", "TMDbnWriteLongMtx", "TMStoreFloatData", "TMStoreIntData", "TMStoreLongData":
+            return DIRIGO_BLOCK_CONSTOUT
+        // Pin surface only (`ShapePreservingBlock`), or behaviour no pin can observe (`8xPWM`'s duty, a
+        // week program this build cannot decode).
+        case "TMAnalogOutputs", "TMIIC_3xDO", "TMIIC_8xAO", "TMIIC_8xDO", "TMIQRF", "TMP3Menu", "TMSaveData",
+             "TMSwitch2", "TMUserComm", "TMPWMOutputs", "TMWeekProgram":
+            return DIRIGO_BLOCK_PASSIVE
+        case "TMResults": return DIRIGO_BLOCK_YES                 // `ResultsBlock` copies like `YesBlock`
+        case "TMP1DelayFilter": return DIRIGO_BLOCK_DELAYFILTER
+        case "TMTimer": return DIRIGO_BLOCK_TIMER
+        case "TMRamp": return DIRIGO_BLOCK_RAMP
+        case "TMValve": return DIRIGO_BLOCK_VALVE
+        case "TMWaterRegulator": return DIRIGO_BLOCK_WATERREG
+        case "TMStepDriver": return DIRIGO_BLOCK_STEPDRV
+        case "TMHysteresisComparator": return DIRIGO_BLOCK_HYSTCOMP
+        case "TMMultiComparator": return DIRIGO_BLOCK_MCOMPARE
+        case "TMIfModule": return DIRIGO_BLOCK_IF
+        case "TMElseModule": return DIRIGO_BLOCK_ELSE
+        case "TMEndIfModule": return DIRIGO_BLOCK_ENDIF
+        case "TMSwitchModule": return DIRIGO_BLOCK_SWITCHCASE
+        case "TMCaseModule": return DIRIGO_BLOCK_CASE
+        case "TMDefaultModule": return DIRIGO_BLOCK_DEFAULT
+        case "TMEndSwitchModule": return DIRIGO_BLOCK_ENDSWITCH
+        case "TMFloatVar": return DIRIGO_BLOCK_FLOATVAR
+        case "TMLongVar": return DIRIGO_BLOCK_INTVAR
+        case "TMCreateIntArray", "TMCreateLongArray": return DIRIGO_BLOCK_CREATEARRAY
+        case "TMReadIntArray", "TMReadLongArray", "TMReadFloatArray": return DIRIGO_BLOCK_READARRAY
+        case "TMWriteIntArray", "TMWriteLongArray", "TMWriteFloatArray": return DIRIGO_BLOCK_WRITEARRAY
+        case "TMSetIndexed": return DIRIGO_BLOCK_SETIDX
+        default:
+            // One Swift class backs each of these families; the operation is the `variant`.
+            if LongMathOperation(blockName: BlockTypeCatalog.info(forGuid: guid)?.blockName ?? "") != nil {
+                return DIRIGO_BLOCK_LONGMATH
+            }
+            if FloatMathOperation(blockName: BlockTypeCatalog.info(forGuid: guid)?.blockName ?? "") != nil {
+                return DIRIGO_BLOCK_FLOATNUM
+            }
+            // The legacy `FloatMath` has no Delphi class of its own, so it is matched by GUID.
+            if guid == FloatMathBlock.guid { return DIRIGO_BLOCK_FLOATMATH }
+            return nil
+        }
+    }
+
+    /// The per-instance configuration the Swift registry reads from module attributes when it builds the block.
+    ///
+    /// Each rule mirrors the matching `register` closure in `BlockRegistry`, so the core and the Swift block
+    /// are configured from the same attributes the same way.
+    static func configuration(for mod: PCCModule, kind: DirigoBlockKind,
+                              inCount: Int, outCount: Int) -> (variant: Int32, config: [Int64]) {
+        let blockName = BlockTypeCatalog.info(forGuid: mod.guid)?.blockName ?? ""
+        switch kind {
+        case DIRIGO_BLOCK_RS:
+            let setPriority = mod.rawAttributes["PRIORITY"]?.uppercased() == "S"
+                || mod.rawAttributes["RS_PRIORITY"]?.uppercased() == "S"
+            return (setPriority ? 1 : 0, [])
+        case DIRIGO_BLOCK_SWITCH:
+            return (BlockTypeCatalog.info(forGuid: mod.guid)?.delphiClass == "TMFloatSwitch" ? 1 : 0, [])
+        case DIRIGO_BLOCK_MEAN:
+            let window = mod.paramPins.first?.value.asInt
+                ?? mod.rawAttributes["N"].flatMap { Int($0) }
+                ?? mod.rawAttributes["WINDOW"].flatMap { Int($0) }
+                ?? 12
+            return (0, [Int64(max(1, window))])
+        case DIRIGO_BLOCK_COPY:
+            // `CopyBlock(count:hasWrPin:)`: a Wr pin is present when there is an input beyond the outputs.
+            return (inCount > max(outCount, 1) ? 1 : 0, [])
+        case DIRIGO_BLOCK_LONGMATH:
+            let ops: [LongMathOperation] = [.add, .subtract, .absolute, .negate, .logicalNot, .increment,
+                                            .bitAnd, .bitOr, .bitXor]
+            let op = LongMathOperation(blockName: blockName)
+            return (Int32(ops.firstIndex { $0 == op } ?? 0), [])
+        case DIRIGO_BLOCK_FLOATNUM:
+            let ops: [FloatMathOperation] = [.add, .subtract, .multiply, .divide, .absolute, .negate,
+                                             .squareRoot, .modulo, .sine, .cosine, .arcSine, .arcCosine]
+            let op = FloatMathOperation(blockName: blockName)
+            return (Int32(ops.firstIndex { $0 == op } ?? 0), [])
+        case DIRIGO_BLOCK_FLOATMATH:
+            let ops = ["add", "sub", "mul", "div", "sqrt", "sin", "cos"]
+            return (Int32(ops.firstIndex(of: mod.rawAttributes["OP"]?.lowercased() ?? "add") ?? 0), [])
+        case DIRIGO_BLOCK_TIMER:
+            // `TimerBlock.Mode(rawValue:) ?? .onDelay`.
+            let mode = Int(mod.rawAttributes["MODE"] ?? "0") ?? 0
+            return ((0...3).contains(mode) ? Int32(mode) : 0, [])
+        case DIRIGO_BLOCK_IF, DIRIGO_BLOCK_SWITCHCASE:
+            return (mod.inPins.first?.inverted == true ? 1 : 0, [])
+        case DIRIGO_BLOCK_DATETIME:
+            let offset = mod.rawAttributes["OFFS"].flatMap { Int($0) } ?? mod.rawAttributes["OFFSET"].flatMap { Int($0) } ?? 0
+            return (0, [Int64(offset)])
+        case DIRIGO_BLOCK_CONSTOUT:
+            switch BlockTypeCatalog.info(forGuid: mod.guid)?.delphiClass ?? "" {
+            case let c where c.hasPrefix("TMDbnRead") || c.hasPrefix("TMDbnWrite"): return (1, [])
+            case "TMStoreFloatData": return (2, [])
+            case "TMReadDallas": return (3, [])
+            default: return (0, [])
+            }
+        case DIRIGO_BLOCK_READARRAY, DIRIGO_BLOCK_WRITEARRAY:
+            let delphiClass = BlockTypeCatalog.info(forGuid: mod.guid)?.delphiClass ?? ""
+            return (delphiClass.hasSuffix("FloatArray") ? 1 : 0, [])
+        default:
+            return (0, [])
         }
     }
 
@@ -68,10 +209,11 @@ public final class CxxSimulationCore {
         project.modules.allSatisfy { kind(forGUID: $0.guid) != nil }
     }
 
-    public init(project original: PCCProject, profileScheduling: Bool = true) {
-        // Every call of a macro runs on its own copy of the sheet, as in `SimulationEngine`; the copies'
-        // modules are addressable here by the ids `MacroInstancing` gave them.
-        let project = MacroInstancing.instanced(original)
+    public init(project original: PCCProject, profile: PLCProfile? = nil, profileScheduling: Bool = true) {
+        // The same runtime `SimulationEngine` builds: every call of a macro on its own copy of the sheet
+        // (`MacroInstancing`), then every container written out as legacy If/Case/EndIf markers
+        // (`ConstructContainers`). The modules are addressable here by the ids those passes gave them.
+        let project = ConstructContainers.expanded(MacroInstancing.instanced(original))
         // The same starting state `SimulationEngine.setupRuntime` builds: a block per module, the
         // project's in-pin and param-pin values applied over the block's own defaults. The values are
         // handed over as flat C arrays the core copies from, so nothing here outlives the call.
@@ -96,6 +238,9 @@ public final class CxxSimulationCore {
             totalIn += block.inPins.count
             totalOut += block.outPins.count
             pinValues.append((block.inPins, block.outPins))
+            let setup = Self.configuration(for: mod, kind: kind,
+                                           inCount: block.inPins.count, outCount: block.outPins.count)
+            let config = setup.config + Array(repeating: 0, count: max(0, 4 - setup.config.count))
             descs.append(DirigoModuleDesc(
                 id: Int32(mod.id),
                 order: Int32(mod.order),
@@ -104,7 +249,9 @@ public final class CxxSimulationCore {
                 inCount: Int32(block.inPins.count),
                 paramCount: Int32(block.paramPins.count),
                 outCount: Int32(block.outPins.count),
-                initialOut: nil, initialIn: nil))
+                initialOut: nil, initialIn: nil,
+                variant: setup.variant,
+                config: (config[0], config[1], config[2], config[3])))
         }
 
         let inFlat = UnsafeMutablePointer<DirigoValue>.allocate(capacity: max(1, totalIn))
@@ -122,13 +269,18 @@ public final class CxxSimulationCore {
             offsetOut += values.outPins.count
         }
 
+        // An in-pin wire carries its destination pin's `inverted` flag, which is where the Swift reads it
+        // (`dstNode.module.inPins[inPinId].inverted`); a param wire is never inverted.
+        let modulesById = Dictionary(project.modules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var connections: [DirigoConnection] = []
         for (list, isParam) in [(project.inConnections, false), (project.paramConnections, true)] {
             for conn in list {
+                let pins = modulesById[conn.inModuleId]?.inPins ?? []
+                let inverted = !isParam && pins.indices.contains(conn.inPinId) && pins[conn.inPinId].inverted
                 connections.append(DirigoConnection(
                     inModule: Int32(conn.inModuleId), inPin: Int32(conn.inPinId),
                     outModule: Int32(conn.outModuleId), outPin: Int32(conn.outPinId),
-                    inverted: 0, toParamPins: isParam ? 1 : 0))
+                    inverted: inverted ? 1 : 0, toParamPins: isParam ? 1 : 0))
             }
         }
 
@@ -151,6 +303,21 @@ public final class CxxSimulationCore {
             for (idx, pin) in mod.paramPins.enumerated() where idx < block.paramPins.count {
                 dirigo_sim_set_param(created, Int32(position), Int32(idx), Self.cValue(pin.value))
             }
+            // A `Case`'s accepted values are configuration (`VALUES`, e.g. "1, 5..7"), parsed as the Swift
+            // `CaseBlock` parses them.
+            if Self.kind(forGUID: mod.guid) == DIRIGO_BLOCK_CASE {
+                let ranges = CaseBlock.parse(mod.rawAttributes["VALUES"] ?? mod.rawAttributes["CASE_VALUES"] ?? "")
+                let flat = ranges.flatMap { [Int64($0.lowerBound), Int64($0.upperBound)] }
+                flat.withUnsafeBufferPointer { buffer in
+                    dirigo_sim_set_case_ranges(created, Int32(position), buffer.baseAddress, Int32(ranges.count))
+                }
+            }
+        }
+        // Thread periods from the hardware profile, as `SimulationEngine.intervalMs(forThread:)` takes them.
+        for threadId in Set(project.modules.map(\.threadId)) {
+            if let thread = profile?.thread(id: threadId), thread.intervalMs > 0 {
+                dirigo_sim_set_thread_interval(created, Int32(threadId), Double(thread.intervalMs))
+            }
         }
         // Macro interfaces. The Swift engine finds these by matching `MACRO_NAME` and `KIND`
         // attributes and page names; doing that here rather than in C++ keeps the string matching in
@@ -167,6 +334,91 @@ public final class CxxSimulationCore {
         self.indexByModuleId = index
         self.portedModuleCount = ported
         self.unresolvedModuleCount = descs.count - ported
+        self.runtimeModules = project.modules
+        var counts: [Int: (inputs: Int, params: Int, outputs: Int)] = [:]
+        for (position, mod) in project.modules.enumerated() {
+            counts[mod.id] = (Int(descs[position].inCount), Int(descs[position].paramCount), Int(descs[position].outCount))
+        }
+        self.pinCounts = counts
+    }
+
+    // MARK: - Driving the core from the app
+
+    /// Whether the core has a module with this id.
+    public func contains(moduleId: Int) -> Bool { indexByModuleId[moduleId] != nil }
+
+    /// A module's pins, as arrays — what the views draw.
+    public func inPins(moduleId: Int) -> [PinValue] {
+        (0..<(pinCounts[moduleId]?.inputs ?? 0)).map { inValue(moduleId: moduleId, pin: $0) ?? .undefined }
+    }
+
+    public func paramPins(moduleId: Int) -> [PinValue] {
+        (0..<(pinCounts[moduleId]?.params ?? 0)).map { paramValue(moduleId: moduleId, pin: $0) ?? .undefined }
+    }
+
+    public func outPins(moduleId: Int) -> [PinValue] {
+        (0..<(pinCounts[moduleId]?.outputs ?? 0)).map { outValue(moduleId: moduleId, pin: $0) ?? .undefined }
+    }
+
+    public func paramValue(moduleId: Int, pin: Int) -> PinValue? {
+        guard let index = indexByModuleId[moduleId] else { return nil }
+        return Self.pinValue(dirigo_sim_get_param(sim, index, Int32(clamping: pin)))
+    }
+
+    /// A push button's single click: the output goes high for `cycles` passes, then low.
+    public func pulseOut(moduleId: Int, pin: Int, cycles: Int) {
+        guard let index = indexByModuleId[moduleId] else { return }
+        dirigo_sim_pulse_out(sim, index, Int32(clamping: pin), Int32(clamping: cycles))
+    }
+
+    /// One block's own reset: its state and outputs, keeping its inputs and parameters.
+    public func resetModule(moduleId: Int) {
+        guard let index = indexByModuleId[moduleId] else { return }
+        dirigo_sim_reset_module(sim, index)
+    }
+
+    /// Re-reads a module's attribute-driven configuration (an RS priority, a timer mode) into the core, live.
+    public func reconfigure(module: PCCModule) {
+        guard let index = indexByModuleId[module.id], let kind = Self.kind(forGUID: module.guid),
+              let counts = pinCounts[module.id] else { return }
+        let setup = Self.configuration(for: module, kind: kind, inCount: counts.inputs, outCount: counts.outputs)
+        dirigo_sim_set_variant(sim, index, setup.variant)
+    }
+
+    /// The whole-project wire and macro sweep, so a hand edit reaches its consumers without a step.
+    public func propagate() { dirigo_sim_propagate(sim) }
+
+    /// One pass of every thread *now*, leaving the threads' timers alone: an edit made while paused shows its
+    /// effect even on a thread whose period is a second. Counts as a tick.
+    public func evaluateNow(now: Date) {
+        dirigo_sim_set_wall_clock(sim, Self.wallClock(from: now))
+        dirigo_sim_evaluate_now(sim)
+    }
+
+    /// A faithful digest of every pin, for "did anything change since the last redraw?".
+    public func pinsDigest() -> UInt64 { dirigo_sim_pins_digest(sim) }
+
+    /// How many times each thread has run, for the threads the project uses.
+    public var threadRunCounts: [Int: UInt64] {
+        var counts: [Int: UInt64] = [:]
+        for threadId in Set(runtimeModules.map(\.threadId)) {
+            let count = dirigo_sim_thread_run_count(sim, Int32(clamping: threadId))
+            if count > 0 { counts[threadId] = count }
+        }
+        return counts
+    }
+
+    /// A thread's period: the profile's, or the project's cycle.
+    public func intervalMs(forThread threadId: Int) -> Double {
+        dirigo_sim_thread_interval_ms(sim, Int32(clamping: threadId))
+    }
+
+    /// Module ids on a thread, in the order the core runs them: ascending `ORDER`, ties in runtime order.
+    public func executionOrder(forThread threadId: Int) -> [Int] {
+        runtimeModules.enumerated()
+            .filter { $0.element.threadId == threadId }
+            .sorted { ($0.element.order, $0.offset) < ($1.element.order, $1.offset) }
+            .map(\.element.id)
     }
 
     /// The caller/subpage interfaces of every macro in a project, in the shape the core expects.
@@ -180,8 +432,11 @@ public final class CxxSimulationCore {
         var result: [DirigoMacroBridge] = []
 
         for macro in project.modules {
-            // A call on a `*` sheet is a nested macro and is bridged like any other.
-            guard let name = MacroCalls.target(of: macro) else { continue }
+            // A call on a `*` sheet is a nested macro and is bridged like any other. Like the Swift, a macro
+            // block without a `MACRO_NAME` falls back to its instance name (`MacroBlock.macroName`).
+            let fallback = macro.guid == MacroBlock.guid ? (macro.rawAttributes["MACRO_NAME"] ?? macro.name) : nil
+            guard let name = MacroCalls.target(of: macro) ?? fallback,
+                  !["inputs", "outputs", "params"].contains(name.lowercased()) else { continue }
             let targetPage = "*\(name)"
             let candidates = project.modules.filter {
                 $0.page == targetPage
@@ -198,6 +453,15 @@ public final class CxxSimulationCore {
                 result.append(DirigoMacroBridge(callerModule: Int32(macro.id),
                                                 interfaceModule: Int32(inputs.id),
                                                 kind: Int32(DIRIGO_MACRO_INPUTS.rawValue)))
+            }
+            if let params = candidates.first(where: {
+                $0.rawAttributes["KIND"] == "2"
+                    || $0.name.lowercased().hasPrefix("param")
+                    || $0.rawAttributes["MACRO_NAME"]?.lowercased() == "params"
+            }) {
+                result.append(DirigoMacroBridge(callerModule: Int32(macro.id),
+                                                interfaceModule: Int32(params.id),
+                                                kind: Int32(DIRIGO_MACRO_PARAMS.rawValue)))
             }
             if let outputs = candidates.first(where: {
                 $0.rawAttributes["KIND"] == "1"
@@ -239,7 +503,8 @@ public final class CxxSimulationCore {
                                hour: Int32(parts.hour ?? 0),
                                minute: Int32(parts.minute ?? 0),
                                second: Int32(parts.second ?? 0),
-                               dayOfWeek: Int32(DirigoEpoch.dayOfWeek(from: date)))
+                               dayOfWeek: Int32(DirigoEpoch.dayOfWeek(from: date)),
+                               unixSeconds: date.timeIntervalSince1970)
     }
 
     /// Milliseconds until the earliest thread is due.
@@ -250,27 +515,27 @@ public final class CxxSimulationCore {
 
     public func outValue(moduleId: Int, pin: Int) -> PinValue? {
         guard let index = indexByModuleId[moduleId] else { return nil }
-        return Self.pinValue(dirigo_sim_get_out(sim, index, Int32(pin)))
+        return Self.pinValue(dirigo_sim_get_out(sim, index, Int32(clamping: pin)))
     }
 
     public func inValue(moduleId: Int, pin: Int) -> PinValue? {
         guard let index = indexByModuleId[moduleId] else { return nil }
-        return Self.pinValue(dirigo_sim_get_in(sim, index, Int32(pin)))
+        return Self.pinValue(dirigo_sim_get_in(sim, index, Int32(clamping: pin)))
     }
 
     public func setIn(moduleId: Int, pin: Int, value: PinValue) {
         guard let index = indexByModuleId[moduleId] else { return }
-        dirigo_sim_set_in(sim, index, Int32(pin), Self.cValue(value))
+        dirigo_sim_set_in(sim, index, Int32(clamping: pin), Self.cValue(value))
     }
 
     public func setOut(moduleId: Int, pin: Int, value: PinValue) {
         guard let index = indexByModuleId[moduleId] else { return }
-        dirigo_sim_set_out(sim, index, Int32(pin), Self.cValue(value))
+        dirigo_sim_set_out(sim, index, Int32(clamping: pin), Self.cValue(value))
     }
 
     public func setParam(moduleId: Int, pin: Int, value: PinValue) {
         guard let index = indexByModuleId[moduleId] else { return }
-        dirigo_sim_set_param(sim, index, Int32(pin), Self.cValue(value))
+        dirigo_sim_set_param(sim, index, Int32(clamping: pin), Self.cValue(value))
     }
 
     // MARK: - Value translation

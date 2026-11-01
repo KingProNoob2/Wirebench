@@ -696,29 +696,29 @@ public struct CanvasView: View {
         ContentUnavailableView {
             Label("No Project Open", systemImage: "cpu")
         } description: {
-            Text("Open an existing .pcc project from disk, or create a new diagram to begin simulating.")
+            Text("Open a .pcc project, or start a new one.")
         } actions: {
-            HStack(spacing: 12) {
-                Button {
-                    model.openProjectFile()
-                } label: {
-                    Label("Open Project…", systemImage: "folder")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
+            HStack(spacing: 10) {
                 Button {
                     model.createNewProject()
                 } label: {
-                    Label("New Project", systemImage: "plus")
+                    Text("New Project").frame(minWidth: 110)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
+                Button {
+                    model.openProjectFile()
+                } label: {
+                    Text("Open…").frame(minWidth: 110)
+                }
+                .keyboardShortcut(.defaultAction)
             }
+            .controlSize(.extraLarge)
+            .padding(.top, 6)
         }
-        .padding(28)
-        .glassPanel(cornerRadius: 22)
-        .padding(40)
+        // Sized to its content, in a glass panel of its own, rather than spread over the whole canvas.
+        .fixedSize()
+        .padding(.horizontal, 36)
+        .padding(.vertical, 28)
+        .glassPanel(cornerRadius: 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -900,11 +900,9 @@ struct ZoomControlBar: View {
 
             Divider().frame(height: 14)
 
+            // 100% is in the percentage menu and on ⌘0, so it has no button of its own here.
             iconButton("arrow.up.left.and.arrow.down.right", help: "Zoom to Fit (⌘9)") {
                 model.zoomToFit()
-            }
-            iconButton("arrow.counterclockwise", help: "Reset to 100% (⌘0)") {
-                model.resetZoom()
             }
         }
         .padding(.horizontal, 6)
@@ -922,6 +920,7 @@ struct ZoomControlBar: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 

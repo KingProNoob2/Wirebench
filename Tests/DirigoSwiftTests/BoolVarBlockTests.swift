@@ -746,7 +746,7 @@ struct VariablesAndSetTests {
         project.modules = [variable, setter]
         project.inConnections = [wire]
 
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
         engine.step()
         #expect(engine.getNode(id: 2)?.block.outPins[0].asInt == 77,
                 "Set must overwrite the variable it is wired to")
@@ -764,7 +764,7 @@ struct VariablesAndSetTests {
         project.modules = [variable, setter]
         project.inConnections = [wire]
 
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
         let before = engine.getNode(id: 2)?.block.outPins[0].asInt
         engine.step()
         #expect(engine.getNode(id: 2)?.block.outPins[0].asInt == before, "En = 0 must not write")
@@ -1192,7 +1192,7 @@ struct D3NetTests {
 
     @Test("The buffer is cleared by an engine reset")
     func bufferIsPartOfThePlc() {
-        let engine = SimulationEngine(project: {
+        let engine = TestEngine(project: {
             var p = PCCProject(name: "d3net")
             p.pages = [ProjectPage(caption: "main")]
             return p
@@ -1303,7 +1303,7 @@ struct SetIdxTests {
             Connection(inModuleId: 4, inPinId: 4, outModuleId: 3, outPinId: 0),
         ]
 
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
         engine.step()
         #expect(engine.getNode(id: 3)?.block.outPins[0].asInt == 42, "Idx = 1 selects P1")
         #expect(engine.getNode(id: 2)?.block.outPins[0].asInt == 11, "P0 is untouched")

@@ -23,6 +23,57 @@ public struct BlockSnapshot: Equatable, Sendable {
     public init() {}
 }
 
+/// A module's live pins, read out of the core: what `getNode` returns.
+///
+/// A value, not a live block. Nothing writes through it — every edit goes through the model (`setModuleInput`,
+/// `updateModuleParam`, ...), which writes the core — so a caller cannot change a pin the simulation never sees.
+public struct RuntimePins: Equatable, Sendable {
+    public var inPins: [PinValue]
+    public var paramPins: [PinValue]
+    public var outPins: [PinValue]
+}
+
+public struct RuntimeNode: Sendable {
+    public let module: PCCModule
+    public let block: RuntimePins
+}
+
+/// What kind of block a module is, from its type GUID — the question views used to answer by casting the
+/// Swift block object (`node.block is IntVarBlock`).
+public enum BlockRole {
+    /// A `BoolVar`'s mode, as the registry builds it: `SimulMode`, or a push button by default.
+    public static func boolVarMode(of module: PCCModule) -> BoolVarBlock.Mode? {
+        guard module.guid == BoolVarBlock.guid else { return nil }
+        let raw = module.simulMode ?? (module.rawAttributes["SimulMode"].flatMap { Int($0) } ?? 2)
+        return BoolVarBlock.Mode(rawValue: raw) ?? (raw == 1 ? .toggleSwitch : .pushButton)
+    }
+
+    /// The Delphi class of the module's type, which is how the core tells blocks apart.
+    public static func delphiClass(of module: PCCModule) -> String? {
+        BlockTypeCatalog.info(forGuid: module.guid)?.delphiClass
+    }
+
+    public static func isIntVariable(_ module: PCCModule) -> Bool {
+        ["TMIntVar", "TMLongVar"].contains(delphiClass(of: module) ?? "")
+    }
+
+    public static func isFloatVariable(_ module: PCCModule) -> Bool { delphiClass(of: module) == "TMFloatVar" }
+
+    /// Blocks whose *outputs* a person drives by clicking: the macro `Inputs` interface and `8xDI`.
+    public static func hasClickableOutputs(_ module: PCCModule) -> Bool {
+        if module.guid == EightDIBlock.guid { return true }
+        guard module.guid == InputsBlock.guid else { return false }
+        return (module.rawAttributes["KIND"] ?? "0") != "1" && !module.name.lowercased().hasPrefix("output")
+    }
+
+    /// A seven-segment display's lit segments, from its pins (`SegmentBlock.segmentsState`).
+    public static func segments(of module: PCCModule, inPins: [PinValue]) -> [Bool] {
+        guard module.guid == SegmentBlock.guid else { return [] }
+        guard inPins.count >= 9, inPins[0].asBool else { return Array(repeating: false, count: 8) }
+        return (1...8).map { inPins[$0].asBool }
+    }
+}
+
 @Observable
 public final class AppModel: @unchecked Sendable {
     public var project: PCCProject? {
@@ -113,9 +164,13 @@ public final class AppModel: @unchecked Sendable {
     /// The running play loop, cancelled and replaced by `play()`/`pause()`.
     private var simulationTimerTask: Task<Void, Never>?
 
-    /// The runtime the canvas draws its values from. Rebuilt on any structural change, which is why
-    /// `play()` re-reads it every iteration instead of capturing it.
-    private var engine: SimulationEngine?
+    /// The simulation: the C++ core, which owns every pin value the canvas, the inspector and the
+    /// dialogs show. Rebuilt on any structural change, which is why `play()` re-reads it every iteration
+    /// instead of capturing it.
+    private var engine: CxxSimulationCore?
+
+    /// The push buttons currently held down, so a release only clears the button a press set.
+    private var heldButtons: Set<Int> = []
 
     // MARK: - Hardware link
 
@@ -375,10 +430,10 @@ public final class AppModel: @unchecked Sendable {
         }
         // The cheap question first. Measured on `had+1block.pcc` the snapshot data changes on 2 ticks out
         // of 460, so this returns before allocating the dictionary, the per-module snapshots and the
-        // comparison on 99.6% of ticks. `pinsDigest` is faithful (see `SimulationEngine`), and the
-        // comparison below still runs whenever it does not match, so a digest that under-reported could
-        // only cost a frame — never a stale value on the canvas.
-        let previousDigest = engine?.pinsDigest()
+        // comparison on 99.6% of ticks. `pinsDigest` is faithful, and the comparison below still runs
+        // whenever it does not match, so a digest that under-reported could only cost a frame — never a
+        // stale value on the canvas.
+        let previousDigest = pinsDigest()
         if !snapshots.isEmpty, let previousDigest, previousDigest == publishedPinDigest {
             return false
         }
@@ -391,8 +446,8 @@ public final class AppModel: @unchecked Sendable {
             snapshot.inValues = node.block.inPins
             snapshot.paramValues = node.block.paramPins
             snapshot.outValues = node.block.outPins
-            snapshot.segments = (node.block as? SegmentBlock)?.segmentsState ?? []
-            snapshot.boolVarMode = (node.block as? BoolVarBlock)?.mode
+            snapshot.segments = BlockRole.segments(of: module, inPins: node.block.inPins)
+            snapshot.boolVarMode = BlockRole.boolVarMode(of: module)
             next[module.id] = snapshot
         }
         guard next != snapshots else {
@@ -408,7 +463,7 @@ public final class AppModel: @unchecked Sendable {
         return true
     }
 
-    /// The engine digest the published `snapshots` correspond to. See `refreshSnapshots`.
+    /// The digest the published `snapshots` correspond to. See `refreshSnapshots`.
     private var publishedPinDigest: UInt64?
 
     /// How many times `refreshSnapshots` has actually built a new snapshot dictionary.
@@ -420,27 +475,31 @@ public final class AppModel: @unchecked Sendable {
     /// outside. This counter is how the tests observe the difference.
     public private(set) var snapshotRebuildCount = 0
 
-    /// Digests the values the published `snapshots` were built from.
+    /// Digests the values the published `snapshots` are built from: every pin in the core, plus each
+    /// `BoolVar`'s mode — the one thing a snapshot carries that the pins do not imply, which decides how
+    /// the control draws.
     ///
-    /// A published surface for two reasons, both about testability rather than the app: the "did anything
-    /// change?" shortcut in `refreshSnapshots` is only safe while the digest is faithful, and a test
-    /// cannot observe a private engine. `pinsDigest()` reads the same pin values that
-    /// `refreshSnapshots()` copies, so a test may compare the two.
-    public func pinsDigest() -> UInt64? { engine?.pinsDigest() }
+    /// Published because the "did anything change?" shortcut in `refreshSnapshots` is only safe while the
+    /// digest is faithful, and a test can only check that from outside.
+    public func pinsDigest() -> UInt64? {
+        guard let engine else { return nil }
+        var digest = engine.pinsDigest()
+        for module in project?.modules ?? [] {
+            guard let mode = BlockRole.boolVarMode(of: module) else { continue }
+            digest = (digest ^ UInt64(bitPattern: Int64(module.id &* 31 &+ mode.rawValue))) &* 0x0000_0100_0000_01b3
+        }
+        return digest
+    }
 
-    // MARK: - The C++ core
+    // MARK: - The simulation core
 
-    /// The C++ simulation core, when the project is one it can run completely.
-    ///
-    /// A project with a single unported block cannot run here: one inert module stops the wires it
-    /// carries, which would make the *ported* blocks look wrong too. So the Swift engine stays the
-    /// engine of record, and this takes over only for projects the core covers entirely — and then the
-    /// pins are mirrored back into the Swift blocks after every step, because the canvas, the inspector
-    /// and the segment displays all read *those*.
-    private var cxxCore: CxxSimulationCore?
+    /// Whether the project is simulated by the C++ core — always, once a project is loaded. Kept for the
+    /// tests and the UI that asked while there was a Swift engine beside it.
+    public var isUsingCxxCore: Bool { engine != nil }
 
-    /// Whether the running project is being simulated by the C++ core. Surfaced for the UI and tests.
-    public private(set) var isUsingCxxCore = false
+    /// The wall clock a step is stamped with. A property, not a `Date()` call, so a test can pin the
+    /// instant a time-dependent block (`DateTime`) reads.
+    public var now: () -> Date = { Date() }
 
     /// Whether the app is frontmost.
     ///
@@ -467,55 +526,12 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
-    private func makeCxxCore(project: PCCProject) -> CxxSimulationCore? {
-        guard CxxSimulationCore.isFullyPorted(project) else { return nil }
-        return CxxSimulationCore(project: project)
-    }
-
-    /// Pushes every block's inputs and parameters into the core, so an edit made in the UI reaches it
-    /// without every mutation site having to remember to tell it.
-    private func syncPinsIntoCore() {
-        guard let core = cxxCore, let project else { return }
-        for module in project.modules {
-            guard let node = getNode(id: module.id) else { continue }
-            for pin in 0..<node.block.inPins.count { core.setIn(moduleId: module.id, pin: pin, value: node.block.inPins[pin]) }
-            for pin in 0..<node.block.paramPins.count { core.setParam(moduleId: module.id, pin: pin, value: node.block.paramPins[pin]) }
-            // An output written by hand — a `BoolVar`'s switch, an `8xDI` channel — is an input to the
-            // core in practice, so it is pushed before the step rather than overwritten by it.
-            for pin in 0..<node.block.outPins.count where node.block is BoolVarBlock || node.block is EightDIBlock {
-                core.setOut(moduleId: module.id, pin: pin, value: node.block.outPins[pin])
-            }
-        }
-    }
-
-    /// Pulls the core's pins back into the blocks the views read.
-    private func syncPinsFromCore() {
-        guard let core = cxxCore, let project else { return }
-        for module in project.modules {
-            guard let node = getNode(id: module.id) else { continue }
-            for pin in 0..<node.block.inPins.count {
-                if let value = core.inValue(moduleId: module.id, pin: pin) { node.block.inPins[pin] = value }
-            }
-            for pin in 0..<node.block.outPins.count {
-                if let value = core.outValue(moduleId: module.id, pin: pin) { node.block.outPins[pin] = value }
-            }
-        }
-    }
-
-    /// One cycle, on whichever engine is running the project. Reports whether anything ran.
+    /// One cycle. Reports whether a thread ran.
     @discardableResult
     private func stepBackend(deltaMs: Double) -> Bool {
-        guard let core = cxxCore else {
-            engine?.step(deltaMs: deltaMs)
-            return true
-        }
-        syncPinsIntoCore()
-        // One instant for both engines. The Swift engine's clock is `SimulationEngine.now`, which a test
-        // can pin; reading it here rather than calling `Date()` again is what makes a `TMDateTime` pin
-        // agree between the two backends.
-        let ran = core.step(deltaMs: deltaMs, now: engine?.now() ?? Date())
-        if ran { syncPinsFromCore() }
-        tickCount = core.tickCount
+        guard let engine else { return false }
+        let ran = engine.step(deltaMs: deltaMs, now: now())
+        tickCount = engine.tickCount
         return ran
     }
 
@@ -1124,7 +1140,10 @@ public final class AppModel: @unchecked Sendable {
 
     public func step() {
         guard engine != nil else { return }
-        stepBackend(deltaMs: max(1, cxxCore == nil ? engine!.cycleDelayMs : Double(max(1, project?.appOptions.cycleDelay ?? 1))))
+        // One step is one execution: simulated time advances to the next thread that runs. A fixed project
+        // cycle would usually reach no thread at all once threads keep their profile periods (a second, say).
+        let cycle = Double(max(1, project?.appOptions.cycleDelay ?? 1))
+        stepBackend(deltaMs: max(cycle, engine?.msUntilNextRun() ?? 0))
         simulationDidChange()
     }
 
@@ -1132,8 +1151,10 @@ public final class AppModel: @unchecked Sendable {
         simulationTimerTask?.cancel()
         simulationTimerTask = nil
         isPlaying = false
-        engine?.reset()
-        cxxCore?.reset()
+        // Rebuilt from the document, not wound back block by block: every pin returns to the value the
+        // file gives it, and the PLC's array area is cleared.
+        if let project { engine = installEngine(project: project) }
+        heldButtons = []
         tickCount = 0
         simulationDidChange()
     }
@@ -1175,7 +1196,7 @@ public final class AppModel: @unchecked Sendable {
                 // Simulated time since the last step, and whether it reaches a thread. Calling `step` anyway would
                 // count a tick and wake the UI every few milliseconds whatever the speed, with no thread running.
                 let simulatedMs = elapsedMs * self.effectiveSpeed
-                let untilRun = self.cxxCore?.msUntilNextRun() ?? engine.msUntilNextRun()
+                let untilRun = engine.msUntilNextRun()
                 let ran = untilRun <= simulatedMs + 1e-9
                     ? stepBackend(deltaMs: simulatedMs)
                     : false
@@ -1186,7 +1207,7 @@ public final class AppModel: @unchecked Sendable {
                     updatePending = false
                 }
                 if ran {
-                    self.tickCount = self.cxxCore?.tickCount ?? engine.tickCount
+                    self.tickCount = engine.tickCount
                     // Throttle UI property invalidations to ~30-40 Hz maximum to keep UI at solid 60fps
                     // without choking — but never *drop* one. Dropping is what a rare step cannot afford:
                     // a thread that runs once a second would have its single update swallowed by the
@@ -1207,7 +1228,7 @@ public final class AppModel: @unchecked Sendable {
                 // Sleep until the next thread is due — in wall-clock time, so a slowed simulation waits longer —
                 // never less than 2 ms and never longer than a second. A pending update caps the wait
                 // instead, so it is delivered within one frame rather than one thread period.
-                let untilRunNow = self.cxxCore?.msUntilNextRun() ?? engine.msUntilNextRun()
+                let untilRunNow = engine.msUntilNextRun()
                 let sinceStep = Double((ContinuousClock.now - lastStepTime).components.seconds) * 1000
                     + Double((ContinuousClock.now - lastStepTime).components.attoseconds) / 1e15
                 let remainingSimMs = max(0, untilRunNow - sinceStep * self.effectiveSpeed)
@@ -1232,33 +1253,25 @@ public final class AppModel: @unchecked Sendable {
     /// Builds the runtime with the project's profile, so scheduling follows the hardware rather than a
     /// fixed cadence. Falls back to the project's `CYCLE_DELAY` when no profile matches, which is the
     /// same period for every thread.
-    /// Installs both backends for a project: the Swift engine, which owns the block objects the whole
-    /// UI reads, and — when the project is one it covers completely — the C++ core that actually steps.
-    private func installEngine(project: PCCProject) -> SimulationEngine {
+    private func installEngine(project: PCCProject) -> CxxSimulationCore {
         let profile = Self.profileDatabase.flatMap { ProfileRegistry.profile(for: project, in: $0) }
-        cxxCore = makeCxxCore(project: project)
-        isUsingCxxCore = cxxCore != nil
-        return SimulationEngine(project: project, profile: profile, scheduling: .profileIntervals)
+        return CxxSimulationCore(project: project, profile: profile, profileScheduling: true)
     }
 
-    public func getNode(id: Int) -> SimulationEngine.RuntimeNode? {
-        engine?.getNode(id: id)
+    /// A module's live pins, read out of the core.
+    public func getNode(id: Int) -> RuntimeNode? {
+        guard let engine, engine.contains(moduleId: id),
+              let module = engine.runtimeModules.first(where: { $0.id == id }) else { return nil }
+        return RuntimeNode(module: module, block: RuntimePins(inPins: engine.inPins(moduleId: id),
+                                                              paramPins: engine.paramPins(moduleId: id),
+                                                              outPins: engine.outPins(moduleId: id)))
     }
 
-    /// Swaps in a differently-shaped instance of the same block type, copying across every pin
-    /// value the two shapes have in common (En, switch selector, operands, parameters).
-    private func replaceBlock(id: Int, with newBlock: FunctionBlock) {
-        guard let node = getNode(id: id) else { return }
-        for (index, value) in node.block.inPins.enumerated() where index < newBlock.inPins.count {
-            newBlock.inPins[index] = value
-        }
-        for (index, value) in node.block.paramPins.enumerated() where index < newBlock.paramPins.count {
-            newBlock.paramPins[index] = value
-        }
-        for (index, value) in node.block.outPins.enumerated() where index < newBlock.outPins.count {
-            newBlock.outPins[index] = value
-        }
-        engine?.updateBlock(for: id, newBlock: newBlock)
+    /// Rebuilds the core after a block changed shape (an input or output count), carrying every pin value
+    /// the document gives across — the same as any other structural edit.
+    private func rebuildAfterShapeChange() {
+        if let project { engine = installEngine(project: project) }
+        simulationDidChange()
     }
 
     /// Moves a module. The workspace is unbounded — Dirigo's fixed A3 sheet is only a *reference*
@@ -1319,9 +1332,9 @@ public final class AppModel: @unchecked Sendable {
         guard let idx = project?.modules.firstIndex(where: { $0.id == id }) else { return }
         project?.modules[idx].simulMode = mode.rawValue
         project?.modules[idx].rawAttributes["SimulMode"] = "\(mode.rawValue)"
-        if let node = getNode(id: id), let boolVar = node.block as? BoolVarBlock {
-            boolVar.mode = mode
-        }
+        // The mode is the module's, read from the document whenever the button is pressed; the core only
+        // runs out pulses, so it has nothing to update.
+        heldButtons.remove(id)
         self.isDocumentEdited = true
         simulationDidChange()
     }
@@ -1351,42 +1364,42 @@ public final class AppModel: @unchecked Sendable {
         if pinIndex < (project?.modules[idx].inPins.count ?? 0) {
             project?.modules[idx].inPins[pinIndex].value = value
         }
-        if let node = getNode(id: moduleId), pinIndex < node.block.inPins.count {
-            node.block.inPins[pinIndex] = value
-        }
+        engine?.setIn(moduleId: moduleId, pin: pinIndex, value: value)
         isDocumentEdited = true
         refreshAfterPinEdit()
     }
 
     /// The same for an **output** pin a person drives directly: a `BoolVar`'s switch, an `8xDI` channel.
+    /// Writing an output clears any pulse still running on it, as `BoolVarBlock.setOutput` does.
     public func setModuleOutput(moduleId: Int, pinIndex: Int, value: PinValue) {
-        guard pinIndex >= 0, let node = getNode(id: moduleId),
-              pinIndex < node.block.outPins.count else { return }
-        node.block.outPins[pinIndex] = value
-        if let boolVar = node.block as? BoolVarBlock {
-            boolVar.setOutput(value.asBool)
-        }
+        guard pinIndex >= 0, let node = getNode(id: moduleId), pinIndex < node.block.outPins.count else { return }
+        engine?.setOut(moduleId: moduleId, pin: pinIndex, value: value)
         refreshAfterPinEdit()
     }
 
-    /// Sets a variable block's value by hand (`IntVar`). The value is the block's state, so it is written
-    /// through `WritableVariable` — and into the C++ core's copy when that is running the project — rather than
-    /// onto the output pin, which the variable would overwrite from its stored value on its next pass.
+    /// Sets a variable block's value by hand (`IntVar`). The value is the block's state, so the core writes
+    /// it into the variable itself, not only onto the output pin the variable would overwrite on its next pass.
     public func setVariableValue(moduleId: Int, value: Int) {
-        guard let node = getNode(id: moduleId), let variable = node.block as? WritableVariable else { return }
-        let stored = PinValue.int32(Int32(truncatingIfNeeded: value))
-        variable.writeVariable(stored)
-        cxxCore?.setOut(moduleId: moduleId, pin: 0, value: stored)
+        guard let module = module(id: moduleId), BlockRole.isIntVariable(module) else { return }
+        engine?.setOut(moduleId: moduleId, pin: 0, value: .int32(Int32(truncatingIfNeeded: value)))
         refreshAfterPinEdit()
     }
 
-    /// Re-propagates and, when the simulation is not running, takes one step so an edit shows up now.
+    /// The same for a `FloatVar`.
+    public func setFloatVariableValue(moduleId: Int, value: Float) {
+        guard let module = module(id: moduleId), BlockRole.isFloatVariable(module) else { return }
+        engine?.setOut(moduleId: moduleId, pin: 0, value: .float(value))
+        refreshAfterPinEdit()
+    }
+
+    /// Re-propagates and, when the simulation is not running, evaluates every thread once so an edit shows up
+    /// now. A plain step would not: with the profile's periods, the edited block's thread may not be due for
+    /// another second.
     private func refreshAfterPinEdit() {
-        engine?.propagateWires()
-        if isPlaying {
-            syncPinsIntoCore()
-        } else {
-            stepBackend(deltaMs: Double(max(1, project?.appOptions.cycleDelay ?? 1)))
+        engine?.propagate()
+        if !isPlaying, let engine {
+            engine.evaluateNow(now: now())
+            tickCount = engine.tickCount
         }
         simulationDidChange()
     }
@@ -1416,12 +1429,23 @@ public final class AppModel: @unchecked Sendable {
         if paramIndex < (project?.modules[idx].paramPins.count ?? 0) {
             project?.modules[idx].paramPins[paramIndex].value = value
         }
-        if let node = getNode(id: id), paramIndex < node.block.paramPins.count {
-            node.block.paramPins[paramIndex] = value
-        }
+        engine?.setParam(moduleId: id, pin: paramIndex, value: value)
         self.isDocumentEdited = true
         // Through the same path as every other edit: what reads the parameter is recomputed now, not at the next tick.
         refreshAfterPinEdit()
+    }
+
+    /// Passes a module's attribute-driven configuration (a timer's `MODE`) to the running core.
+    public func reconfigureModule(id: Int) {
+        if let module = module(id: id) { engine?.reconfigure(module: module) }
+        simulationDidChange()
+    }
+
+    /// One block's own reset — its state and outputs, keeping its inputs — as the inspector's Reset asks.
+    public func resetModuleState(id: Int) {
+        engine?.resetModule(moduleId: id)
+        heldButtons.remove(id)
+        simulationDidChange()
     }
 
     public func updatePulseGenTiming(id: Int, tOn: Int, tOff: Int) {
@@ -1651,7 +1675,7 @@ public final class AppModel: @unchecked Sendable {
 
     /// Module ids on a thread, in the order the runtime will execute them.
     public func executionOrder(forThread threadId: Int) -> [Int] {
-        (engine?.executionSchedule[threadId] ?? []).map(\.module.id)
+        engine?.executionOrder(forThread: threadId) ?? []
     }
 
     /// The module whose name is being edited on the canvas, if any.
@@ -1679,7 +1703,7 @@ public final class AppModel: @unchecked Sendable {
 
     /// Moves a module to another thread.
     ///
-    /// The runtime files every module under its thread (`executionSchedule[tid]`), so this has to
+    /// The runtime files every module under its thread, so this has to
     /// rebuild it — a plain field write would leave the block running on its old thread until some
     /// other edit happened to rebuild.
     public func updateModuleThread(id: Int, threadId: Int) {
@@ -1736,9 +1760,7 @@ public final class AppModel: @unchecked Sendable {
         let priVal = higherPriorityS ? "S" : "R"
         project?.modules[idx].rawAttributes["PRIORITY"] = priVal
         project?.modules[idx].rawAttributes["RS_PRIORITY"] = priVal
-        if let node = getNode(id: id), let rs = node.block as? RSBlock {
-            rs.resetPriority = !higherPriorityS
-        }
+        if let module = project?.modules[idx] { engine?.reconfigure(module: module) }
         self.isDocumentEdited = true
         simulationDidChange()
     }
@@ -1764,19 +1786,8 @@ public final class AppModel: @unchecked Sendable {
             }
         }
         
-        // Update the live runtime block, carrying the current pin values over so that changing
-        // the input count does not reset a running simulation.
-        if let node = getNode(id: id) {
-            if node.block is ISwitchBlock {
-                replaceBlock(id: id, with: ISwitchBlock(inputCount: count))
-            } else if node.block is AndBlock {
-                replaceBlock(id: id, with: AndBlock(inputCount: count))
-            } else if node.block is OrBlock {
-                replaceBlock(id: id, with: OrBlock(inputCount: count))
-            }
-        }
         self.isDocumentEdited = true
-        simulationDidChange()
+        rebuildAfterShapeChange()
     }
 
     public func updateModuleOutputCount(id: Int, count: Int) {
@@ -1794,15 +1805,8 @@ public final class AppModel: @unchecked Sendable {
             }
         }
         
-        if let node = getNode(id: id) {
-            if node.block is Int2BitsBlock {
-                engine?.updateBlock(for: id, newBlock: Int2BitsBlock(bitCount: count))
-            } else if node.block is IntDemuxBlock {
-                engine?.updateBlock(for: id, newBlock: IntDemuxBlock(outputCount: count))
-            }
-        }
         self.isDocumentEdited = true
-        simulationDidChange()
+        rebuildAfterShapeChange()
     }
 
     public func update8xDIMask(id: Int, maskHex: String, showWord: Bool) {
@@ -1857,23 +1861,24 @@ public final class AppModel: @unchecked Sendable {
         project?.modules[idx].inPins = newPins
         project?.modules[idx].rawAttributes["PIN_COUNT"] = "\(pinCount)"
         project?.modules[idx].rawAttributes["HIDDEN_PIN_MASK"] = hiddenMaskHex
-        if getNode(id: id) != nil {
-            replaceBlock(id: id, with: EightDOBlock(pinCount: newPins.count))
-        }
         self.isDocumentEdited = true
-        simulationDidChange()
+        rebuildAfterShapeChange()
     }
 
     public func toggleModuleInput(moduleId: Int, pinIndex: Int) {
-        // A negative index used to reach `inPins[pinIndex]` below and trap; the `togglePin` helpers it
-        // delegates to check both ends, this method did not.
+        // A negative index used to reach `inPins[pinIndex]` below and trap.
         guard pinIndex >= 0, let node = getNode(id: moduleId) else { return }
-        if let boolVar = node.block as? BoolVarBlock {
-            boolVar.trigger()
-        } else if let inputs = node.block as? InputsBlock {
-            inputs.togglePin(pinIndex)
-        } else if let eightDI = node.block as? EightDIBlock {
-            eightDI.togglePin(pinIndex)
+        if let mode = BlockRole.boolVarMode(of: node.module) {
+            // `BoolVarBlock.trigger`: a push button gives a two-cycle pulse, a switch flips.
+            if mode == .pushButton {
+                engine?.pulseOut(moduleId: moduleId, pin: 0, cycles: 2)
+            } else {
+                engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(!(node.block.outPins.first?.asBool ?? false)))
+            }
+        } else if BlockRole.hasClickableOutputs(node.module) {
+            // The macro `Inputs` interface and `8xDI` are driven on their outputs.
+            guard pinIndex < node.block.outPins.count else { return }
+            engine?.setOut(moduleId: moduleId, pin: pinIndex, value: .bool(!node.block.outPins[pinIndex].asBool))
         } else if pinIndex < node.block.inPins.count {
             // A click clears a set pin and sets a clear one, keeping the value's *kind* so a switch's
             // `X3 = 8` becomes `0` — and the next click brings the `8` back, not a `1`.
@@ -1884,16 +1889,9 @@ public final class AppModel: @unchecked Sendable {
             if current.asBool { clearedPinValues[key] = current }
             return
         } else if pinIndex < node.block.outPins.count {
-            let current = node.block.outPins[pinIndex].asBool
-            node.block.outPins[pinIndex] = .bool(!current)
+            engine?.setOut(moduleId: moduleId, pin: pinIndex, value: .bool(!node.block.outPins[pinIndex].asBool))
         }
-        engine?.propagateWires()
-
-        if !isPlaying {
-            engine?.step()
-            self.tickCount = engine?.tickCount ?? (self.tickCount &+ 1)
-        }
-        simulationDidChange()
+        refreshAfterPinEdit()
     }
 
     /// Reports a momentary control being held down or let go.
@@ -1902,19 +1900,30 @@ public final class AppModel: @unchecked Sendable {
     /// the press, which a single call cannot express.
     public func setModuleInputPressed(moduleId: Int, pinIndex: Int, isPressed: Bool) {
         guard let node = getNode(id: moduleId) else { return }
-        if let boolVar = node.block as? BoolVarBlock {
-            if isPressed { boolVar.press() } else { boolVar.release() }
+        if let mode = BlockRole.boolVarMode(of: node.module) {
+            // `BoolVarBlock.press` / `release`: a held push button is high for as long as it is held; a
+            // switch flips on the press and ignores the release.
+            if mode == .pushButton {
+                if isPressed {
+                    heldButtons.insert(moduleId)
+                    engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(true))
+                } else {
+                    guard heldButtons.remove(moduleId) != nil else { return }
+                    engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(false))
+                }
+            } else if isPressed {
+                engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(!(node.block.outPins.first?.asBool ?? false)))
+            } else {
+                return
+            }
         } else if isPressed {
             // Everything else is a latch, so a press is the whole interaction.
             toggleModuleInput(moduleId: moduleId, pinIndex: pinIndex)
             return
+        } else {
+            return
         }
-        engine?.propagateWires()
-        if !isPlaying {
-            engine?.step()
-            self.tickCount = engine?.tickCount ?? (self.tickCount &+ 1)
-        }
-        simulationDidChange()
+        refreshAfterPinEdit()
     }
 
     public func connectHardware() {

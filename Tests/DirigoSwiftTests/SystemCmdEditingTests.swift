@@ -38,8 +38,9 @@ struct SystemCmdEditingTests {
         #expect(schema.paramPins.map(\.shortcut) == [pwm.input1.isHidden ? "I1" : pwm.input1.name, pwm.input2.isHidden ? "I2" : pwm.input2.name])
         #expect(schema.outPins.map(\.shortcut) == [pwm.output.name])
         #expect(model.systemCommand(of: module)?.command == pwm.command)
-        let block = try #require(model.getNode(id: id)?.block as? SystemCmdBlock)
-        #expect(block.definition?.command == pwm.command, "the simulator runs the chosen variant")
+        // The simulator runs the chosen variant: its command word is what the core holds on `Cmd`.
+        let pins = try #require(model.getNode(id: id)?.block)
+        #expect(pins.inPins[1].asInt == Int(pwm.command), "the simulator runs the chosen variant")
 
         model.setSystemCommand(moduleId: id, to: nil)
         #expect(model.module(id: id)?.rawAttributes["DEFINITION"] == nil)
@@ -66,6 +67,6 @@ extension SystemCmdEditingTests {
         model.updateModuleParam(id: id, paramIndex: 0, value: .int32(5))
         #expect(model.module(id: id)?.paramPins[0].value.asInt == 5)
         for _ in 0..<5 { model.step() }
-        #expect((model.getNode(id: id)?.block as? SystemCmdBlock)?.paramPins[0].asInt == 5, "it survives the simulation steps")
+        #expect(model.getNode(id: id)?.block.paramPins[0].asInt == 5, "it survives the simulation steps")
     }
 }

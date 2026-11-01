@@ -118,7 +118,7 @@ struct DirigoCLI {
             let project = try parser.parse(fileAt: url)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
-            print("\n✅ Successfully parsed: \(url.lastPathComponent) in \(String(format: "%.2f", elapsed)) ms")
+            print("\n Successfully parsed: \(url.lastPathComponent) in \(String(format: "%.2f", elapsed)) ms")
             print("-------------------------------------------------------------------")
             print("  Application     : \(project.application) \(project.applicationVersion)")
             print("  Profile         : \(project.profile)")
@@ -133,7 +133,7 @@ struct DirigoCLI {
             print("\nModules by Page:")
             let pages = Dictionary(grouping: project.modules, by: { $0.page })
             for (page, mods) in pages.sorted(by: { $0.key < $1.key }) {
-                print("  📄 Page [\(page)] (\(mods.count) modules):")
+                print("   Page [\(page)] (\(mods.count) modules):")
                 for m in mods.prefix(8) {
                     print("     - ID \(m.id): \(m.name) (Thread: \(m.threadId), Order: \(m.order))")
                 }
@@ -142,7 +142,7 @@ struct DirigoCLI {
                 }
             }
         } catch {
-            print("❌ Failed to parse project: \(error)")
+            print(" Failed to parse project: \(error)")
         }
     }
 
@@ -154,49 +154,52 @@ struct DirigoCLI {
 
             let database = useProfileScheduling ? ProfileRegistry.load() : nil
             let profile = database.flatMap { ProfileRegistry.profile(for: project, in: $0) }
-            let scheduling: SimulationEngine.ThreadScheduling = useProfileScheduling ? .profileIntervals : .everyTick
             if useProfileScheduling, profile == nil {
                 print("Warning: Profiles.ini not found; falling back to every-tick scheduling")
             }
-            let engine = SimulationEngine(project: project, profile: profile, scheduling: scheduling)
+            // Without `--profile-scheduling` every thread runs on every tick; with it, each thread keeps its
+            // profile period and a tick advances the clock by the project's cycle.
+            let engine = CxxSimulationCore(project: project, profile: profile,
+                                           profileScheduling: useProfileScheduling && profile != nil)
+            let cycle = Double(max(1, project.appOptions.cycleDelay))
 
             if let profile, useProfileScheduling {
                 print("Profile '\(profile.name)': "
                       + profile.threads.map { "\($0.name)=\($0.intervalMs)ms" }.joined(separator: ", "))
             }
 
-            let unresolved = engine.unresolvedBlocks()
+            let unresolved = project.modules.filter { CxxSimulationCore.kind(forGUID: $0.guid) == nil }
             if !unresolved.isEmpty {
                 print("\nNote: \(unresolved.count) module(s) have no implementation and run inert:")
-                print("  " + unresolved.map(\.module.name).sorted().joined(separator: ", "))
+                print("  " + unresolved.map(\.name).sorted().joined(separator: ", "))
             }
 
             print("\n🚀 Starting simulation benchmark for \(ticks) ticks on '\(url.lastPathComponent)'...")
             let start = CFAbsoluteTimeGetCurrent()
-            engine.run(ticks: ticks)
+            let now = Date()
+            for _ in 0..<ticks { engine.step(deltaMs: cycle, now: now) }
             let elapsed = CFAbsoluteTimeGetCurrent() - start
             let ticksPerSec = Double(ticks) / elapsed
 
-            print("✅ Completed \(ticks) ticks in \(String(format: "%.4f", elapsed)) seconds")
-            print("⚡ Performance: \(String(format: "%.0f", ticksPerSec)) ticks/sec (\(String(format: "%.3f", (elapsed / Double(ticks)) * 1000)) ms/tick)")
+            print(" Completed \(ticks) ticks in \(String(format: "%.4f", elapsed)) seconds")
+            print(" Performance: \(String(format: "%.0f", ticksPerSec)) ticks/sec (\(String(format: "%.3f", (elapsed / Double(ticks)) * 1000)) ms/tick)")
 
-            if scheduling == .profileIntervals {
-                print("\nThread executions:")
-                for (tid, count) in engine.threadRunCounts.sorted(by: { $0.key < $1.key }) {
-                    let name = profile?.thread(id: tid)?.name ?? "(undefined thread \(tid))"
-                    print("  T\(tid) \(name): \(count) run(s), interval \(Int(engine.intervalMs(forThread: tid))) ms")
+            if let profile, useProfileScheduling {
+                print("\nThread periods:")
+                for tid in Set(project.modules.map(\.threadId)).sorted() {
+                    let thread = profile.thread(id: tid)
+                    let period = thread.map { "\($0.intervalMs) ms" } ?? "the project cycle (\(Int(cycle)) ms)"
+                    print("  T\(tid) \(thread?.name ?? "(undefined thread \(tid))"): \(period)")
                 }
             }
 
             print("\nSample Module States after simulation:")
-            for m in project.modules.prefix(10) {
-                if let node = engine.getNode(id: m.id) {
-                    let outs = node.block.outPins.map { "\($0)" }.joined(separator: ", ")
-                    print("  - \(m.name) (ID \(m.id)): Outputs = [\(outs)]")
-                }
+            for m in project.modules.prefix(10) where engine.contains(moduleId: m.id) {
+                let outs = engine.outPins(moduleId: m.id).map { "\($0)" }.joined(separator: ", ")
+                print("  - \(m.name) (ID \(m.id)): Outputs = [\(outs)]")
             }
         } catch {
-            print("❌ Simulation error: \(error)")
+            print(" Simulation error: \(error)")
         }
     }
 

@@ -56,6 +56,7 @@ typedef enum {
     DIRIGO_BLOCK_COMPARATOR = 8,
     DIRIGO_BLOCK_INT2BITS = 9,
     DIRIGO_BLOCK_SYSTEMCMD = 10,
+    /// `ISwitch`, `LSwitch` and `FSwitch`; `variant` is 1 for the Float form, whose cleared output is a float.
     DIRIGO_BLOCK_SWITCH = 11,
     /// A block with no behaviour of its own: the I/O channels and the displays. Ported in the sense
     /// that the core is complete for it — its pins are the interface, and whoever drives them does the
@@ -96,6 +97,7 @@ typedef enum {
     /// the corpus needs — measured from the projects, not from the module documentation.
     DIRIGO_BLOCK_BITS2INT = 18,
     /// `TMRS`: a set/reset latch that **holds its state**, so it has a field rather than reading a pin.
+    /// `variant` is 1 for set priority (the module's `PRIORITY` or `RS_PRIORITY` is `S`), 0 for reset priority.
     DIRIGO_BLOCK_RS = 19,
     /// `TMIntVar`: "performs no operation; it only allocates space for a variable of type Int". Its
     /// value lives in a field, and `Set`/`SetIdx` write it through — see `writeThroughConnection`.
@@ -103,8 +105,90 @@ typedef enum {
     /// `TMDiv`: quotient and remainder, with a guard for `B = 0`.
     DIRIGO_BLOCK_DIV = 21,
     /// `TMIntSub`: `Y = A - B`.
-    DIRIGO_BLOCK_INTSUB = 22
+    DIRIGO_BLOCK_INTSUB = 22,
+
+    /* Integer, bit and conversion blocks. Each mirrors the Swift class named beside it; where one Swift
+       class backs several Dirigo types, the type is told apart by `DirigoModuleDesc.variant`. */
+    DIRIGO_BLOCK_YES = 23,           /* YesBlock */
+    DIRIGO_BLOCK_SHL = 24,           /* ShlBlock */
+    DIRIGO_BLOCK_SAR = 25,           /* SarBlock */
+    DIRIGO_BLOCK_EXT = 26,           /* ExtBlock */
+    DIRIGO_BLOCK_INS = 27,           /* InsBlock */
+    DIRIGO_BLOCK_SINGLEPULSE = 28,   /* SinglePulseBlock */
+    DIRIGO_BLOCK_PULSELEN = 29,      /* PulseLengthBlock */
+    DIRIGO_BLOCK_IABS = 30,          /* AbsBlock */
+    DIRIGO_BLOCK_IINC = 31,          /* IncBlock */
+    DIRIGO_BLOCK_INEG = 32,          /* NegBlock */
+    DIRIGO_BLOCK_IADD = 33,          /* AddBlock */
+    DIRIGO_BLOCK_IMUL = 34,          /* MulBlock */
+    DIRIGO_BLOCK_LIMITER = 35,       /* LimiterBlock (ILimiter, LLimiter) */
+    DIRIGO_BLOCK_CALIBTRANSF = 36,   /* CalibratedTransformBlock */
+    DIRIGO_BLOCK_MEAN = 37,          /* MeanBlock; config[0] = window */
+    DIRIGO_BLOCK_FLOATMATH = 38,     /* FloatMathBlock (legacy, Float arithmetic); variant = DirigoFloatMathOp */
+    DIRIGO_BLOCK_LONGMATH = 39,      /* LongMathBlock; variant = DirigoLongMathOp */
+    DIRIGO_BLOCK_FLOATNUM = 40,      /* FloatMathNumericBlock; variant = DirigoFloatNumOp */
+    DIRIGO_BLOCK_MOVE = 41,          /* MoveBlock */
+    DIRIGO_BLOCK_COPY = 42,          /* CopyBlock; variant = 1 when it has a Wr pin */
+    DIRIGO_BLOCK_ENCODEDATE = 43,    /* EncodeDateBlock */
+    DIRIGO_BLOCK_DECODEDATE = 44,    /* DecodeDateBlock */
+    DIRIGO_BLOCK_IDEMUX = 45,        /* IntDemuxBlock (IDemux, LDemux) */
+    DIRIGO_BLOCK_FDEMUX = 46,        /* FloatDemuxBlock */
+    DIRIGO_BLOCK_ADVCOUNTER = 47,    /* AdvCounterBlock */
+    DIRIGO_BLOCK_FILTER = 48,        /* FilterBlock */
+    DIRIGO_BLOCK_IAND = 49,          /* IntAndBlock */
+    DIRIGO_BLOCK_IOR = 50,           /* IntOrBlock */
+    DIRIGO_BLOCK_IXOR = 51,          /* IntXorBlock */
+    DIRIGO_BLOCK_INOT = 52,          /* IntNotBlock */
+    DIRIGO_BLOCK_TRIGGER = 53,       /* TriggerBlock */
+
+    /* A block with no unit attached: when it runs it writes "nothing read" to every output. `variant` picks
+       the value — 0 an Int zero (HardwareInputBlock, LoggerBlock, Store*Data), 1 `false` (D3NetRead/Write),
+       2 a Float zero (StoreFloatData), 3 ReadDallas's `St = 0, T = 0`. */
+    DIRIGO_BLOCK_CONSTOUT = 54,
+    DIRIGO_BLOCK_DELAYFILTER = 55,   /* DelayFilterBlock */
+    DIRIGO_BLOCK_TIMER = 56,         /* TimerBlock; variant = TimerBlock.Mode */
+    DIRIGO_BLOCK_RAMP = 57,          /* RampBlock */
+    DIRIGO_BLOCK_VALVE = 58,         /* ValveBlock */
+    DIRIGO_BLOCK_WATERREG = 59,      /* WaterRegulatorBlock */
+    DIRIGO_BLOCK_STEPDRV = 60,       /* StepDriverBlock */
+    DIRIGO_BLOCK_HYSTCOMP = 61,      /* HysteresisComparatorBlock */
+    DIRIGO_BLOCK_MCOMPARE = 62,      /* MultiComparatorBlock */
+
+    /* The construct markers. Their bookkeeping is in the step loop (the Swift `stepNode`), because it
+       decides whether *other* modules run; `variant` on If/Switch is 1 when the condition pin is inverted. */
+    DIRIGO_BLOCK_IF = 63,
+    DIRIGO_BLOCK_ELSE = 64,
+    DIRIGO_BLOCK_ENDIF = 65,
+    DIRIGO_BLOCK_SWITCHCASE = 66,    /* `TMSwitchModule`, the construct (not the `ISwitch` value switch) */
+    DIRIGO_BLOCK_CASE = 67,          /* accepted values set by `dirigo_sim_set_case_ranges` */
+    DIRIGO_BLOCK_DEFAULT = 68,
+    DIRIGO_BLOCK_ENDSWITCH = 69,
+
+    DIRIGO_BLOCK_FLOATVAR = 70,      /* FloatVarBlock: the value is state, written through by Set/SetIdx */
+    DIRIGO_BLOCK_CREATEARRAY = 71,   /* CreateArrayBlock */
+    DIRIGO_BLOCK_READARRAY = 72,     /* ReadArrayBlock; variant 1 = Float elements */
+    DIRIGO_BLOCK_WRITEARRAY = 73,    /* WriteArrayBlock; variant 1 = Float elements */
+    DIRIGO_BLOCK_SETIDX = 74         /* SetIdxBlock: like Set, but through the one P pin `Idx` names */
 } DirigoBlockKind;
+
+/* `variant` for `DIRIGO_BLOCK_LONGMATH`, in `LongMathOperation` order. */
+typedef enum {
+    DIRIGO_LONG_ADD = 0, DIRIGO_LONG_SUB = 1, DIRIGO_LONG_ABS = 2, DIRIGO_LONG_NEG = 3, DIRIGO_LONG_NOT = 4,
+    DIRIGO_LONG_INC = 5, DIRIGO_LONG_AND = 6, DIRIGO_LONG_OR = 7, DIRIGO_LONG_XOR = 8
+} DirigoLongMathOp;
+
+/* `variant` for `DIRIGO_BLOCK_FLOATNUM`, in `FloatMathOperation` order. */
+typedef enum {
+    DIRIGO_FNUM_ADD = 0, DIRIGO_FNUM_SUB = 1, DIRIGO_FNUM_MUL = 2, DIRIGO_FNUM_DIV = 3, DIRIGO_FNUM_ABS = 4,
+    DIRIGO_FNUM_NEG = 5, DIRIGO_FNUM_SQRT = 6, DIRIGO_FNUM_MOD = 7, DIRIGO_FNUM_SIN = 8, DIRIGO_FNUM_COS = 9,
+    DIRIGO_FNUM_ASIN = 10, DIRIGO_FNUM_ACOS = 11
+} DirigoFloatNumOp;
+
+/* `variant` for `DIRIGO_BLOCK_FLOATMATH`, in `FloatMathBlock.Operation` order. */
+typedef enum {
+    DIRIGO_FMATH_ADD = 0, DIRIGO_FMATH_SUB = 1, DIRIGO_FMATH_MUL = 2, DIRIGO_FMATH_DIV = 3,
+    DIRIGO_FMATH_SQRT = 4, DIRIGO_FMATH_SIN = 5, DIRIGO_FMATH_COS = 6
+} DirigoFloatMathOp;
 
 /// A step's wall clock, already decomposed. `DOW` is 0 = Monday, as the help specifies.
 typedef struct {
@@ -113,6 +197,9 @@ typedef struct {
     int32_t minute;
     int32_t second;
     int32_t dayOfWeek;   /* 0 = Monday */
+    /// The same instant in seconds since 1970 (UTC). `DateTime` decomposes this itself, because a module's
+    /// configured offset (`OFFS`) shifts the instant before it is split into days, hours and minutes.
+    double unixSeconds;
 } DirigoWallClock;
 
 typedef struct {
@@ -125,6 +212,11 @@ typedef struct {
     int32_t outCount;
     const DirigoValue *initialOut;   /* `outCount` entries, or NULL */
     const DirigoValue *initialIn;    /* `inCount` entries, or NULL */
+    /// Per-instance configuration the Swift registry reads from module *attributes* when it builds a block
+    /// (an RS block's priority, a math block's operation, a window length). The core cannot read attributes,
+    /// so Swift resolves them and hands the result over; what each kind expects is noted on its enum value.
+    int32_t variant;
+    int64_t config[4];
 } DirigoModuleDesc;
 
 typedef struct {
@@ -158,7 +250,9 @@ typedef struct {
 
 typedef enum {
     DIRIGO_MACRO_INPUTS = 0,
-    DIRIGO_MACRO_OUTPUTS = 1
+    DIRIGO_MACRO_OUTPUTS = 1,
+    /// The caller's `paramPins` onto the subpage `Params` module's `outPins`.
+    DIRIGO_MACRO_PARAMS = 2
 } DirigoMacroInterfaceKind;
 
 typedef struct DirigoSim DirigoSim;
@@ -186,11 +280,21 @@ void dirigo_sim_set_macro_sweeps(DirigoSim *sim, int32_t sweeps);
 /// clock could never be checked against another engine, so this is the only way the block gets a time.
 void dirigo_sim_set_wall_clock(DirigoSim *sim, DirigoWallClock clock);
 
+/// A thread's period from the hardware profile. A thread with none set runs at the project's cycle.
+void dirigo_sim_set_thread_interval(DirigoSim *sim, int32_t threadId, double intervalMs);
+
+/// A `Case` module's accepted values: `count` inclusive ranges as `lo, hi` pairs in `ranges`.
+void dirigo_sim_set_case_ranges(DirigoSim *sim, int32_t index, const int64_t *ranges, int32_t count);
+
 void dirigo_sim_destroy(DirigoSim *sim);
 void dirigo_sim_reset(DirigoSim *sim);
 
 /// One cycle. Returns 1 when a thread ran, matching `SimulationEngine.stepIfDue`.
 int32_t dirigo_sim_step(DirigoSim *sim, double deltaMs);
+
+/// One pass of *every* thread now, without advancing any thread's timer: what an edit made while paused
+/// needs to show its effect, whatever the threads' periods. Counts as a tick.
+void dirigo_sim_evaluate_now(DirigoSim *sim);
 
 /// Milliseconds until the earliest thread is due next; 0 when one already is.
 double dirigo_sim_next_due_ms(const DirigoSim *sim);
@@ -207,6 +311,32 @@ DirigoValue dirigo_sim_get_out(const DirigoSim *sim, int32_t index, int32_t pin)
 void dirigo_sim_set_in(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue value);
 void dirigo_sim_set_param(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue value);
 void dirigo_sim_set_out(DirigoSim *sim, int32_t index, int32_t pin, DirigoValue value);
+
+/* --- What the app needs to drive the core directly, with no Swift engine beside it. --- */
+
+/// Sets an output high for `cycles` passes of its module, then low: a push button's single click
+/// (`BoolVarBlock.trigger`). Writing the pin with `dirigo_sim_set_out` would clear any pending pulse instead.
+void dirigo_sim_pulse_out(DirigoSim *sim, int32_t index, int32_t pin, int32_t cycles);
+
+/// Winds one module's internal state and outputs back to its reset values, keeping its inputs and
+/// parameters — what a block's own `reset()` does, as the inspector's Reset button asks.
+void dirigo_sim_reset_module(DirigoSim *sim, int32_t index);
+
+/// Changes a module's `variant` live (an RS block's priority, a timer's mode), keeping its state.
+void dirigo_sim_set_variant(DirigoSim *sim, int32_t index, int32_t variant);
+
+/// The whole-project wire and macro sweep, outside a step: an edit made by hand reaches its consumers now.
+void dirigo_sim_propagate(DirigoSim *sim);
+
+/// How many times a thread has run since the runtime was built or reset.
+uint64_t dirigo_sim_thread_run_count(const DirigoSim *sim, int32_t threadId);
+
+/// A thread's period: the profile's when it has one, otherwise the project's cycle.
+double dirigo_sim_thread_interval_ms(const DirigoSim *sim, int32_t threadId);
+
+/// A digest of every pin value, for "did anything change?". Faithful: every pin's kind and exact bits are
+/// mixed in (FNV-1a), so equal digests mean equal pins, short of a hash collision.
+uint64_t dirigo_sim_pins_digest(const DirigoSim *sim);
 
 /// How many of `DirigoBlockKind` the core implements (i.e. excluding `DIRIGO_BLOCK_UNRESOLVED`).
 int32_t dirigo_sim_portable_kind_count(void);

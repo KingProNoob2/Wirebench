@@ -59,16 +59,28 @@ public struct MainView: View {
             sidebarContent
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
         } detail: {
-            CanvasView(model: model)
-                .inspector(isPresented: $showInspector) {
+            // A split pane under the toolbar, not `.inspector`: that one is a full-height column with a
+            // toolbar section of its own, so opening it narrowed the toolbar and pushed the run controls
+            // to the left. Here the toolbar spans the whole detail area whether the inspector is open or not.
+            // `HSplitView` sizes its panes to what they ask for, so both ask for all the height there is;
+            // left to themselves they collapsed to a band across the middle of the window.
+            HSplitView {
+                CanvasView(model: model)
+                    .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+                if showInspector {
                     InspectorView(model: model)
-                        .inspectorColumnWidth(min: 250, ideal: 280, max: 340)
+                        .frame(minWidth: 250, idealWidth: 280, maxWidth: 340, maxHeight: .infinity)
                 }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .coordinateSpace(name: "AppWindow")
         .navigationTitle(model.projectTitle)
         .toolbar { toolbarContent }
         .background { shortcutsBackground }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
+            showInspector.toggle()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showBlockPalette)) { _ in
             if model.project != nil { showingPalette = true }
         }
@@ -228,22 +240,11 @@ public struct MainView: View {
 
     /// Shown when nothing is open: bare, empty sections look like a bug rather than a state.
     private var sidebarEmptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("No project open")
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text("Open a .pcc file, or start a project from the toolbar.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 170)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(20)
+        Text("No project open")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(20)
     }
 
     private var pageList: some View {
@@ -255,17 +256,17 @@ public struct MainView: View {
             // These are rows, not `Section` headers. macOS gives a section header a large fixed gap
             // that cannot be adjusted (`listSectionSpacing` is unavailable there), which left the
             // sidebar looking like content was missing between groups.
-            sectionLabel("Pages", tint: Color.accentColor, isMacro: false)
+            sectionLabel("Pages", tint: Color.secondary, isMacro: false)
             ForEach(mainPages, id: \.caption) { pageRow(for: $0, isMacro: false) }
 
-            sectionLabel("Macros", tint: Color.accentColor, isMacro: true)
+            sectionLabel("Macros", tint: Color.secondary, isMacro: true)
             ForEach(macroPages, id: \.caption) { pageRow(for: $0, isMacro: true) }
 
             sectionLabel("Hardware Link", tint: nil, isMacro: nil)
             // Same leading inset as every other row's content, so the hardware block lines up with
             // the titles above it instead of sitting 8pt out to the left.
             HardwareLinkSection(model: model)
-                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         }
         .listStyle(.sidebar)
     }
@@ -288,7 +289,7 @@ public struct MainView: View {
         // Measured off a screenshot: with trailing 8 the add button ended 34pt from the right while
         // the title began 27.5pt from the left. Trailing 0 lines the button up with the row badges
         // and makes the two margins match.
-        .listRowInsets(EdgeInsets(top: 12, leading: 8, bottom: 3, trailing: 0))
+        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 0, trailing: 0))
         .selectionDisabled()
     }
 
@@ -299,15 +300,12 @@ public struct MainView: View {
     }
 
     private var searchSummaryRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: model.blockSearchMatchCount == 0 ? "questionmark.circle" : "sparkle.magnifyingglass")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(model.blockSearchMatchCount == 0 ? Color.secondary : Theme.searchHighlight)
-            Text(searchSummary)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        Text(searchSummary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+            .selectionDisabled()
     }
 
     private var pageDeletionMessage: String {
@@ -368,21 +366,8 @@ public struct MainView: View {
                 Label("Snap to Grid", systemImage: "squareshape.split.3x3")
             }
             .help("Snap blocks to the grid when moving or adding them")
-
-            Button {
-                model.openProjectFile()
-            } label: {
-                Label("Open", systemImage: "folder")
-            }
-            .help("Open Project (⌘O)")
-
-            Button {
-                model.saveProject()
-            } label: {
-                Label("Save", systemImage: "square.and.arrow.down")
-            }
-            .disabled(model.project == nil)
-            .help("Save Project (⌘S)")
+            // Open and Save live in the File menu (⌘O, ⌘S), as in other document apps; the toolbar
+            // keeps to what is used while editing.
         }
 
         ToolbarItemGroup(placement: .principal) {
@@ -435,10 +420,10 @@ public struct MainView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
+            // Not animated: the split view is AppKit's, and it places its divider itself. A SwiftUI animation
+            // on top of that overshot the pane's width and then snapped back.
             Button {
-                withAnimation {
-                    showInspector.toggle()
-                }
+                showInspector.toggle()
             } label: {
                 Label("Inspector", systemImage: "sidebar.trailing")
             }
@@ -467,7 +452,7 @@ public struct MainView: View {
     /// A sidebar row for a page or a macro page, with its delete action.
     private func pageRow(for page: ProjectPage, isMacro: Bool) -> some View {
         NavigationLink(value: page.caption) {
-            SidebarRow(symbol: isMacro ? "shippingbox" : "square.grid.2x2", tint: Color.accentColor,
+            SidebarRow(symbol: isMacro ? "shippingbox" : "doc",
                        title: isMacro ? String(page.caption.dropFirst()) : page.caption,
                        count: moduleCount(for: page.caption))
         }
@@ -503,13 +488,12 @@ private struct TickCountBadge: View {
             Circle()
                 .fill(model.isPlaying ? Theme.signalHigh : Color.secondary.opacity(0.55))
                 .frame(width: 6, height: 6)
-                .shadow(color: model.isPlaying ? Theme.signalHigh.opacity(0.8) : .clear, radius: 3)
             Text("\(model.tickCount)")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 11))
+                .monospacedDigit()
                 .foregroundStyle(.primary)
-                .contentTransition(.numericText())
             Text("ticks")
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
         .fixedSize()

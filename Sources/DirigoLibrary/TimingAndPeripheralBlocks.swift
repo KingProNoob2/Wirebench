@@ -250,9 +250,6 @@ public final class EightDOBlock: FunctionBlock, @unchecked Sendable {
     public var outPins: [PinValue] = []
 
 
-    /// Whether the block is enabled.
-    public var isEnabled: Bool { inPins.first?.asBool ?? true }
-
     /// - Parameter pinCount: total input pins, *including* En.
     public init(pinCount: Int = 9) {
         inPins = Array(repeating: .bool(false), count: max(2, pinCount))
@@ -275,9 +272,6 @@ public final class EightDIBlock: FunctionBlock, @unchecked Sendable {
     public var inPins: [PinValue] = [.bool(true)]
     public var paramPins: [PinValue] = []
     public var outPins: [PinValue] = Array(repeating: .bool(false), count: 8)
-
-    /// Whether the block is enabled.
-    public var isEnabled: Bool { inPins.first?.asBool ?? true }
 
     public init(pinCount: Int = 8) {
         outPins = Array(repeating: .bool(false), count: pinCount)

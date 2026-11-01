@@ -10,6 +10,7 @@ import DirigoEngine
 /// invalidates the rows whose values moved and leaves the rest — including the whole hero — alone.
 public struct InspectorView: View {
     @Bindable var model: AppModel
+    @AppStorage("inspector.showDetails") private var showDetails = false
 
     public init(model: AppModel) {
         self.model = model
@@ -19,7 +20,7 @@ public struct InspectorView: View {
         if let modId = model.selectedModuleId,
            let mod = model.project?.modules.first(where: { $0.id == modId }) {
             let node = model.getNode(id: modId)
-            let blockTypeName = node != nil ? type(of: node!.block).typeName : mod.name
+            let blockTypeName = BlockRegistry.shared.resolvedTypeName(for: mod) ?? mod.name
             let info = BlockTypeCatalog.info(forGuid: mod.guid)
 
             Form {
@@ -31,12 +32,10 @@ public struct InspectorView: View {
                         summary: info?.summary ?? "",
                         symbol: Self.iconForBlockType(blockTypeName),
                         tint: Theme.tint(forCategory: info?.category ?? ""),
-                        isSimulated: !(node?.block is UnresolvedBlock),
+                        isSimulated: CxxSimulationCore.kind(forGUID: mod.guid) != nil,
                         onToggleFirstInput: { model.toggleModuleInput(moduleId: mod.id, pinIndex: 0) },
-                        onReset: {
-                            node?.block.reset()
-                            model.simulationDidChange()
-                        })
+                        onReset: { model.resetModuleState(id: mod.id) },
+                        onConfigure: { model.openConfigureModule(id: mod.id) })
                         .equatable()
                 }
 
@@ -100,40 +99,34 @@ public struct InspectorView: View {
                     }
                 }
 
-                Section("Details") {
-                    // The class that implements the block. Selectable, because it is what gets pasted
-                    // into a bug report or a note about the port.
-                    LabeledContent("Dirigo Class") {
-                        Text(info?.delphiClass ?? blockTypeName)
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    if info?.delphiClass != nil, info?.delphiClass != blockTypeName {
-                        LabeledContent("Implementation") {
-                            Text(blockTypeName)
+                // Advanced, so collapsed until asked for; the choice is remembered across blocks and launches.
+                Section {
+                    DisclosureGroup("Details", isExpanded: $showDetails) {
+                        // The class that implements the block. Selectable, because it is what gets pasted
+                        // into a bug report or a note about the port.
+                        LabeledContent("Dirigo Class") {
+                            Text(info?.delphiClass ?? blockTypeName)
                                 .font(.system(.body, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
-                    }
+                        if info?.delphiClass != nil, info?.delphiClass != blockTypeName {
+                            LabeledContent("Implementation") {
+                                Text(blockTypeName)
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
 
-                    LabeledContent("Module ID", value: "\(mod.id)")
-                    // Both are document data that drive the engine's schedule, so they are edited
-                    // here rather than in a second set of fields elsewhere in the inspector.
-                    LabeledContent("Execution Order") { field(orderBinding(mod)) }
-                    LabeledContent("Thread ID") { field(threadBinding(mod)) }
-                    LabeledContent("Page", value: mod.page)
-                    LabeledContent("Position", value: "(\(Int(mod.x)), \(Int(mod.y)))")
-
-                    Button {
-                        model.openConfigureModule(id: mod.id)
-                    } label: {
-                        Label("Configure Module…", systemImage: "slider.horizontal.3")
-                            .frame(maxWidth: .infinity)
+                        LabeledContent("Module ID", value: "\(mod.id)")
+                        // Both are document data that drive the engine's schedule, so they are edited
+                        // here rather than in a second set of fields elsewhere in the inspector.
+                        LabeledContent("Execution Order") { field(orderBinding(mod)) }
+                        LabeledContent("Thread ID") { field(threadBinding(mod)) }
+                        LabeledContent("Page", value: mod.page)
+                        LabeledContent("Position", value: "(\(Int(mod.x)), \(Int(mod.y)))")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 4)
                 }
             }
             .formStyle(.grouped)
@@ -141,17 +134,18 @@ public struct InspectorView: View {
             ContentUnavailableView {
                 Label("No Selection", systemImage: "cursorarrow.click.2")
             } description: {
-                Text("Select a function block on the canvas to inspect its signals and parameters.")
+                Text("Select a block to see its signals and parameters.")
             }
         }
     }
 
     /// A typed-in value for an `IntVar`'s output: the variable itself, which nothing else can change by hand.
     static func editableVariable(model: AppModel, module: PCCModule, value: PinValue) -> Binding<Int>? {
-        guard model.getNode(id: module.id)?.block is IntVarBlock else { return nil }
+        guard BlockRole.isIntVariable(module) else { return nil }
         return Binding(
             get: {
-                (model.getNode(id: module.id)?.block as? IntVarBlock).map { Int($0.currentValue) } ?? value.asInt
+                // The variable's value is its output: the core keeps the two together.
+                model.getNode(id: module.id)?.block.outPins.first?.asInt ?? value.asInt
             },
             set: { model.setVariableValue(moduleId: module.id, value: $0) })
     }
@@ -234,7 +228,7 @@ public struct InspectorView: View {
 
 // MARK: - The block header
 
-/// The block's identity, its one-line description, and the two actions that poke it.
+/// The block's identity, its one-line description, and the actions that act on it.
 ///
 /// `Equatable` over the data alone — the two closures are excluded, as `ModuleCardView` does — so a
 /// simulation tick, which changes the pin values below it, does not re-render the header.
@@ -252,6 +246,7 @@ struct InspectorHero: View, Equatable {
     let isSimulated: Bool
     let onToggleFirstInput: () -> Void
     let onReset: () -> Void
+    var onConfigure: () -> Void = {}
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.name == rhs.name
@@ -264,20 +259,21 @@ struct InspectorHero: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 11) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 BlockGlyph(symbol: symbol, tint: tint)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(name)
                         .font(.headline)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    HStack(spacing: 6) {
-                        Text(blockName)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        CategoryChip(category: category, tint: tint)
-                    }
+                    // Type and category on one quiet line. The category is plain text: it labels the
+                    // block, so it does not need to look like something to click.
+                    Text(category.isEmpty ? blockName : "\(blockName) · \(category)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 Spacer(minLength: 0)
             }
@@ -297,22 +293,20 @@ struct InspectorHero: View, Equatable {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
-                Button(action: onToggleFirstInput) {
-                    Label("Toggle In 0", systemImage: "bolt.fill")
-                }
-                .help("Flips the block's first input pin, so a triggered block can be stepped by hand.")
-                Button(action: onReset) {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                }
-                .help("Resets the block's internal state to its initial value.")
+            HStack(spacing: 6) {
+                Button("Configure…", action: onConfigure)
+                    .help("Opens the module's settings.")
+                Button("Toggle In 0", action: onToggleFirstInput)
+                    .help("Flips the block's first input pin, so a triggered block can be stepped by hand.")
+                Button("Reset", action: onReset)
+                    .help("Resets the block's internal state to its initial value.")
             }
             .controlSize(.small)
-            .buttonStyle(.bordered)
+            .padding(.top, 2)
         }
         // No container of its own: the header is the first row of the grouped form, so it lines up with
         // the sections below it instead of floating above them in a panel of its own.
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -337,31 +331,6 @@ struct BlockGlyph: View {
                     .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
             }
             .accessibilityHidden(true)
-    }
-}
-
-/// The block's category, as a chip rather than a coloured word: the tint marks the chip's text, and the
-/// fill stays neutral so a row of chips reads as labels instead of decoration.
-struct CategoryChip: View {
-    let category: String
-    let tint: Color
-
-    var body: some View {
-        if !category.isEmpty {
-            Text(category)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.07),
-                            in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                }
-                .accessibilityLabel("Category: \(category)")
-        }
     }
 }
 

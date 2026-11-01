@@ -167,9 +167,6 @@ public final class SetBlock: FunctionBlock, @unchecked Sendable {
         self.paramPins = Array(repeating: .int32(0), count: params)
     }
 
-    /// The value written through the P pins.
-    public var writeValue: PinValue { inPins.count > 1 ? inPins[1] : .int32(0) }
-
     public func process(sample: SampleContext) {}
 
     public func reset() {}

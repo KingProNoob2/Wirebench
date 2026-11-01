@@ -32,7 +32,7 @@ struct ExecutionModelTests {
         let not = Self.module(2, "Not1", NotBlock.guid,
                               inPins: [.bool(true), .bool(false)], outPins: [.bool(false)])
         let wire = Connection(inModuleId: 2, inPinId: 1, outModuleId: 1, outPinId: 0)
-        let engine = SimulationEngine(project: Self.project([yes, not], [wire]))
+        let engine = TestEngine(project: Self.project([yes, not], [wire]))
 
         engine.step()
         // Yes runs first (order 10 before 20) and writes true; Not must see that value *this* pass.
@@ -48,7 +48,7 @@ struct ExecutionModelTests {
         let second = Self.module(2, "Yes1", YesBlock.guid,
                                  inPins: [.bool(true)], outPins: [.bool(true)], order: 20)
         let wire = Connection(inModuleId: 1, inPinId: 1, outModuleId: 2, outPinId: 0)
-        let engine = SimulationEngine(project: Self.project([first, second], [wire]))
+        let engine = TestEngine(project: Self.project([first, second], [wire]))
 
         engine.step()
         // Nothing has produced yet on the very first pass, so Not sees its own stored default.
@@ -69,7 +69,7 @@ struct ExecutionModelTests {
         var endModule = Self.module(4, "EndIf1", EndIfBlock.guid, outPins: [.bool(false)])
         endModule.order = 40
 
-        let engine = SimulationEngine(project: Self.project([ifModule, yesModule, endModule], []))
+        let engine = TestEngine(project: Self.project([ifModule, yesModule, endModule], []))
 
         // Pass 1: the branch is open, so Yes1 runs and passes true through.
         engine.getNode(id: 2)?.block.inPins[0] = .bool(true)
@@ -99,7 +99,7 @@ struct ExecutionModelTests {
         var ifModule = Self.module(2, "If1", IfBlock.guid, inPins: [.bool(true)], outPins: [.bool(false)])
         ifModule.order = 20
 
-        let engine = SimulationEngine(project: Self.project([ifModule, yesModule, endModule], []))
+        let engine = TestEngine(project: Self.project([ifModule, yesModule, endModule], []))
         engine.step()
         #expect(engine.getNode(id: 3)?.block.outPins[0].asBool == false,
                 "inside a true branch the block must execute")
@@ -118,7 +118,7 @@ struct SwitchConstructTests {
                          rawAttributes: a)
     }
 
-    static func engine(selector: Int32) -> SimulationEngine {
+    static func engine(selector: Int32) -> TestEngine {
         let sw = module(2, "Switch1", SwitchBlock.guid,
                         inPins: [.bool(true), .int32(selector)])
         let case5 = module(3, "Case5", CaseBlock.guid, attrs: ["VALUES": "5..7"])
@@ -132,7 +132,7 @@ struct SwitchConstructTests {
         var p = PCCProject(name: "switch")
         p.pages = [ProjectPage(caption: "main")]
         p.modules = [sw, case5, inCase, def, inDefault, end]
-        return SimulationEngine(project: p)
+        return TestEngine(project: p)
     }
 
     @Test("Case parsing accepts single values and ranges")
@@ -177,7 +177,7 @@ struct SwitchConstructTests {
         var p = PCCProject(name: "switch")
         p.pages = [ProjectPage(caption: "main")]
         p.modules = [sw, case5, inCase, end]
-        let e = SimulationEngine(project: p)
+        let e = TestEngine(project: p)
         e.step()
         #expect(e.getNode(id: 6)?.block.outPins[0].asBool == false,
                 "no arm may run when the switch's own condition is false")
@@ -200,7 +200,7 @@ struct SwitchConstructTests {
                       inPins: [Pin(id: 0, value: .bool(true))],
                       outPins: (0..<5).map { Pin(id: $0, value: .int32(0)) }),
         ]
-        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        let engine = TestEngine(project: project, scheduling: .everyTick)
 
         // 2024-03-05 06:07:08 UTC. `SSemafor(1).pcc` shows the real shape: 1 in pin, 5 out pins.
         let fixed = Date(timeIntervalSince1970: 1_709_623_628)

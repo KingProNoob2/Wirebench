@@ -85,7 +85,7 @@ struct ConstructContainerTests {
         var p = Self.project([Self.ifContainer, Self.yes(2, order: 20, container: 1, arm: "then"),
                               Self.yes(3, order: 30, container: 1, arm: "else")])
         p.modules[1].inPins[0] = Pin(id: 0, value: .bool(true))
-        let engine = SimulationEngine(project: p)
+        let engine = TestEngine(project: p)
         engine.step()
         #expect(engine.getNode(id: 2)?.block.outPins[0].asBool == true)    // then ran
         #expect(engine.getNode(id: 3)?.block.outPins[0].asBool == false)   // else did not

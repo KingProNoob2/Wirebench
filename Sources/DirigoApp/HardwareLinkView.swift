@@ -1,31 +1,30 @@
 import SwiftUI
 import AppKit
 
-/// The sidebar's *Hardware Link* block, top to bottom in the order the work happens:
+/// The sidebar's *Hardware Link* block:
 ///
-///     ● Connected                       [Disconnect]      ← the link
-///     cu.usbserial-110 ⌃⌄                       ⟳
-///     [          Compile Project          ]               ← the one big action
-///     ──────────────────────────────────────
-///     ✓ Upload complete · 100%                            ← what the last upload did
-///     ▸ Log                                    24 lines
+///     ● Not connected              ⟳  [Connect]      ← the link, a rescan, and its button
+///     [ cu.usbserial-110 ⌄ ]                          ← only when there is a port to pick
+///     [          Build Project           ]            ← the section's main action
+///     ✓ Upload complete · 100%                        ← only once something has happened
+///     › Log                                 24        ← only once there is a log
 ///
-/// One control per job: the link is a small button beside its status (a second full-width bar for it
-/// competed with Compile), the port is named once, and the upload's outcome is one line with an icon
-/// rather than a status sentence, a headline and a bar that all said the same thing.
+/// Nothing is shown that has nothing to say: an idle upload line and an empty log were two rows of
+/// placeholder text under every project.
 struct HardwareLinkSection: View {
     @Bindable var model: AppModel
-    @State private var showingLog = false
+    /// Remembered, so the log is where it was left.
+    @AppStorage("hardware.showLog") private var showingLog = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            linkRow
-            portRow
-            compileButton
-            Divider().padding(.vertical, 2)
-            uploadStatus
+        VStack(alignment: .leading, spacing: 6) {
+            statusRow
+            if !model.availablePorts.isEmpty { portPicker }
+            actions
+            if outcome != .idle { uploadStatus }
+            if !model.uploadLog.isEmpty { log }
         }
-        .padding(.vertical, 6)
+        .controlSize(.small)
         // `refreshPorts` is the only thing that fills `availablePorts`; re-reading on appear also picks up
         // an adapter plugged in after launch.
         .onAppear { model.refreshPorts() }
@@ -33,111 +32,102 @@ struct HardwareLinkSection: View {
 
     // MARK: - The link
 
-    /// Status on the left, the one action that changes it on the right. Connect is the call to action until
-    /// there is a link, and Disconnect is deliberately quiet once there is.
-    private var linkRow: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(model.isHardwareConnected ? Theme.signalHigh : Color.secondary.opacity(0.4))
-                .frame(width: 7, height: 7)
-                .shadow(color: model.isHardwareConnected ? Theme.signalHigh.opacity(0.8) : .clear, radius: 3)
-            Text(model.isHardwareConnected ? "Connected" : "Disconnected")
-                .font(.callout.weight(.medium))
-                .foregroundStyle(model.isHardwareConnected ? Theme.signalHigh : .secondary)
-            Spacer(minLength: 4)
-            if model.isHardwareConnected {
-                Button("Disconnect") { model.disconnectHardware() }
-                    .buttonStyle(.bordered)
-            } else {
-                Button("Connect") { model.connectHardware() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.availablePorts.isEmpty)
-            }
-        }
-        .controlSize(.small)
+    private var statusText: String {
+        if model.isHardwareConnected { return "Connected" }
+        return model.availablePorts.isEmpty ? "No serial port" : "Not connected"
     }
 
-    /// The port, named once. With no adapter there is nothing to pick, so say so — and the rescan stays,
-    /// because plugging one in does not need the sidebar to be toggled to be seen.
-    private var portRow: some View {
+    /// Status, rescan, and the link's own small button — the link is a setting, not the main action.
+    private var statusRow: some View {
         HStack(spacing: 6) {
-            if model.availablePorts.isEmpty {
-                Text("No serial ports found.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Picker("Serial Port", selection: $model.selectedPortPath) {
-                    ForEach(model.availablePorts) { port in
-                        Text(port.name).tag(port.path)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
-                .disabled(model.isHardwareConnected)
-            }
-            Spacer(minLength: 2)
+            Circle()
+                .fill(model.isHardwareConnected ? Theme.signalHigh : Color.secondary.opacity(0.4))
+                .frame(width: 6, height: 6)
+            Text(statusText)
+                .font(.callout)
+                .foregroundStyle(model.isHardwareConnected ? .primary : .secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
             Button {
                 model.refreshPorts()
             } label: {
                 Image(systemName: "arrow.clockwise")
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .controlSize(.small)
             .help("Rescan for serial adapters")
+            .accessibilityLabel("Rescan serial ports")
+            if model.isHardwareConnected {
+                Button("Disconnect") { model.disconnectHardware() }
+            } else {
+                Button("Connect") { model.connectHardware() }
+                    .disabled(model.availablePorts.isEmpty)
+            }
         }
     }
 
-    /// Blue once there is a link to upload over: compiling is then the next step. The report it opens has
-    /// Upload to PLC and the exports. A ternary cannot pick between two button styles, so both are spelled out.
-    @ViewBuilder
-    private var compileButton: some View {
-        if model.isHardwareConnected {
-            Button { model.buildAndShowReport() } label: { compileLabel }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(model.project == nil)
-        } else {
-            Button { model.buildAndShowReport() } label: { compileLabel }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(model.project == nil)
+    private var portPicker: some View {
+        Picker("Serial Port", selection: $model.selectedPortPath) {
+            ForEach(model.availablePorts) { port in
+                Text(port.name).tag(port.path)
+            }
         }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .fixedSize()
+        .disabled(model.isHardwareConnected)
     }
 
-    private var compileLabel: some View {
-        Label("Compile Project", systemImage: "hammer")
-            .frame(maxWidth: .infinity)
+    /// The section's main action, full width. The frame is on the label, not the button: a frame around
+    /// a macOS button only pads it, while a wide label stretches the bezel itself.
+    private var actions: some View {
+        Button {
+            model.buildAndShowReport()
+        } label: {
+            // Named as in the Build menu, so the same action reads the same everywhere.
+            Text("Build Project")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+        .disabled(model.project == nil)
+        .padding(.top, 6)
+        // The report it opens has Upload to PLC and the exports.
+        .help("Build the project and show the report, with Upload to PLC (⌘B)")
     }
 
     // MARK: - The upload
 
-    private enum Outcome { case idle, running, done, failed }
+    private enum Outcome { case idle, info, running, done, failed }
 
     private var outcome: Outcome {
         if model.isUploading { return .running }
         if model.uploadPhase.hasPrefix("Upload failed") { return .failed }
         if model.uploadPhase.hasPrefix("Upload complete") { return .done }
+        // A message from before an upload started (no serial link, a file being read) is still worth a line.
+        if !model.uploadPhase.isEmpty || !model.uploadStatus.isEmpty { return .info }
         return .idle
     }
 
-    /// One line for the outcome, a bar only while it is running, and the log behind a toggle.
+    private var headline: String {
+        model.uploadPhase.isEmpty ? model.uploadStatus : model.uploadPhase
+    }
+
     private var uploadStatus: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 outcomeIcon
+                // Selectable, so an error can be copied into a report.
                 Text(headline)
-                    .font(.caption)
                     .foregroundStyle(outcome == .failed ? Color.red : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
+            .font(.caption)
             if outcome == .running, let progress = model.uploadProgress {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
-                    .controlSize(.small)
             }
-            logToggle
-            if showingLog { logBody }
         }
     }
 
@@ -149,51 +139,34 @@ struct HardwareLinkSection: View {
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
         case .running:
-            Image(systemName: "arrow.up.circle.fill").foregroundStyle(Color.accentColor)
-        case .idle:
-            Image(systemName: "circle.dashed").foregroundStyle(.tertiary)
+            ProgressView().controlSize(.mini)
+        case .idle, .info:
+            EmptyView()
         }
     }
 
-    /// What is happening, or what the last upload did; before any upload, what to do first. The message the
-    /// model keeps for errors that happen before an upload starts (no serial link) is shown when there is no
-    /// phase to report.
-    private var headline: String {
-        if !model.uploadPhase.isEmpty { return model.uploadPhase }
-        if !model.uploadStatus.isEmpty { return model.uploadStatus }
-        return model.isHardwareConnected ? "Ready — compile, then upload from the report."
-                                         : "Connect to a serial port to upload."
-    }
+    // MARK: - The log
 
-    private var logToggle: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.15)) { showingLog.toggle() }
+    /// The system disclosure triangle, named for what it reveals.
+    private var log: some View {
+        DisclosureGroup(isExpanded: $showingLog) {
+            logBody
+                .padding(.top, 4)
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-                    .rotationEffect(.degrees(showingLog ? 90 : 0))
-                    .frame(width: 10)
-                Text("Log")
+            HStack {
+                Text("Upload Log")
                 Spacer(minLength: 0)
-                if !model.uploadLog.isEmpty {
-                    Text("\(model.uploadLog.count) lines").foregroundStyle(.tertiary)
-                }
+                Text("\(model.uploadLog.count)")
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
     }
 
-    @ViewBuilder
     private var logBody: some View {
-        if model.uploadLog.isEmpty {
-            Text("Nothing has been uploaded yet.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        } else {
+        VStack(alignment: .leading, spacing: 4) {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -207,8 +180,10 @@ struct HardwareLinkSection: View {
                                 .id(entry.id)
                         }
                     }
+                    .padding(6)
                 }
                 .frame(maxHeight: 200)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 .onChange(of: model.uploadLog.count) {
                     if let last = model.uploadLog.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
@@ -221,8 +196,7 @@ struct HardwareLinkSection: View {
                 Button("Clear") { model.clearUploadLog() }
             }
             .buttonStyle(.borderless)
-            .controlSize(.small)
-            .font(.caption2)
+            .font(.caption)
         }
     }
 

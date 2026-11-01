@@ -30,6 +30,17 @@ struct DirigoApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
+            // View ▸ Show/Hide Sidebar (⌃⌘S) and Show/Hide Inspector (⌃⌘I): a hidden pane can come
+            // back from the menu and the keyboard, not only from its toolbar button. The inspector is a
+            // plain split pane rather than `.inspector`, so its command is ours rather than `InspectorCommands`.
+            SidebarCommands()
+            CommandGroup(after: .sidebar) {
+                Button("Toggle Inspector") {
+                    NotificationCenter.default.post(name: .toggleInspector, object: nil)
+                }
+                .keyboardShortcut("i", modifiers: [.control, .command])
+            }
+
             CommandGroup(replacing: .undoRedo) {
             Button("Undo") { model.undo() }
                 .keyboardShortcut("z", modifiers: .command)
@@ -56,24 +67,11 @@ struct DirigoApp: App {
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(model.project == nil)
 
-            Button("Build Report") { model.isShowingBuildReport = true }
-                .keyboardShortcut("b", modifiers: [.command, .option])
-                .disabled(model.buildReport == nil)
-
             Divider()
 
             Button("Export Program Binary\u{2026}") { model.exportCompiledProgram() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
-
-            Button("Export Symbol Table (CSV)\u{2026}") { model.exportSymbolTable() }
-                .disabled(model.project == nil)
-
-            Divider()
-
-            Button("Upload Compiled Program to PLC\u{2026}") { model.uploadCompiledProgram() }
-                .keyboardShortcut("u", modifiers: [.command, .shift])
-                .disabled(model.project == nil || model.isUploading)
 
             Divider()
 
@@ -87,7 +85,7 @@ struct DirigoApp: App {
                 }
                 .keyboardShortcut("n", modifiers: .command)
 
-                Button("Open Project...") {
+                Button("Open Project\u{2026}") {
                     model.openProjectFile()
                 }
                 .keyboardShortcut("o", modifiers: .command)
@@ -100,7 +98,7 @@ struct DirigoApp: App {
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(model.project == nil)
 
-                Button("Save As...") {
+                Button("Save As\u{2026}") {
                     model.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
@@ -132,19 +130,11 @@ struct DirigoApp: App {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
 
-                Button("Export Legacy .PCC") {
+                Button("Export Legacy .PCC\u{2026}") {
                     model.exportForDirigo()
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
-
-                Divider()
-
-                Button("Upload Program to PLC…") {
-                    model.uploadProgramFile()
-                }
-                .keyboardShortcut("u", modifiers: .command)
-                .disabled(model.isUploading)
             }
         }
     }
@@ -154,4 +144,6 @@ public extension Notification.Name {
     /// Asks the main window to open the block palette. Lets the menu bar and the toolbar share one
     /// popover instead of each needing its own presentation state.
     static let showBlockPalette = Notification.Name("com.dirigo.showBlockPalette")
+    /// Asks the main window to show or hide the inspector pane, from the View menu.
+    static let toggleInspector = Notification.Name("com.dirigo.toggleInspector")
 }

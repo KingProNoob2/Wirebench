@@ -108,7 +108,7 @@ struct DirigoSwiftTests {
         let url = URL(fileURLWithPath: sampleProjectPath)
         let project = try parser.parse(fileAt: url)
 
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
         #expect(engine.nodes.count == 57)
 
         // Run 50 simulation ticks
@@ -237,7 +237,7 @@ struct DirigoSwiftTests {
         let parser = PCCParser()
         let url = URL(fileURLWithPath: sampleProjectPath)
         let project = try parser.parse(fileAt: url)
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
 
         // Step 1: Initial state
         engine.step()
@@ -311,7 +311,7 @@ struct DirigoSwiftTests {
         let parser = PCCParser()
         let url = URL(fileURLWithPath: sampleProjectPath)
         let project = try parser.parse(fileAt: url)
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
 
         // Initial setup step
         engine.step()
@@ -731,7 +731,7 @@ struct DirigoSwiftTests {
         guard FileManager.default.fileExists(atPath: pccPath) else { return }
         let parser = PCCParser()
         let project = try parser.parse(fileAt: URL(fileURLWithPath: pccPath))
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
 
         // Switch to Kostka mode: PrepinacRezim (ID 2)
         let prepinac = engine.getNode(id: 2)!
@@ -770,7 +770,7 @@ struct DirigoSwiftTests {
         guard FileManager.default.fileExists(atPath: pccPath) else { return }
         let parser = PCCParser()
         let project = try parser.parse(fileAt: URL(fileURLWithPath: pccPath))
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
 
         // PulseGen1 (ID 2 on *kostka)
         let pg1 = engine.getNode(id: 2)!

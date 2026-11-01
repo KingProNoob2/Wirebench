@@ -65,7 +65,7 @@ struct PulseGenTests {
                       paramPins: [Pin(id: 0, value: .int32(3)), Pin(id: 1, value: .int32(2))],
                       outPins: [Pin(id: 0, value: .bool(false)), Pin(id: 1, value: .bool(false))]),
         ]
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
         var trace: [Bool] = []
         for _ in 0..<10 {
             engine.step()

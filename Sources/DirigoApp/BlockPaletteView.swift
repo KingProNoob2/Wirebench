@@ -19,6 +19,7 @@ struct BlockPaletteView: View {
 
     @State private var query = ""
     @State private var selectedCategory: String?
+    @FocusState private var searchFocused: Bool
 
     /// A category as it should read.
     ///
@@ -109,6 +110,8 @@ struct BlockPaletteView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search blocks", text: $query)
                     .textFieldStyle(.plain)
+                    .focused($searchFocused)
+                    .onSubmit(insertTopResult)
                 if !query.isEmpty {
                     Button {
                         query = ""
@@ -130,6 +133,39 @@ struct BlockPaletteView: View {
             }
         }
         .frame(width: 460, height: 380)
+        // Typing straight away is the point of the picker, so the caret starts in the search field.
+        .task { searchFocused = true }
+    }
+
+    /// Whether Return has something to insert: there is a query, and something matches it.
+    private var hasTopResult: Bool {
+        !query.trimmingCharacters(in: .whitespaces).isEmpty && (!macroEntries.isEmpty || !matches.isEmpty)
+    }
+
+    /// Return in the search field inserts the first row of the list, which is the best match: macro
+    /// rows come first in the list, so they come first here too.
+    private func insertTopResult() {
+        guard hasTopResult else { return }
+        if let entry = macroEntries.first {
+            insert(entry)
+        } else if let info = matches.first {
+            onInsert(info.guid)
+            dismiss()
+        }
+    }
+
+    private func insert(_ entry: MacroEntry) {
+        switch entry {
+        case .call(let sheet): onInsertMacro(sheet)
+        case .interface(let kind): onInsertInterface(kind)
+        }
+        dismiss()
+    }
+
+    /// The row Return would insert, marked so the keyboard shortcut is not a guess.
+    private func topResultBackground(_ isTop: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(isTop && hasTopResult ? Color.accentColor.opacity(0.16) : .clear)
     }
 
     private var categoryList: some View {
@@ -192,13 +228,9 @@ struct BlockPaletteView: View {
         return all.filter { q.isEmpty || $0.title.lowercased().contains(q) }
     }
 
-    private func macroRow(_ entry: MacroEntry) -> some View {
+    private func macroRow(_ entry: MacroEntry, isTop: Bool) -> some View {
         Button {
-            switch entry {
-            case .call(let sheet): onInsertMacro(sheet)
-            case .interface(let kind): onInsertInterface(kind)
-            }
-            dismiss()
+            insert(entry)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Circle().fill(Theme.tint(forCategory: "Macro")).frame(width: 7, height: 7)
@@ -211,6 +243,7 @@ struct BlockPaletteView: View {
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
+            .background(topResultBackground(isTop))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -227,9 +260,13 @@ struct BlockPaletteView: View {
                     // One flat alphabetical list. Grouping it by category produced headers that said
                     // nothing useful in "All Blocks" and broke the alphabet into runs.
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(macroEntries.enumerated()), id: \.offset) { _, entry in macroRow(entry) }
-                        ForEach(matches, id: \.guid) { info in
-                            blockRow(info)
+                        let macros = macroEntries
+                        let blocks = matches
+                        ForEach(Array(macros.enumerated()), id: \.offset) { index, entry in
+                            macroRow(entry, isTop: index == 0)
+                        }
+                        ForEach(blocks, id: \.guid) { info in
+                            blockRow(info, isTop: macros.isEmpty && info.guid == blocks.first?.guid)
                         }
                     }
                     .padding(6)
@@ -239,7 +276,7 @@ struct BlockPaletteView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func blockRow(_ info: BlockTypeInfo) -> some View {
+    private func blockRow(_ info: BlockTypeInfo, isTop: Bool) -> some View {
         Button {
             onInsert(info.guid)
             dismiss()
@@ -265,6 +302,7 @@ struct BlockPaletteView: View {
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
+            .background(topResultBackground(isTop))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

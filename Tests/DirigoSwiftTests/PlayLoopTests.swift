@@ -199,7 +199,7 @@ struct PlayLoopTests {
     @Test("The pin digest tracks values exactly, and does not drift")
     func pinDigestIsFaithful() throws {
         let project = CxxSimulationTests.pulseIntoNot()
-        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        let engine = TestEngine(project: project, scheduling: .everyTick)
         func digest() -> UInt64 { engine.pinsDigest() }
 
         // Stable when nothing happened, including across repeat calls.

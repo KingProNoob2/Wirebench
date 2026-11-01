@@ -163,7 +163,7 @@ struct ThreadSchedulingTests {
 
     @Test("everyTick runs every thread on every step")
     func everyTickIsUnchanged() {
-        let engine = SimulationEngine(project: Self.makeProject(), scheduling: .everyTick)
+        let engine = TestEngine(project: Self.makeProject(), scheduling: .everyTick)
         engine.run(ticks: 10)
         #expect(engine.threadRunCounts[1] == 10)
         #expect(engine.threadRunCounts[2] == 10)
@@ -172,7 +172,7 @@ struct ThreadSchedulingTests {
 
     @Test("profileIntervals honours each thread's period")
     func profileIntervals() {
-        let engine = SimulationEngine(
+        let engine = TestEngine(
             project: Self.makeProject(),
             profile: Self.makeProfile(),
             scheduling: .profileIntervals
@@ -191,7 +191,7 @@ struct ThreadSchedulingTests {
     /// so below about 30% speed the simulation did not get any slower — the loop just made more, shorter steps.
     @Test("Sub-millisecond deltas are honoured, and the exact time to the next run is reported")
     func subMillisecondDeltas() {
-        let engine = SimulationEngine(project: Self.makeProject(), profile: Self.makeProfile(),
+        let engine = TestEngine(project: Self.makeProject(), profile: Self.makeProfile(),
                                       scheduling: .profileIntervals)
         engine.step(deltaMs: 1)                         // every thread runs once on the first pass
         let first = engine.threadRunCounts[1] ?? 0
@@ -205,7 +205,7 @@ struct ThreadSchedulingTests {
 
     @Test("Threads the profile does not define fall back to the cycle delay")
     func unknownThreadFallsBack() {
-        let engine = SimulationEngine(
+        let engine = TestEngine(
             project: Self.makeProject(),
             profile: Self.makeProfile(),
             scheduling: .profileIntervals
@@ -229,12 +229,13 @@ struct ThreadSchedulingTests {
                       inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .int32(3))],
                       outPins: [Pin(id: 0, value: .int32(0))]),
         ]
-        let engine = SimulationEngine(project: project)
+        let engine = TestEngine(project: project)
         let unresolved = engine.unresolvedBlocks()
         #expect(unresolved.count == 1)
 
+        #expect(unresolved[0].module.id == 1)
+        #expect(CxxSimulationCore.kind(forGUID: unknownGuid) == nil, "the core has no behaviour for it")
         let block = unresolved[0].block
-        #expect(block is UnresolvedBlock)
 
         // Running must not fabricate a result from the input.
         engine.run(ticks: 5)

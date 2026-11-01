@@ -94,9 +94,6 @@ public final class SetIdxBlock: FunctionBlock, @unchecked Sendable {
         // Idx (1) and X (2) stay Int; P0... begin at 3.
     }
 
-    /// The value written into the selected variable.
-    public var writeValue: PinValue { inPins.count > 2 ? inPins[2] : .int32(0) }
-
     /// The P pin to write through, or nil when `Idx` is outside `0..<N` — in which case, per the
     /// help, "no write takes place".
     public var targetPinIndex: Int? {

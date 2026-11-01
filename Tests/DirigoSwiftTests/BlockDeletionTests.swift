@@ -91,20 +91,25 @@ struct ReviewFixTests {
         #expect(PinValue.float(-2.7).asInt32 == -2)
     }
 
-    @Test("A block swapped into a running engine is the one a step runs")
-    func swappedBlockRuns() {
+    /// A block whose shape changes while the project is open (here `Int2Bits` going from eight outputs to
+    /// four) must run in its new shape. The Swift engine swapped a new block object in; the core is rebuilt
+    /// from the document instead, so this checks the result rather than the mechanism.
+    @Test("A block whose output count changes runs in its new shape")
+    @MainActor
+    func reshapedBlockRuns() throws {
         var project = PCCProject(name: "swap")
         project.pages = [ProjectPage(caption: "main")]
         project.modules = [PCCModule(id: 1, guid: Int2BitsBlock.guid, name: "Int2Bits1", x: 0, y: 0,
                                      order: 10, threadId: 1, page: "main",
                                      inPins: [Pin(id: 0, value: .int32(0))],
                                      outPins: (0..<8).map { Pin(id: $0, value: .bool(false)) })]
-        let engine = SimulationEngine(project: project)
-        let replacement = Int2BitsBlock(bitCount: 4)
-        replacement.inPins[0] = .int32(5)
-        engine.updateBlock(for: 1, newBlock: replacement)
-        engine.step()
-        #expect(replacement.outPins.map(\.asBool) == [true, false, true, false])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("reshape-\(UUID().uuidString).pcc")
+        try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
+        let model = AppModel()
+        model.loadProject(url: url)
+        model.updateModuleOutputCount(id: 1, count: 4)
+        model.setModuleInput(moduleId: 1, pinIndex: 0, value: .int32(5))
+        #expect(model.getNode(id: 1)?.block.outPins.map(\.asBool) == [true, false, true, false])
     }
 
     @Test("Deleting the selection leaves blocks on other pages alone")

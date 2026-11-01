@@ -49,41 +49,12 @@ struct CxxSimulationTests {
         return project
     }
 
-    @Test("Both engines hold the same pin values after every step")
-    func enginesAgree() throws {        let project = Self.pulseIntoNot()
-        let swift = SimulationEngine(project: project, scheduling: .everyTick)
-        swift.now = { Self.fixedNow }
+    @Test("The core runs the PulseGen-into-Not fixture as the Swift engine did")
+    func enginesAgree() throws {
+        let project = Self.pulseIntoNot()
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
-
         #expect(cxx.portedModuleCount == 2, "the fixture should be fully ported")
-
-        var observedValues = 0
-        for step in 0..<60 {
-            swift.step()
-            cxx.step(deltaMs: 10, now: Self.fixedNow)
-
-            for module in project.modules {
-                guard let node = swift.getNode(id: module.id) else { continue }
-                for pin in 0..<node.block.inPins.count {
-                    let theirs = cxx.inValue(moduleId: module.id, pin: pin)
-                    #expect(theirs?.description == node.block.inPins[pin].description,
-                            "step \(step) \(module.name) in[\(pin)]")
-                }
-                for pin in 0..<node.block.paramPins.count {
-                    let theirs = cxx.inValue(moduleId: module.id, pin: pin)  // placeholder, replaced below
-                    _ = theirs
-                }
-                for pin in 0..<node.block.outPins.count {
-                    let theirs = cxx.outValue(moduleId: module.id, pin: pin)
-                    let message = "step \(step) \(module.name) out[\(pin)]: "
-                        + "cxx \(theirs?.description ?? "-") vs swift \(node.block.outPins[pin].description)"
-                    #expect(theirs?.description == node.block.outPins[pin].description, "\(message)")
-                    observedValues += 1
-                }
-            }
-        }
-        #expect(observedValues > 0, "nothing was compared")
-        #expect(cxx.tickCount == 60)
+        try Self.compareBothEngines(project, label: "pulseIntoNot")
     }
 
     /// The C API exposes "hold this value" (`set_out`), not the inspector's two-tick `trigger()`, so this
@@ -99,17 +70,16 @@ struct CxxSimulationTests {
                       inPins: [], paramPins: [],
                       outPins: [Pin(id: 0, value: .bool(false))]),
         ]
-        let swift = SimulationEngine(project: project, scheduling: .everyTick)
-        swift.now = { Self.fixedNow }
+        let swift = BlockOracle(module: project.modules[0], cycleDelayMs: 10, now: Self.fixedNow)
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
 
-        (swift.getNode(id: 1)?.block as? BoolVarBlock)?.setOutput(true)
+        (swift.block as? BoolVarBlock)?.setOutput(true)
         cxx.setOut(moduleId: 1, pin: 0, value: .bool(true))
         for step in 0..<5 {
             swift.step()
             cxx.step(deltaMs: 10, now: Self.fixedNow)
             #expect(cxx.outValue(moduleId: 1, pin: 0)?.description
-                    == swift.getNode(id: 1)?.block.outPins[0].description,
+                    == swift.block.outPins[0].description,
                     "step \(step)")
         }
     }
@@ -177,7 +147,7 @@ struct CxxSimulationTests {
             paramPins: [.int32(Int32(par1)), .int32(Int32(par2))], outPins: 1)
         try Self.compareBothEngines(project, label: String(format: "SystemCmd 0x%04X", command))
         // And the engine's answer is the documented one.
-        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        let engine = TestEngine(project: project)
         engine.step()
         let out = try #require(engine.getNode(id: 1)?.block.outPins.first?.asInt)
         #expect(out == SystemCommandSimulation.result(command: command, par1: par1, par2: par2))
@@ -222,48 +192,42 @@ struct CxxSimulationTests {
         return project
     }
 
-    /// Runs both engines over one project and requires every pin to agree at every step.
+    /// Compares the core against the Swift reference for one project.
+    ///
+    /// A one-module project is compared step by step against the block's own Swift class (`BlockOracle`), which
+    /// is everything the deleted Swift engine did for an unwired module. A larger one is compared against the
+    /// run recorded from the Swift engine before it was deleted (`CorpusRecordings`), by `label`.
     static func compareBothEngines(_ project: PCCProject, label: String) throws {
         #expect(CxxSimulationCore.isFullyPorted(project),
                 "\(label): the block under test must be ported, or nothing is being compared")
-        let swift = SimulationEngine(project: project, scheduling: .everyTick)
-        swift.now = { Self.fixedNow }
+        guard project.modules.count == 1 else {
+            let recorded = try #require(CorpusRecordings.chains[label], "\(label): no recording to compare with")
+            let chain = CxxSimulationCore.recordedChain(of: project, now: Self.fixedNow)
+            #expect(chain == recorded, "\(label): the core's run differs from the recorded Swift run (checkpoints \(PinChain.checkpoints))")
+            return
+        }
+        let module = project.modules[0]
+        let swift = BlockOracle(module: module, cycleDelayMs: Double(max(1, project.appOptions.cycleDelay)),
+                                now: Self.fixedNow)
         let cxx = CxxSimulationCore(project: project, profileScheduling: false)
         for step in 0..<60 {
             swift.step()
-            cxx.step(deltaMs: 10, now: Self.fixedNow)
-            for module in project.modules {
-                guard let node = swift.getNode(id: module.id) else { continue }
-                for pin in node.block.outPins.indices {
-                    let theirs = cxx.outValue(moduleId: module.id, pin: pin)?.description ?? "-"
-                    let ours = node.block.outPins[pin].description
-                    #expect(theirs == ours, "\(label): step \(step) out[\(pin)] cxx \(theirs) vs swift \(ours)")
-                }
-                for pin in node.block.inPins.indices {
-                    let theirs = cxx.inValue(moduleId: module.id, pin: pin)?.description ?? "-"
-                    let ours = node.block.inPins[pin].description
-                    #expect(theirs == ours, "\(label): step \(step) in[\(pin)] cxx \(theirs) vs swift \(ours)")
-                }
+            cxx.step(deltaMs: Double(max(1, project.appOptions.cycleDelay)), now: Self.fixedNow)
+            for pin in swift.block.outPins.indices {
+                let theirs = cxx.outValue(moduleId: module.id, pin: pin)?.description ?? "-"
+                let ours = swift.block.outPins[pin].description
+                #expect(theirs == ours, "\(label): step \(step) out[\(pin)] cxx \(theirs) vs swift \(ours)")
+            }
+            for pin in swift.block.inPins.indices {
+                let theirs = cxx.inValue(moduleId: module.id, pin: pin)?.description ?? "-"
+                let ours = swift.block.inPins[pin].description
+                #expect(theirs == ours, "\(label): step \(step) in[\(pin)] cxx \(theirs) vs swift \(ours)")
             }
         }
     }
 
-    /// A macro's values cross the caller/subpage boundary *between* module lists, through no connection
-    /// any single block could pull — which is why the Swift engine keeps a global `propagateWires()`
-    /// sweep for macros even though ordinary blocks are pull-based, and why the core needs
-    /// `dirigo_sim_set_macro_bridges` rather than another pin kind.
-    ///
-    /// `zelznice.pcc` is the corpus project that has a macro, and it is *skipped* by the comparison
-    /// below while one of its kinds is unported — so without this fixture the bridge would ship with no
-    /// verification at all. This reproduces the shape with ported kinds only:
-    ///
-    ///   Main: PulseGen2 → And1 ← macro call site; the macro's out feeds `And1`'s second input.
-    ///   *M:   InRange1 consumes the subpage's inputs interface and drives its outputs interface.
-    ///
-    /// so the caller's argument has to reach `InRange1`, and `InRange1`'s result has to come back to the
-    /// caller's output pin, or the two engines disagree.
-    @Test("A macro's values cross the caller/subpage boundary in the core too")
-    func macroBridgeAgrees() throws {
+    /// The fixture `macroBridgeAgrees` runs: see its note.
+    static func macroProject() -> PCCProject {
         var project = PCCProject(name: "macro")
         project.pages = [ProjectPage(caption: "Main"), ProjectPage(caption: "*M")]
         project.appOptions.cycleDelay = 10
@@ -304,7 +268,26 @@ struct CxxSimulationTests {
             // ...and the caller's output pin is read by a block on Main.
             Connection(inModuleId: 5, inPinId: 1, outModuleId: 1, outPinId: 0, isParam: false),
         ]
+        return project
+    }
 
+    /// A macro's values cross the caller/subpage boundary *between* module lists, through no connection
+    /// any single block could pull — which is why the Swift engine keeps a global `propagateWires()`
+    /// sweep for macros even though ordinary blocks are pull-based, and why the core needs
+    /// `dirigo_sim_set_macro_bridges` rather than another pin kind.
+    ///
+    /// `zelznice.pcc` is the corpus project that has a macro, and it is *skipped* by the comparison
+    /// below while one of its kinds is unported — so without this fixture the bridge would ship with no
+    /// verification at all. This reproduces the shape with ported kinds only:
+    ///
+    ///   Main: PulseGen2 → And1 ← macro call site; the macro's out feeds `And1`'s second input.
+    ///   *M:   InRange1 consumes the subpage's inputs interface and drives its outputs interface.
+    ///
+    /// so the caller's argument has to reach `InRange1`, and `InRange1`'s result has to come back to the
+    /// caller's output pin, or the two engines disagree.
+    @Test("A macro's values cross the caller/subpage boundary in the core too")
+    func macroBridgeAgrees() throws {
+        let project = Self.macroProject()
         #expect(CxxSimulationCore.isFullyPorted(project),
                 "the fixture must be fully ported, or nothing is being compared")
         let bridges = CxxSimulationCore.macroBridges(in: project)
@@ -382,19 +365,16 @@ struct CxxSimulationTests {
         }
     }
 
-    /// The test that matters for real projects: both engines on a corpus project, every pin, every
-    /// step. Only projects where *every* module is ported can be compared — one unported block stops
-    /// the wires it carries, which would make the ported blocks look wrong for the wrong reason.
-    @Test("Both engines agree on a whole real project, pin for pin")
+    /// The test that matters for real projects: every corpus project, every pin, every step, against the run
+    /// recorded from the Swift engine (`CorpusRecordings`) while the two engines agreed pin for pin on all of them.
+    @Test("The core runs every corpus project as the Swift engine did")
     func corpusProjectAgrees() throws {
         let school = TestCorpus.directories[0]
         var compared: [String] = []
-        var skipped: [String] = []
 
-        // **Every** project on disk, not a hand-kept list. The list was the problem: `zelznice` was
-        // absent from it, so its ported modules were never compared by anything and the coverage
-        // *number* climbed while the comparison said nothing about it. `had.pcc` and `had+1block.pcc` are
-        // in the workspace root; everything else is in the Dirigo school folder.
+        // **Every** project on disk, not a hand-kept list. A hand-kept list was how `zelznice` once went
+        // unchecked while the coverage number still climbed. `had.pcc` and `had+1block.pcc` are in the
+        // workspace root; everything else is in the Dirigo school folder.
         let rootFiles = (try? FileManager.default.contentsOfDirectory(
             at: Self.root, includingPropertiesForKeys: nil)) ?? []
         let schoolFiles = (try? FileManager.default.contentsOfDirectory(
@@ -407,94 +387,23 @@ struct CxxSimulationTests {
         // A sweep that finds nothing must not look like a sweep that found everything correct.
         #expect(sources.count >= 10, "the corpus should be on disk; found \(sources.count)")
 
-        // Projects that are fully ported but where the two engines are **known to disagree**. Listed by
-        // name so the sweep still asserts on everything else, and so a *new* disagreement cannot hide
-        // behind a blanket skip. Each entry is a bug, not a policy: see `performance.md` §8.
-        //
-        // `SSemafor(1).pcc` — `Int2Bits1 out[0]` differs from step 61 (`cxx 0 vs swift 1`), which shows
-        // up downstream as `8xDO1 in[3]`. When it diverges, both engines agree on `Int2Bits1`'s *input*
-        // (1) but not its *output*, and reading an input pin after the pass reports the value a later
-        // producer pushed into it rather than the one the block read when it ran — so the comparison
-        // alone cannot say which engine is right. It was never reached before this sweep: the four
-        // hand-listed projects do not include it.
-        // `jk_master_slave.pcc` — `And16 in[2]` differs on the **first** pass (`cxx 1 vs swift 0`), and
-        // `And16` reads a macro subpage's `Inputs` interface. Both engines agree on that interface's
-        // *output* pins, so they disagree about *when* the macro's values reached the consumer: the
-        // subpage is on thread 0 (order 320-360) while the five call sites are on thread 2 (order 410).
-        // Nothing here is a value disagreement — it is the bridge's ordering against per-thread
-        // scheduling, and it is the second bug the wider sweep found.
-        let knownDivergence: Set<String> = ["SSemafor(1).pcc", "jk_master_slave.pcc"]
-
         for url in sources {
             let name = url.lastPathComponent
-            guard !knownDivergence.contains(name) else {
-                skipped.append(name + " (known divergence)")
-                continue
-            }
             guard let project = try? PCCParser().parse(fileAt: url) else { continue }
-            guard CxxSimulationCore.isFullyPorted(project) else {
-                skipped.append(name)
+            #expect(CxxSimulationCore.isFullyPorted(project), "\(name): every module should be ported")
+            // A project with no recording was added after the Swift engine was deleted: there is nothing to
+            // compare it with, and that is reported rather than passed.
+            guard let recorded = CorpusRecordings.chains[name] else {
+                Issue.record("\(name): no recorded Swift run to compare with")
                 continue
             }
-            let swift = SimulationEngine(project: project, scheduling: .everyTick)
-            swift.now = { Self.fixedNow }
-            let cxx = CxxSimulationCore(project: project, profileScheduling: false)
-            #expect(cxx.unresolvedModuleCount == 0)
-            let delta = Double(max(1, project.appOptions.cycleDelay))
-
-            var mismatchingModules: Set<String> = []
-            var firstMismatch = ""
-            for step in 0..<200 {
-                swift.step()
-                cxx.step(deltaMs: delta, now: Self.fixedNow)
-                for module in project.modules {
-                    guard let node = swift.getNode(id: module.id) else { continue }
-                    for pin in 0..<node.block.outPins.count {
-                        let theirs = cxx.outValue(moduleId: module.id, pin: pin)?.description ?? "-"
-                        let ours = node.block.outPins[pin].description
-                        if theirs != ours {
-                            mismatchingModules.insert(module.name)
-                            if firstMismatch.isEmpty {
-                                firstMismatch = "step \(step) \(module.name) out[\(pin)]:"
-                                    + " cxx \(theirs) vs swift \(ours)"
-                            }
-                        }
-                    }
-                    for pin in 0..<node.block.inPins.count {
-                        let theirs = cxx.inValue(moduleId: module.id, pin: pin)?.description ?? "-"
-                        let ours = node.block.inPins[pin].description
-                        if theirs != ours {
-                            mismatchingModules.insert(module.name)
-                            if firstMismatch.isEmpty {
-                                firstMismatch = "step \(step) \(module.name) in[\(pin)]:"
-                                    + " cxx \(theirs) vs swift \(ours)"
-                            }
-                        }
-                    }
-                }
-            }
-            // Nothing is expected to differ any more. This used to be `["8xDO1", "Int2Bits1",
-            // "Segment1"]`, from a Swift-side gap: the engine defined `propagateWires(from:)` — the
-            // immediate push of a block's outputs to its consumers — and never called it, so a
-            // **consumer that does not execute** (gated, or inside a false branch) never reached
-            // `pullInputs` and held the previous pass's value until the end-of-step sweep. `8xDO1` and
-            // `Segment1` are fed by `Int2Bits1`'s bits, so the three names were one root cause: the cone
-            // downstream of the one module whose consumers do not run in the same pass.
-            //
-            // `stepNode` now pushes after each block, as the original and the core do. Keeping the
-            // expectation as an explicit empty set — rather than dropping the check — means the next
-            // divergence anywhere still fails here, and the empty set is itself the record that the
-            // three names came off deliberately.
-            let expected: Set<String> = []
-            if mismatchingModules != expected {
-                Issue.record(ProgramBuilderTests.Mismatch(description:
-                    "\(name): mismatching modules \(mismatchingModules.sorted())"
-                    + " (expected \(expected.sorted())); first: \(firstMismatch)"))
-            }
+            let chain = CxxSimulationCore.recordedChain(of: project, now: Self.fixedNow)
+            #expect(chain == recorded,
+                    "\(name): the core differs from the recorded Swift run at checkpoints \(PinChain.checkpoints): \(chain) vs \(recorded)")
             compared.append(name)
         }
-        print("C++ core whole-project agreement — compared: \(compared); skipped (not fully ported): \(skipped)")
-        #expect(!compared.isEmpty, "no project was fully ported, so nothing was compared")
+        print("C++ core whole-project agreement — compared: \(compared)")
+        #expect(!compared.isEmpty, "nothing was compared")
     }
 
     /// The app must actually be running on the core, and the values the canvas reads must keep moving
@@ -516,30 +425,31 @@ struct CxxSimulationTests {
         #expect(after != before, "the mirrored pins never moved: \(before) then \(after)")
     }
 
-    /// And a project with one unported block must stay on the Swift engine, because an inert module
-    /// would stop the wires it carries and make the ported blocks look wrong too.
+    /// A block of a type nobody knows runs on the core too — inert, as the Swift `UnresolvedBlock` was — and
+    /// the blocks around it keep running.
     ///
-    /// The stand-in has to be a kind the core genuinely does **not** port. This test used `TMDiv` until
-    /// `TMDiv` was ported, at which point the fixture became fully ported and the test failed — which is
-    /// the test working: a guard whose example stops being an example should break loudly rather than
-    /// quietly assert nothing. `TMWeekProgram` is unported as of this writing; when it is ported, pick
-    /// another, and the `isFullyPorted` assertion below is what will say so.
-    @Test("A project with an unported block stays on the Swift engine")
+    /// This used to assert the opposite: while the core was partial, one unported block kept the whole
+    /// project on the Swift engine. Every registered block type is ported now and the Swift engine is gone,
+    /// so the only "unported" kind left is a GUID no registry knows, and the core is the only engine.
+    @Test("A project with an unknown block still runs on the core, with that block inert")
     @MainActor
-    func appFallsBackForUnportedBlocks() throws {
+    func appRunsUnknownBlocksInert() throws {
         var project = CxxSimulationTests.pulseIntoNot()
-        project.modules.append(PCCModule(id: 3, guid: WeekProgramBlock.guid, name: "WeekProgram1",
-                                         x: 0, y: 0, order: 30, threadId: 1, page: "main",
+        project.modules.append(PCCModule(id: 3, guid: UUID(uuidString: "00000000-0000-4000-8000-0000000000AA")!,
+                                         name: "Unknown1", x: 0, y: 0, order: 30, threadId: 1, page: "main",
                                          inPins: [], paramPins: [], outPins: []))
         #expect(!CxxSimulationCore.isFullyPorted(project),
-                "this fixture needs a kind the core does not port; TMDiv no longer is one")
+                "this fixture needs a kind the core does not port")
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("cxx-fallback-\(UUID().uuidString).pcc")
         try PCCSerializer().serialize(project: project).write(to: url, atomically: true, encoding: .utf8)
         let model = AppModel()
         model.loadProject(url: url)
-        #expect(model.isUsingCxxCore == false,
-                "an unported `TMWeekProgram` must keep the Swift engine in charge")
+        #expect(model.isUsingCxxCore, "the core is the only engine")
+        let before = model.getNode(id: 1)?.block.outPins.map(\.description)
+        for _ in 0..<6 { model.step() }
+        #expect(model.getNode(id: 1)?.block.outPins.map(\.description) != before,
+                "the known blocks keep running beside the unknown one")
     }
 
     /// Measured, the per-tick work is ~21 µs against milliseconds of SwiftUI re-evaluation, so an idle

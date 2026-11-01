@@ -59,7 +59,7 @@ struct NestedMacroTests {
 
     @Test("A value crosses two macro levels and back, in the Swift engine")
     func swiftEngine() throws {
-        let engine = SimulationEngine(project: Self.project(), scheduling: .everyTick)
+        let engine = TestEngine(project: Self.project(), scheduling: .everyTick)
         engine.step()
         // Src is false, `*B` inverts it, and `A1`'s output is what came back.
         #expect(engine.getNode(id: 2)?.block.outPins.first?.asBool == true)
@@ -111,7 +111,7 @@ struct NestedMacroTests {
         let xml = PCCSerializer().serialize(project: project)
         let modules = PLCProjectCompiler.modules(in: xml)
         #expect(!PLCProjectCompiler.expansionOrder(modules).isEmpty)
-        let engine = SimulationEngine(project: project, scheduling: .everyTick)
+        let engine = TestEngine(project: project, scheduling: .everyTick)
         engine.step()
     }
     // MARK: - One copy of the sheet per call
@@ -129,7 +129,7 @@ struct NestedMacroTests {
 
     @Test("Two calls of one macro see independent copies, in the Swift engine")
     func swiftCallsAreIndependent() {
-        let engine = SimulationEngine(project: Self.twoCalls(), scheduling: .everyTick)
+        let engine = TestEngine(project: Self.twoCalls(), scheduling: .everyTick)
         for _ in 0..<3 { engine.step() }
         #expect(engine.getNode(id: 2)?.block.outPins.first?.asBool == true)
         #expect(engine.getNode(id: 4)?.block.outPins.first?.asBool == false)
@@ -158,7 +158,7 @@ struct NestedMacroTests {
 
     @Test("A call on a sheet nothing calls does not feed the macro a real call is using")
     func strayCallIsIgnored() {
-        let engine = SimulationEngine(project: Self.strayCall(), scheduling: .everyTick)
+        let engine = TestEngine(project: Self.strayCall(), scheduling: .everyTick)
         for _ in 0..<3 { engine.step() }
         #expect(engine.getNode(id: 2)?.block.outPins.first?.asBool == true, "A1: Src is false, B inverts")
         let core = CxxSimulationCore(project: Self.strayCall(), profileScheduling: false)

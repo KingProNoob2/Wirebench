@@ -7,34 +7,23 @@ import SwiftUI
 /// "unsupported view" placeholder. Anything visual kept private to `MainView` can therefore only be
 /// checked by eye in the running app. As their own views these can be laid out and looked at.
 enum SidebarMetrics {
-    static let iconTile: CGFloat = 20
-    static let searchCornerRadius: CGFloat = 9
+    static let searchCornerRadius: CGFloat = 7
     static let outerPadding: CGFloat = 10
-
-    /// A tinted rounded square behind a row's glyph.
-    static func tile<S: View>(tint: Color, fill: Double = 0.15, @ViewBuilder content: () -> S) -> some View {
-        content()
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(tint)
-            .frame(width: iconTile, height: iconTile)
-            .background(tint.opacity(fill),
-                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-    }
 }
 
-/// Small tracked capitals, so the groups read as groups at a glance.
+/// A group title, in the weight and size macOS uses for its own sidebar headers.
 struct SidebarSectionTitle: View {
     let title: String
 
     var body: some View {
-        Text(title.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(0.7)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// The glass field at the top of the sidebar.
+/// The search field at the top of the sidebar: a quiet filled field, like Finder's and Mail's.
 ///
 /// Deliberately not the system `.searchable`: that drops a stock, blue-ringed control into the
 /// sidebar, which does not match the rest of the app's chrome.
@@ -47,9 +36,9 @@ struct SidebarSearchField: View {
     }
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
 
             TextField(prompt, text: $text)
@@ -66,14 +55,16 @@ struct SidebarSearchField: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear the search")
+                .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .glassPanel(cornerRadius: SidebarMetrics.searchCornerRadius, interactive: true)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: SidebarMetrics.searchCornerRadius, style: .continuous))
         .padding(.horizontal, SidebarMetrics.outerPadding)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 }
 
@@ -92,7 +83,7 @@ struct SidebarAddButton: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(isHovering ? tint : tint.opacity(0.85))
+                .foregroundStyle(isHovering ? Color.primary : tint)
                 .frame(width: 18, height: 18)
                 // Its own hover highlight rather than a borderless AppKit button: this is pure
                 // SwiftUI, so it draws the same everywhere and stays put next to the title.
@@ -105,48 +96,41 @@ struct SidebarAddButton: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
-/// A counted pill. Quieter when the count is zero, so empty pages recede.
+/// A row's block count, as plain trailing digits the way Mail shows unread counts. Empty pages
+/// show nothing, so the eye goes to the pages that have something on them.
 struct SidebarCountBadge: View {
     let count: Int
-    /// On a selected row, whose background is the accent colour: the badge is white on a lighter pill.
-    var onAccent = false
 
     var body: some View {
-        Text("\(count)")
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(onAccent ? Color.white : (count == 0 ? Color.secondary.opacity(0.6) : Color.secondary))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(onAccent ? Color.white.opacity(0.24) : Color.primary.opacity(0.08),
-                        in: Capsule(style: .continuous))
+        if count > 0 {
+            Text("\(count)")
+                .font(.subheadline)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("\(count) block\(count == 1 ? "" : "s")")
+        }
     }
 }
 
-/// One sidebar row: tinted glyph tile, name, count.
+/// One sidebar row: glyph, name, count.
 struct SidebarRow: View {
     let symbol: String
-    let tint: Color
     let title: String
     let count: Int
 
-    /// `.increased` when the list draws this row selected, on the accent colour. The tile and badge are
-    /// accent-tinted, so left alone they vanish into that background (a blue glyph on a blue row).
-    @Environment(\.backgroundProminence) private var prominence
-
     var body: some View {
-        let selected = prominence == .increased
-        HStack(spacing: 8) {
-            SidebarMetrics.tile(tint: selected ? .white : tint, fill: selected ? 0.24 : 0.15) {
-                Image(systemName: symbol)
-            }
-            Text(title)
+        HStack(spacing: 6) {
+            // A plain `Label` so the list styles the glyph itself, including on a selected row.
+            // Truncated in the middle, so two long page names that differ only at the end stay distinct.
+            Label(title, systemImage: symbol)
                 .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 4)
-            SidebarCountBadge(count: count, onAccent: selected)
+            SidebarCountBadge(count: count)
         }
     }
 }
