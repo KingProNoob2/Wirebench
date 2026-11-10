@@ -1,0 +1,8 @@
+// Signing for the macOS app.
+//
+// Ad hoc by default, so the project builds on any machine. An ad-hoc signature is new with every build, so macOS treats each rebuild as a
+// different app: the Keychain asks permission again and "Always Allow" never sticks. To stop that, give this machine a stable identity in
+// Config/Local.xcconfig (copy Local.xcconfig.example). That file is not committed.
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = -
+#include? "Local.xcconfig"

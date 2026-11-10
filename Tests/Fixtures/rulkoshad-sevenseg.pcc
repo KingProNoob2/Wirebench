@@ -1,0 +1,1303 @@
+<PCC_PROJECT APPLICATION="Dirigo" APPLICATION_VERSION="v2.5.10.459" NAME="" DESCRIPTION="" AUTHOR="" VERSION="" PROFILE="Sybas P3" THREADINDEX="2" OLD_EXPORT_MODE="False" PAGESIZE="63" APPLICATION_PATH="Y:\Random Stuff\Dirigo\Dirigo.exe" PROJECT_PATH="Y:\School\PCV\rulkoshaddirigo.pcc" ORIG_PROJECT_PATH="Y:\School\PCV\rulkoshaddirigo.pcc">
+  <COMMUNICATION TYPE="0" PLC_ADDRESS="1" PC_ADDRESS="31" BAUD_RATE="57600" HOST="127.0.0.1" PORT="59" PC_PORT="59" PASSWORD="" TIMEOUT="5000"/>
+  <APP_OPTIONS IQRF_NETWORK="1" IQRF_ADDRESS="1" CYCLE_DELAY="7"/>
+  <SIM_OPTIONS ENABLED="False" ADDRESS="1" PORT="59" PASSWORD="">
+    <PEER_1 IP="127.0.0.1" PORT="59" TIMEOUT="500" PASSWORD=""/>
+  </SIM_OPTIONS>
+  <PAGES>
+    <PAGE CAPTION="main"/>
+    <PAGE CAPTION="*kostka"/>
+    <PAGE CAPTION="*rultea"/>
+    <PAGE CAPTION="*had"/>
+  </PAGES>
+  <CONSTANTS/>
+  <MODULES>
+    <MODULE GUID="{74F92168-F67B-4364-8AC0-B735DAA400A3}" NAME="PulseGen1" ID="2" X="350" Y="148" ORDER="20" THREAD_ID="0" PAGE="*kostka">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="1"/>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch1" ID="7" X="686" Y="246" ORDER="60" THREAD_ID="0" PAGE="*kostka" INPUT_COUNT="6">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="6"/>
+        <IN_PIN VALUE="91"/>
+        <IN_PIN VALUE="79"/>
+        <IN_PIN VALUE="102"/>
+        <IN_PIN VALUE="109"/>
+        <IN_PIN VALUE="125"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{74F92168-F67B-4364-8AC0-B735DAA400A3}" NAME="PulseGen2" ID="11" X="350" Y="176" ORDER="130" THREAD_ID="0" PAGE="*rultea">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="1"/>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch3" ID="17" X="1036" Y="386" ORDER="190" THREAD_ID="0" PAGE="*rultea" INPUT_COUNT="10">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="63"/>
+        <IN_PIN VALUE="6"/>
+        <IN_PIN VALUE="91"/>
+        <IN_PIN VALUE="79"/>
+        <IN_PIN VALUE="102"/>
+        <IN_PIN VALUE="109"/>
+        <IN_PIN VALUE="125"/>
+        <IN_PIN VALUE="7"/>
+        <IN_PIN VALUE="127"/>
+        <IN_PIN VALUE="111"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{E37509F9-7693-49D7-977E-BAA796F92265}" NAME="Counter3" ID="20" X="462" Y="498" ORDER="160" THREAD_ID="0" PAGE="*rultea">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{8942245A-7E82-43FF-94E8-E7BCF69FDEE9}" NAME="Comparator3" ID="21" X="294" Y="442" ORDER="150" THREAD_ID="0" PAGE="*rultea">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="39"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{05ED6F8C-A885-4F72-9671-6D6AB3D556E2}" NAME="Div1" ID="13" X="574" Y="246" ORDER="170" THREAD_ID="0" PAGE="*rultea" MODULO_VISIBLE="True">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="10"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch2" ID="14" X="742" Y="204" ORDER="180" THREAD_ID="0" PAGE="*rultea" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{74F92168-F67B-4364-8AC0-B735DAA400A3}" NAME="PulseGen3" ID="16" X="728" Y="36" ORDER="120" THREAD_ID="0" PAGE="*rultea">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="1"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="1"/>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{060906AA-5048-4931-BE5C-714697885084}" NAME="SystemCmd1" ID="22" X="56" Y="8" ORDER="100" THREAD_ID="0" PAGE="*rultea">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="770" DISPLAY_FORMAT="0x"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="112"/>
+        <PARAM_PIN VALUE="0"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{D163B0B9-D7AE-4BB8-800C-167B9E26488B}" NAME="Set1" ID="23" X="742" Y="330" ORDER="200" THREAD_ID="0" PAGE="*rultea" INPUT_COUNT="1">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="127"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="0"/>
+      </PARAM_PINS>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{D163B0B9-D7AE-4BB8-800C-167B9E26488B}" NAME="Set2" ID="26" X="392" Y="260" ORDER="70" THREAD_ID="0" PAGE="*kostka" INPUT_COUNT="1">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="127"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="0"/>
+      </PARAM_PINS>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC}" NAME="Inputs1" ID="10" X="196" Y="78" ORDER="110" THREAD_ID="0" PAGE="*rultea" MACRO_NAME="Inputs" KIND="0">
+      <IN_PINS/>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN TYPE="1" PIN_NAME="Inp1" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="Inp2" RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC}" NAME="Inputs2" ID="1" X="70" Y="204" ORDER="10" THREAD_ID="0" PAGE="*kostka" MACRO_NAME="Inputs" KIND="0">
+      <IN_PINS/>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN TYPE="1" PIN_NAME="Inp1" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="Inp2" RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC}" NAME="Inputs3" ID="40" X="70" Y="176" ORDER="230" THREAD_ID="0" PAGE="*had" MACRO_NAME="Inputs" KIND="0">
+      <IN_PINS/>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN TYPE="1" PIN_NAME="Inp1" RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{E37509F9-7693-49D7-977E-BAA796F92265}" NAME="Counter2" ID="43" X="182" Y="190" ORDER="20" THREAD_ID="4" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits2" ID="44" X="322" Y="134" ORDER="40" THREAD_ID="4" PAGE="main" OUTPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{8942245A-7E82-43FF-94E8-E7BCF69FDEE9}" NAME="Comparator2" ID="46" X="182" Y="8" ORDER="30" THREAD_ID="4" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="3"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{058EE871-1370-46E7-AC3E-905CB632A211}" NAME="And1" ID="47" X="574" Y="0" ORDER="50" THREAD_ID="4" PAGE="main" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{848C8ACE-58B9-48D8-9CAC-DE5DB5055674}" NAME="had1" ID="48" X="504" Y="204" ORDER="110" THREAD_ID="4" PAGE="main" MACRO_NAME="had">
+      <IN_PINS>
+        <IN_PIN TYPE="1" PIN_NAME="Inp1" VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN TYPE="I" PIN_NAME="Out1" RIGHTS="2"/>
+        <OUT_PIN TYPE="I" PIN_NAME="Out2" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="EN" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="PG" RIGHTS="2"/>
+        <OUT_PIN TYPE="I" PIN_NAME="OutA" RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{848C8ACE-58B9-48D8-9CAC-DE5DB5055674}" NAME="kostka1" ID="49" X="644" Y="106" ORDER="60" THREAD_ID="4" PAGE="main" MACRO_NAME="kostka">
+      <IN_PINS>
+        <IN_PIN TYPE="1" PIN_NAME="Inp1" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="Inp2" VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN TYPE="I" PIN_NAME="Out1" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="PG" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="EN" RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{848C8ACE-58B9-48D8-9CAC-DE5DB5055674}" NAME="rultea1" ID="50" X="490" Y="442" ORDER="120" THREAD_ID="4" PAGE="main" MACRO_NAME="rultea">
+      <IN_PINS>
+        <IN_PIN TYPE="1" PIN_NAME="Inp1" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="Inp2" VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN TYPE="I" PIN_NAME="Out1" RIGHTS="2"/>
+        <OUT_PIN TYPE="I" PIN_NAME="Out2" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="EN" RIGHTS="2"/>
+        <OUT_PIN TYPE="1" PIN_NAME="PG" RIGHTS="2"/>
+        <OUT_PIN TYPE="I" PIN_NAME="OutA" RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{035970BC-0033-4051-A525-8579CFF78785}" NAME="8xDI1" ID="42" X="42" Y="204" ORDER="10" THREAD_ID="4" PAGE="main" PIN_MASK="$0030">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{72ECCB1C-F9E5-42A7-847D-12F37BC9EE47}" NAME="Not1" ID="52" X="378" Y="372" ORDER="90" THREAD_ID="4" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{058EE871-1370-46E7-AC3E-905CB632A211}" NAME="And2" ID="51" X="392" Y="274" ORDER="100" THREAD_ID="4" PAGE="main" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{058EE871-1370-46E7-AC3E-905CB632A211}" NAME="And3" ID="53" X="602" Y="344" ORDER="80" THREAD_ID="4" PAGE="main" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{72ECCB1C-F9E5-42A7-847D-12F37BC9EE47}" NAME="Not2" ID="54" X="602" Y="274" ORDER="70" THREAD_ID="4" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{CBD854FF-873C-46DD-81E4-249A7D5FFF43}" NAME="AdvCounter" ID="25" X="476" Y="498" ORDER="260" THREAD_ID="0" PAGE="*had">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="0"/>
+        <PARAM_PIN VALUE="8"/>
+        <PARAM_PIN VALUE="0"/>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch5" ID="27" X="630" Y="694" ORDER="290" THREAD_ID="0" PAGE="*had" INPUT_COUNT="8">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0" DISPLAY_FORMAT="0d"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="8"/>
+        <IN_PIN VALUE="16"/>
+        <IN_PIN VALUE="32"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{058EE871-1370-46E7-AC3E-905CB632A211}" NAME="And4" ID="30" X="294" Y="274" ORDER="140" THREAD_ID="0" PAGE="*rultea" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{058EE871-1370-46E7-AC3E-905CB632A211}" NAME="And5" ID="4" X="196" Y="302" ORDER="30" THREAD_ID="0" PAGE="*kostka" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{74F92168-F67B-4364-8AC0-B735DAA400A3}" NAME="PulseGen5" ID="24" X="224" Y="302" ORDER="250" THREAD_ID="0" PAGE="*had">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="1"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="30"/>
+        <PARAM_PIN VALUE="30"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{72ECCB1C-F9E5-42A7-847D-12F37BC9EE47}" NAME="Not3" ID="6" X="420" Y="0" ORDER="10" THREAD_ID="2" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{72ECCB1C-F9E5-42A7-847D-12F37BC9EE47}" NAME="Not4" ID="31" X="462" Y="64" ORDER="20" THREAD_ID="2" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{060906AA-5048-4931-BE5C-714697885084}" NAME="SystemCmd2" ID="12" X="56" Y="8" ORDER="100" THREAD_ID="0" PAGE="main">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="770" DISPLAY_FORMAT="0x"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="112"/>
+        <PARAM_PIN VALUE="0"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{CBD854FF-873C-46DD-81E4-249A7D5FFF43}" NAME="AdvCounter1" ID="19" X="798" Y="36" ORDER="320" THREAD_ID="0" PAGE="*kostka">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="0"/>
+        <PARAM_PIN VALUE="5"/>
+        <PARAM_PIN VALUE="0"/>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch4" ID="5" X="840" Y="610" ORDER="330" THREAD_ID="0" PAGE="*had" INPUT_COUNT="8">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="2"/>
+        <IN_PIN VALUE="4"/>
+        <IN_PIN VALUE="8"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{74F92168-F67B-4364-8AC0-B735DAA400A3}" NAME="PulseGen4" ID="8" X="980" Y="456" ORDER="340" THREAD_ID="0" PAGE="*had">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="1"/>
+      </IN_PINS>
+      <PARAM_PINS>
+        <PARAM_PIN VALUE="1"/>
+        <PARAM_PIN VALUE="1"/>
+      </PARAM_PINS>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch6" ID="32" X="798" Y="442" ORDER="350" THREAD_ID="0" PAGE="*had" INPUT_COUNT="2">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC}" NAME="Outputs1" ID="34" X="1078" Y="274" ORDER="370" THREAD_ID="0" PAGE="*rultea" MACRO_NAME="Outputs" KIND="1">
+      <IN_PINS>
+        <IN_PIN TYPE="I" PIN_NAME="Out1" VALUE="0"/>
+        <IN_PIN TYPE="I" PIN_NAME="Out2" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="EN" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="PG" VALUE="0"/>
+        <IN_PIN TYPE="I" PIN_NAME="OutA" VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits4" ID="33" X="826" Y="456" ORDER="30" THREAD_ID="4" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0F50AC33-F61E-4009-9C60-FDE664DA0ABC}" NAME="8xDO1" ID="15" X="812" Y="274" ORDER="40" THREAD_ID="4" PAGE="main" PIN_COUNT="14" HIDDEN_PIN_MASK="$0473">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits3" ID="18" X="854" Y="50" ORDER="30" THREAD_ID="4" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0F50AC33-F61E-4009-9C60-FDE664DA0ABC}" NAME="8xDO2" ID="35" X="1008" Y="50" ORDER="30" THREAD_ID="4" PAGE="main" PIN_COUNT="14" HIDDEN_PIN_MASK="$0473">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC}" NAME="Outputs2" ID="37" X="994" Y="162" ORDER="390" THREAD_ID="0" PAGE="*kostka" MACRO_NAME="Outputs" KIND="1">
+      <IN_PINS>
+        <IN_PIN TYPE="I" PIN_NAME="Out1" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="PG" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="EN" VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{0F50AC33-F61E-4009-9C60-FDE664DA0ABC}" NAME="8xDO4" ID="3" X="1148" Y="246" ORDER="30" THREAD_ID="4" PAGE="main" PIN_COUNT="14" HIDDEN_PIN_MASK="$0473">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits1" ID="9" X="1022" Y="232" ORDER="40" THREAD_ID="4" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC}" NAME="Outputs3" ID="29" X="980" Y="316" ORDER="410" THREAD_ID="0" PAGE="*had" MACRO_NAME="Outputs" KIND="1">
+      <IN_PINS>
+        <IN_PIN TYPE="I" PIN_NAME="Out1" VALUE="0"/>
+        <IN_PIN TYPE="I" PIN_NAME="Out2" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="EN" VALUE="0"/>
+        <IN_PIN TYPE="1" PIN_NAME="PG" VALUE="0"/>
+        <IN_PIN TYPE="I" PIN_NAME="OutA" VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS/>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch7" ID="28" X="644" Y="442" ORDER="420" THREAD_ID="0" PAGE="*rultea" INPUT_COUNT="10">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="63"/>
+        <IN_PIN VALUE="6"/>
+        <IN_PIN VALUE="91"/>
+        <IN_PIN VALUE="79"/>
+        <IN_PIN VALUE="102"/>
+        <IN_PIN VALUE="109"/>
+        <IN_PIN VALUE="125"/>
+        <IN_PIN VALUE="7"/>
+        <IN_PIN VALUE="127"/>
+        <IN_PIN VALUE="111"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{0FAE4998-FD44-4CA1-B55F-7E148FDFF20A}" NAME="ISwitch8" ID="36" X="770" Y="442" ORDER="430" THREAD_ID="0" PAGE="*rultea" INPUT_COUNT="10">
+      <IN_PINS>
+        <IN_PIN VALUE="1"/>
+        <IN_PIN VALUE="0"/>
+        <IN_PIN VALUE="63"/>
+        <IN_PIN VALUE="6"/>
+        <IN_PIN VALUE="91"/>
+        <IN_PIN VALUE="79"/>
+        <IN_PIN VALUE="102"/>
+        <IN_PIN VALUE="109"/>
+        <IN_PIN VALUE="125"/>
+        <IN_PIN VALUE="7"/>
+        <IN_PIN VALUE="127"/>
+        <IN_PIN VALUE="111"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits5" ID="38" X="616" Y="442" ORDER="30" THREAD_ID="2" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits6" ID="39" X="742" Y="442" ORDER="40" THREAD_ID="2" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits7" ID="41" X="994" Y="414" ORDER="50" THREAD_ID="2" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+    <MODULE GUID="{F319DECC-7D91-4684-A813-83DBB5C70245}" NAME="Int2Bits8" ID="45" X="1092" Y="428" ORDER="60" THREAD_ID="2" PAGE="main" OUTPUT_COUNT="7">
+      <IN_PINS>
+        <IN_PIN VALUE="0"/>
+      </IN_PINS>
+      <PARAM_PINS/>
+      <OUT_PINS>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+        <OUT_PIN RIGHTS="2"/>
+      </OUT_PINS>
+    </MODULE>
+  </MODULES>
+  <CONNECTIONS>
+    <IN_CONNECTIONS>
+      <CONNECTION IN_MODULE_ID="2" IN_PIN_ID="0" OUT_MODULE_ID="1" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="57" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="2" IN_PIN_ID="1" OUT_MODULE_ID="1" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="113" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="7" IN_PIN_ID="0" OUT_MODULE_ID="1" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="295" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="7" IN_PIN_ID="1" OUT_MODULE_ID="19" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="22" Y="0"/>
+          <POINT X="22" Y="168"/>
+          <POINT X="-216" Y="168"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="11" IN_PIN_ID="1" OUT_MODULE_ID="10" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="55" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="17" IN_PIN_ID="0" OUT_MODULE_ID="10" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="209" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="17" IN_PIN_ID="1" OUT_MODULE_ID="14" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="10" Y="0"/>
+          <POINT X="10" Y="70"/>
+          <POINT X="-142" Y="70"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="20" IN_PIN_ID="1" OUT_MODULE_ID="11" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="10" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="20" IN_PIN_ID="2" OUT_MODULE_ID="21" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="50" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="21" IN_PIN_ID="1" OUT_MODULE_ID="20" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="67" Y="0"/>
+          <POINT X="67" Y="98"/>
+          <POINT X="-283" Y="98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="13" IN_PIN_ID="1" OUT_MODULE_ID="20" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="23" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="14" IN_PIN_ID="0" OUT_MODULE_ID="10" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="237" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="14" IN_PIN_ID="1" OUT_MODULE_ID="16" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="50" Y="0"/>
+          <POINT X="50" Y="56"/>
+          <POINT X="-118" Y="56"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="14" IN_PIN_ID="2" OUT_MODULE_ID="13" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="14" IN_PIN_ID="3" OUT_MODULE_ID="13" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="68" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="16" IN_PIN_ID="0" OUT_MODULE_ID="10" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="223" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="23" IN_PIN_ID="0" OUT_MODULE_ID="30" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="152" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="26" IN_PIN_ID="0" OUT_MODULE_ID="4" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="68" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="43" IN_PIN_ID="1" OUT_MODULE_ID="42" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="-10" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="43" IN_PIN_ID="2" OUT_MODULE_ID="46" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="22" Y="0"/>
+          <POINT X="22" Y="98"/>
+          <POINT X="-104" Y="98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="44" IN_PIN_ID="0" OUT_MODULE_ID="43" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="23" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="46" IN_PIN_ID="1" OUT_MODULE_ID="43" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="11" Y="0"/>
+          <POINT X="11" Y="-98"/>
+          <POINT X="-89" Y="-98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="47" IN_PIN_ID="1" OUT_MODULE_ID="6" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="47" IN_PIN_ID="2" OUT_MODULE_ID="31" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="48" IN_PIN_ID="0" OUT_MODULE_ID="51" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="40" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="49" IN_PIN_ID="0" OUT_MODULE_ID="47" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="0" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="49" IN_PIN_ID="1" OUT_MODULE_ID="42" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="186" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="50" IN_PIN_ID="0" OUT_MODULE_ID="53" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="54" Y="0"/>
+          <POINT X="54" Y="42"/>
+          <POINT X="-182" Y="42"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="50" IN_PIN_ID="1" OUT_MODULE_ID="42" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="30" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="52" IN_PIN_ID="1" OUT_MODULE_ID="44" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="-70" Y="0"/>
+          <POINT X="-70" Y="140"/>
+          <POINT X="-47" Y="140"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="51" IN_PIN_ID="1" OUT_MODULE_ID="44" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="42" Y="0"/>
+          <POINT X="42" Y="98"/>
+          <POINT X="-14" Y="98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="51" IN_PIN_ID="2" OUT_MODULE_ID="52" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="26" Y="0"/>
+          <POINT X="26" Y="-42"/>
+          <POINT X="-72" Y="-42"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="53" IN_PIN_ID="1" OUT_MODULE_ID="44" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="210" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="53" IN_PIN_ID="2" OUT_MODULE_ID="54" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="-58" Y="0"/>
+          <POINT X="-58" Y="28"/>
+          <POINT X="-39" Y="28"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="54" IN_PIN_ID="1" OUT_MODULE_ID="44" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="210" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="25" IN_PIN_ID="1" OUT_MODULE_ID="24" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="78" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="25" IN_PIN_ID="2" OUT_MODULE_ID="25" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="29" Y="0"/>
+          <POINT X="29" Y="-70"/>
+          <POINT X="-156" Y="-70"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="27" IN_PIN_ID="0" OUT_MODULE_ID="40" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="293" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="27" IN_PIN_ID="1" OUT_MODULE_ID="25" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="29" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="30" IN_PIN_ID="1" OUT_MODULE_ID="10" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="27" Y="0"/>
+          <POINT X="27" Y="98"/>
+          <POINT X="13" Y="98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="30" IN_PIN_ID="2" OUT_MODULE_ID="10" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="27" Y="0"/>
+          <POINT X="27" Y="98"/>
+          <POINT X="13" Y="98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="4" IN_PIN_ID="1" OUT_MODULE_ID="1" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="29" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="4" IN_PIN_ID="2" OUT_MODULE_ID="1" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="29" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="24" IN_PIN_ID="0" OUT_MODULE_ID="40" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="55" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="6" IN_PIN_ID="1" OUT_MODULE_ID="44" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="42" Y="0"/>
+          <POINT X="42" Y="-28"/>
+          <POINT X="14" Y="-28"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="31" IN_PIN_ID="1" OUT_MODULE_ID="44" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="42" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="19" IN_PIN_ID="1" OUT_MODULE_ID="2" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="290" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="19" IN_PIN_ID="2" OUT_MODULE_ID="19" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="22" Y="0"/>
+          <POINT X="22" Y="70"/>
+          <POINT X="-104" Y="70"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="5" IN_PIN_ID="1" OUT_MODULE_ID="25" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="141" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="32" IN_PIN_ID="1" OUT_MODULE_ID="8" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="22" Y="0"/>
+          <POINT X="22" Y="84"/>
+          <POINT X="-300" Y="84"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="32" IN_PIN_ID="2" OUT_MODULE_ID="27" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="52" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="32" IN_PIN_ID="3" OUT_MODULE_ID="5" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="24" Y="0"/>
+          <POINT X="24" Y="-56"/>
+          <POINT X="-130" Y="-56"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="34" IN_PIN_ID="0" OUT_MODULE_ID="28" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="192" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="34" IN_PIN_ID="1" OUT_MODULE_ID="36" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="122" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="34" IN_PIN_ID="2" OUT_MODULE_ID="10" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="419" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="34" IN_PIN_ID="3" OUT_MODULE_ID="16" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="134" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="34" IN_PIN_ID="4" OUT_MODULE_ID="17" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="24" Y="0"/>
+          <POINT X="24" Y="-28"/>
+          <POINT X="-46" Y="-28"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="33" IN_PIN_ID="0" OUT_MODULE_ID="50" OUT_PIN_ID="4">
+        <POINTS>
+          <POINT X="253" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="0" OUT_MODULE_ID="50" OUT_PIN_ID="2">
+        <POINTS>
+          <POINT X="114" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="1" OUT_MODULE_ID="33" OUT_PIN_ID="3">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="2" OUT_MODULE_ID="33" OUT_PIN_ID="4">
+        <POINTS>
+          <POINT X="42" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="3" OUT_MODULE_ID="33" OUT_PIN_ID="5">
+        <POINTS>
+          <POINT X="70" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="4" OUT_MODULE_ID="33" OUT_PIN_ID="6">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="5" OUT_MODULE_ID="50" OUT_PIN_ID="3">
+        <POINTS>
+          <POINT X="114" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="6" OUT_MODULE_ID="33" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="84" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="7" OUT_MODULE_ID="33" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="70" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="15" IN_PIN_ID="8" OUT_MODULE_ID="33" OUT_PIN_ID="2">
+        <POINTS>
+          <POINT X="70" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="18" IN_PIN_ID="0" OUT_MODULE_ID="49" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="60" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="0" OUT_MODULE_ID="49" OUT_PIN_ID="2">
+        <POINTS>
+          <POINT X="144" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="1" OUT_MODULE_ID="18" OUT_PIN_ID="3">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="2" OUT_MODULE_ID="18" OUT_PIN_ID="4">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="3" OUT_MODULE_ID="18" OUT_PIN_ID="5">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="4" OUT_MODULE_ID="18" OUT_PIN_ID="6">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="6" OUT_MODULE_ID="18" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="7" OUT_MODULE_ID="18" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="35" IN_PIN_ID="8" OUT_MODULE_ID="18" OUT_PIN_ID="2">
+        <POINTS>
+          <POINT X="56" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="37" IN_PIN_ID="0" OUT_MODULE_ID="7" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="124" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="37" IN_PIN_ID="2" OUT_MODULE_ID="1" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="421" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="0" OUT_MODULE_ID="48" OUT_PIN_ID="2">
+        <POINTS>
+          <POINT X="282" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="1" OUT_MODULE_ID="9" OUT_PIN_ID="3">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="2" OUT_MODULE_ID="9" OUT_PIN_ID="4">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="3" OUT_MODULE_ID="9" OUT_PIN_ID="5">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="4" OUT_MODULE_ID="9" OUT_PIN_ID="6">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="5" OUT_MODULE_ID="48" OUT_PIN_ID="3">
+        <POINTS>
+          <POINT X="322" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="6" OUT_MODULE_ID="9" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="7" OUT_MODULE_ID="9" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="3" IN_PIN_ID="8" OUT_MODULE_ID="9" OUT_PIN_ID="2">
+        <POINTS>
+          <POINT X="28" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="9" IN_PIN_ID="0" OUT_MODULE_ID="48" OUT_PIN_ID="4">
+        <POINTS>
+          <POINT X="365" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="29" IN_PIN_ID="0" OUT_MODULE_ID="27" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="24" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="29" IN_PIN_ID="1" OUT_MODULE_ID="5" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="38" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="29" IN_PIN_ID="2" OUT_MODULE_ID="40" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="433" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="29" IN_PIN_ID="3" OUT_MODULE_ID="8" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="22" Y="0"/>
+          <POINT X="22" Y="-84"/>
+          <POINT X="-104" Y="-84"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="29" IN_PIN_ID="4" OUT_MODULE_ID="32" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="66" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="28" IN_PIN_ID="1" OUT_MODULE_ID="13" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="26" Y="0"/>
+          <POINT X="26" Y="98"/>
+          <POINT X="-30" Y="98"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="36" IN_PIN_ID="1" OUT_MODULE_ID="13" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="82" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="38" IN_PIN_ID="0" OUT_MODULE_ID="50" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="15" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="39" IN_PIN_ID="0" OUT_MODULE_ID="50" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="141" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="41" IN_PIN_ID="0" OUT_MODULE_ID="48" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="211" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="45" IN_PIN_ID="0" OUT_MODULE_ID="48" OUT_PIN_ID="1">
+        <POINTS>
+          <POINT X="239" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+    </IN_CONNECTIONS>
+    <PARAM_CONNECTIONS>
+      <CONNECTION IN_MODULE_ID="23" IN_PIN_ID="0" OUT_MODULE_ID="17" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="-368" Y="0"/>
+        </POINTS>
+      </CONNECTION>
+      <CONNECTION IN_MODULE_ID="26" IN_PIN_ID="0" OUT_MODULE_ID="7" OUT_PIN_ID="0">
+        <POINTS>
+          <POINT X="26" Y="0"/>
+          <POINT X="26" Y="14"/>
+          <POINT X="-380" Y="14"/>
+        </POINTS>
+      </CONNECTION>
+    </PARAM_CONNECTIONS>
+  </CONNECTIONS>
+  <PROJECT_GRAPHICS>
+    <GRAPHICS TYPE="2" PAGE="*kostka">
+      <NODES>
+        <NODE X="182" Y="481"/>
+        <NODE X="988" Y="690"/>
+      </NODES>
+      <PEN COLOR="$000000" MODE="4" STYLE="0" WIDTH="1"/>
+      <BRUSH COLOR="$FFFFFF" STYLE="0"/>
+    </GRAPHICS>
+    <GRAPHICS TYPE="4" PAGE="*kostka" TEXT="&#9;B7&#9;B6&#9;B5&#9;B4&#9;B3&#9;B2&#9;B1&#9;B0&#xA;&#9;&#9;G&#9;F&#9;E&#9;D&#9;C&#9;B&#9;A&#xA;1...&#9;0&#9;0&#9;0&#9;0&#9;0&#9;1&#9;1&#9;0&#9;= &#9;6&#xA;2...&#9;0&#9;1&#9;0&#9;1&#9;1&#9;0&#9;1&#9;1&#9;= &#9;91&#xA;3...&#9;0&#9;1&#9;0&#9;0&#9;1&#9;1&#9;1&#9;1&#9;= &#9;79&#xA;4...&#9;0&#9;1&#9;1&#9;0&#9;0&#9;1&#9;1&#9;0&#9;= &#9;102&#xA;5...&#9;0&#9;1&#9;1&#9;0&#9;1&#9;1&#9;0&#9;1&#9;= &#9;109&#xA;6...&#9;0&#9;1&#9;1&#9;1&#9;1&#9;1&#9;0&#9;1&#9;= &#9;125">
+      <NODES>
+        <NODE X="213" Y="498"/>
+      </NODES>
+      <FONT NAME="Century Gothic" BOLD="False" ITALIC="False" UNDERLINE="False" STRIKE_OUT="False" SIZE="11" COLOR="$FF000008" CHARSET="238"/>
+    </GRAPHICS>
+  </PROJECT_GRAPHICS>
+</PCC_PROJECT>

@@ -1,0 +1,114 @@
+name: Qt client (Linux)
+
+# Builds the Swift bridge and the Qt Quick app on Ubuntu (ubuntu:latest, 26.04, whose own Qt is 6.10), packs the minimum needed to run
+# it into a zip, and checks that zip in a bare ubuntu:latest with only the runtime packages installed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: qt-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SWIFT_VERSION: "6.4.2"
+  # What the app needs to run, besides what is in the zip (Swift's runtime is in it). Also in the zip's README.txt.
+  RUNTIME_PACKAGES: >-
+    libqt6quick6 libqt6quickcontrols2-6 qt6-qpa-plugins
+    qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window
+    qml6-module-qtquick-templates qml6-module-qtquick-shapes qml6-module-qtquick-dialogs
+    libxml2-16 libcurl4t64 libstdc++6
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: ubuntu:latest
+    timeout-minutes: 60
+    steps:
+      - name: Tools the checkout and Swift need
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git binutils tzdata zip patchelf \
+            build-essential cmake ninja-build pkg-config zlib1g-dev libcurl4-openssl-dev libxml2-dev \
+            libedit2 libsqlite3-0 libncurses-dev
+
+      - uses: actions/checkout@v7
+
+      # Qt from Ubuntu's own packages (6.10 on 26.04; the app needs 6.5 or newer).
+      - name: Qt
+        run: |
+          apt-get install -y --no-install-recommends \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools qt6-shadertools-dev libgl1-mesa-dev libegl-dev libvulkan-dev libxkbcommon-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window \
+            qml6-module-qtquick-templates qml6-module-qtquick-shapes qml6-module-qtquick-dialogs \
+            qt6-qpa-plugins libqt6quickcontrols2-6
+
+      - name: Swift toolchain (cache)
+        id: swift-cache
+        uses: actions/cache@v6
+        with:
+          path: /opt/swift
+          key: swift-${{ env.SWIFT_VERSION }}-ubuntu26.04-x86_64
+
+      - name: Swift toolchain (download)
+        if: steps.swift-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL "https://download.swift.org/swift-${SWIFT_VERSION}-release/ubuntu2604/swift-${SWIFT_VERSION}-RELEASE/swift-${SWIFT_VERSION}-RELEASE-ubuntu26.04.tar.gz" -o swift.tar.gz
+          mkdir -p /opt/swift
+          tar -xzf swift.tar.gz -C /opt/swift --strip-components=1
+          rm swift.tar.gz
+
+      - name: Swift version
+        run: |
+          echo "/opt/swift/usr/bin" >> "$GITHUB_PATH"
+          /opt/swift/usr/bin/swift --version
+
+      - name: Cache the Swift build
+        uses: actions/cache@v6
+        with:
+          path: .build
+          # The repository's name is in the key because the build records absolute paths (the module cache): a cache made at another checkout path,
+          # as after renaming the repository, is refused by the compiler.
+          key: swift-build-${{ github.event.repository.name }}-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: swift-build-${{ github.event.repository.name }}-${{ env.SWIFT_VERSION }}-
+
+      - name: Build
+        run: tools/build-qt.sh Release
+
+      - name: Pack the minimum
+        run: tools/package-qt-linux.sh wirebench-qt-linux-x86_64.zip
+
+      # The zip itself is the artifact, uploaded as it is (archive: false), so it downloads as one zip with its file modes kept.
+      # The artifact is named after the file.
+      - name: Keep the zip
+        uses: actions/upload-artifact@v7
+        with:
+          path: wirebench-qt-linux-x86_64.zip
+          archive: false
+          if-no-files-found: error
+
+  # A fresh ubuntu:latest with only the runtime packages: no Swift, no compiler, no -dev packages. If the zip needs a library that is not
+  # in it and not a runtime package, this fails and names it.
+  run-the-zip:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: ubuntu:latest
+    timeout-minutes: 15
+    steps:
+      - name: Runtime packages only
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates unzip $RUNTIME_PACKAGES
+
+      # skip-decompress: the action would otherwise unpack a .zip itself, and this job is to unpack it the way a user does.
+      - uses: actions/download-artifact@v8
+        with:
+          name: wirebench-qt-linux-x86_64.zip
+          skip-decompress: true
+
+      - name: Unpack and check nothing is missing
+        run: |
+          unzip -q wirebench-qt-linux-x86_64.zip
+          ldd wirebench-qt/wirebench-qt wirebench-qt/lib/libWirebenchBridge.so | grep 'not found' && exit 1 || echo "all libraries found"

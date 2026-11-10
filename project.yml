@@ -1,0 +1,275 @@
+name: Wirebench
+options:
+  bundleIdPrefix: com.wirebench
+  deploymentTarget:
+    macOS: "14.0"
+  # The Xcode this project is kept for: it sets the upgrade stamp Xcode compares with its own version. Left older, every `xcodegen generate`
+  # makes Xcode offer "Update to recommended settings" again. Raise it, with the settings below, when Xcode asks once and you accept.
+  xcodeVersion: "27.2"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+
+configFiles:
+  Release: Release.xcconfig
+
+fileGroups:
+  - Release.xcconfig
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: "6.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: false
+    ALWAYS_SEARCH_USER_PATHS: false
+    # What Xcode 27.2's "Update to recommended settings" adds; see `settingGroups`. Written here so that regenerating the project does not take
+    # them away and bring the warning back.
+    DEAD_CODE_STRIPPING: true
+    # `package` access (WirebenchModel's API for WirebenchApp) needs a package name; SwiftPM passes its own, Xcode does not.
+    OTHER_SWIFT_FLAGS: -package-name Wirebench
+
+  # A fourth SwiftPM-versus-Xcode trap, alongside the three on the targets below, and the one that
+  # actually broke the app: under this SDK `@State` is a **macro** in an `xcodebuild` build but is
+  # still resolved as a property wrapper by `swift test`/`swift build`. So `_draft = State(...)` in
+  # an `init` compiles under SwiftPM and fails under Xcode with "cannot find '_draft' in scope" —
+  # which means the suite, which links `WirebenchApp` precisely so app code is covered, cannot see this
+  # class of error at all. Never write the property-wrapper init idiom here; seed `@State` from
+  # `onAppear` (see `TextAnnotationEditor`) so it is valid either way.
+  # Why the two disagree is not established and is worth knowing before trusting either alone.
+
+# Xcode's recommended settings are written on every target as well as the project, and it asks again when a target lacks them.
+settingGroups:
+  recommended:
+    DEAD_CODE_STRIPPING: true
+  recommendedLibrary:
+    DEAD_CODE_STRIPPING: true
+    ENABLE_MODULE_VERIFIER: true
+    MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS: "gnu11 gnu++14"
+
+targets:
+  WirebenchCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchCore
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchCore
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+
+  WirebenchLibrary:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchLibrary
+    dependencies:
+      - target: WirebenchCore
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchLibrary
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+
+  # The C++ simulation core, built as its own static library. Its public header is plain C, so no
+  # C++ interoperability mode is needed anywhere that imports it.
+  WirebenchSimCxx:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchSimCxx
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchSimCxx
+        # SwiftPM works out the module for a C target on its own; Xcode does not. Without an explicit
+        # module map `import WirebenchSimCxx` fails in the app even though `swift test` builds it.
+        DEFINES_MODULE: true
+        MODULEMAP_FILE: $(SRCROOT)/Sources/WirebenchSimCxx/include/module.modulemap
+        # The simulation core is the hot loop, so it is optimised in every configuration, and `-pipe`
+        # keeps the compiler stages in memory rather than in temporary files.
+        GCC_OPTIMIZATION_LEVEL: 2
+        OTHER_CPLUSPLUSFLAGS: -pipe
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/WirebenchSimCxx/include
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
+        SKIP_INSTALL: true
+
+  WirebenchEngine:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchEngine
+    dependencies:
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - target: WirebenchSimCxx
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchEngine
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+
+  WirebenchHardware:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchHardware
+    dependencies:
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchHardware
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+
+  # The application's state and commands, with no view code.
+  WirebenchModel:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchModel
+    dependencies:
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - target: WirebenchEngine
+      - target: WirebenchHardware
+      - target: WirebenchSimCxx
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchModel
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+
+  # The C interface to the model, for the Qt frontend (built by SwiftPM there; here so the sources are in the project).
+  WirebenchBridge:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchBridge
+    dependencies:
+      - target: WirebenchModel
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchBridge
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+
+  Wirebench:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchApp
+    dependencies:
+      - target: WirebenchModel
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - target: WirebenchEngine
+      - target: WirebenchHardware
+      # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
+      # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
+      - target: WirebenchSimCxx
+    info:
+      path: Info.plist
+      properties:
+        CFBundleExecutable: Wirebench
+        CFBundleIdentifier: com.wirebench.WirebenchApp
+        CFBundleName: Wirebench
+        CFBundleDisplayName: Wirebench
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSPrincipalClass: NSApplication
+        NSSupportsAutomaticGraphicsSwitching: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: "PCC Project File"
+            CFBundleTypeExtensions:
+              - "pcc"
+              - "xml"
+            CFBundleTypeRole: "Editor"
+            LSHandlerRank: "Default"
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    settings:
+      groups: [recommended]
+      base:
+        PRODUCT_NAME: Wirebench
+        PRODUCT_BUNDLE_IDENTIFIER: com.wirebench.WirebenchApp
+        INFOPLIST_FILE: Info.plist
+        # Signing comes from Config/App.xcconfig: ad hoc by default, and a stable identity where Config/Local.xcconfig names one.
+        # WirebenchEngine embeds the C++ core; the linker needs the C++ runtime named for the app and the
+        # CLI even though nothing in Swift mentions it.
+        OTHER_LDFLAGS: -lc++
+
+  WirebenchCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchCLI
+    dependencies:
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - target: WirebenchEngine
+      - target: WirebenchHardware
+      # The command line prepares a build exactly as the app does (`BuildInput`), which lives with the model.
+      - target: WirebenchModel
+      # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
+      # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
+      - target: WirebenchSimCxx
+    settings:
+      groups: [recommended]
+      base:
+        OTHER_LDFLAGS: -lc++
+        PRODUCT_NAME: wirebench-cli
+        PRODUCT_BUNDLE_IDENTIFIER: com.wirebench.cli
+
+  WirebenchTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/WirebenchTests
+    dependencies:
+      - target: WirebenchModel
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - target: WirebenchEngine
+      - target: WirebenchHardware
+      # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
+      # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
+      - target: WirebenchSimCxx
+    settings:
+      groups: [recommended]
+      base:
+        PRODUCT_NAME: WirebenchTests
+        GENERATE_INFOPLIST_FILE: true
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+
+schemes:
+  Wirebench:
+    build:
+      targets:
+        Wirebench: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WirebenchTests
+  WirebenchCLI:
+    build:
+      targets:
+        WirebenchCLI: all
+    run:
+      config: Debug

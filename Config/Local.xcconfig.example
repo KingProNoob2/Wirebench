@@ -1,0 +1,4 @@
+// Copy to Local.xcconfig (not committed) and name a signing identity from `security find-identity -v -p codesigning`.
+// A stable identity keeps the Keychain's "Always Allow" for the agent's API key across rebuilds.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = Apple Development: Your Name (XXXXXXXXXX)
