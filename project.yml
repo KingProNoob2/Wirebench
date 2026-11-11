@@ -15,6 +15,11 @@ configFiles:
 fileGroups:
   - Release.xcconfig
 
+packages:
+  swift-syntax:
+    url: https://github.com/swiftlang/swift-syntax.git
+    from: "604.0.0"
+
 settings:
   base:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -163,6 +168,52 @@ targets:
         DEFINES_MODULE: true
         SKIP_INSTALL: true
 
+  # A *static framework*, not a static library: Xcode does not give a static library the include paths of a package
+  # dependency's C target, and the compiler imports SwiftParser, whose SwiftSyntax dependency needs `_SwiftSyntaxCShims`.
+  # A framework links package products, so the module map is found; `MACH_O_TYPE = staticlib` keeps the archive static, so
+  # nothing has to be embedded or copied next to the CLI.
+  WirebenchSource:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchSource
+    dependencies:
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - package: swift-syntax
+        product: SwiftParser
+      - package: swift-syntax
+        product: SwiftSyntax
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchSource
+        MACH_O_TYPE: staticlib
+        SKIP_INSTALL: true
+
+  WirebenchCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchCLI
+    dependencies:
+      - target: WirebenchCore
+      - target: WirebenchLibrary
+      - target: WirebenchEngine
+      - target: WirebenchHardware
+      # The command line prepares a build exactly as the app does (`BuildInput`), which lives with the model.
+      - target: WirebenchModel
+      - target: WirebenchSource
+      # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
+      # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
+      - target: WirebenchSimCxx
+    settings:
+      groups: [recommended]
+      base:
+        OTHER_LDFLAGS: -lc++
+        PRODUCT_NAME: wirebench-cli
+        PRODUCT_BUNDLE_IDENTIFIER: com.wirebench.cli
+
   Wirebench:
     type: application
     platform: macOS
@@ -174,6 +225,8 @@ targets:
       - target: WirebenchLibrary
       - target: WirebenchEngine
       - target: WirebenchHardware
+      - target: WirebenchSource
+        embed: false
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx
@@ -212,28 +265,6 @@ targets:
         # CLI even though nothing in Swift mentions it.
         OTHER_LDFLAGS: -lc++
 
-  WirebenchCLI:
-    type: tool
-    platform: macOS
-    sources:
-      - path: Sources/WirebenchCLI
-    dependencies:
-      - target: WirebenchCore
-      - target: WirebenchLibrary
-      - target: WirebenchEngine
-      - target: WirebenchHardware
-      # The command line prepares a build exactly as the app does (`BuildInput`), which lives with the model.
-      - target: WirebenchModel
-      # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
-      # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
-      - target: WirebenchSimCxx
-    settings:
-      groups: [recommended]
-      base:
-        OTHER_LDFLAGS: -lc++
-        PRODUCT_NAME: wirebench-cli
-        PRODUCT_BUNDLE_IDENTIFIER: com.wirebench.cli
-
   WirebenchTests:
     type: bundle.unit-test
     platform: macOS
@@ -245,6 +276,8 @@ targets:
       - target: WirebenchLibrary
       - target: WirebenchEngine
       - target: WirebenchHardware
+      - target: WirebenchSource
+        embed: false
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx
@@ -257,6 +290,13 @@ targets:
         CODE_SIGN_IDENTITY: "-"
 
 schemes:
+  WirebenchCLI:
+    build:
+      targets:
+        WirebenchCLI: all
+    run:
+      config: Debug
+
   Wirebench:
     build:
       targets:
@@ -267,9 +307,3 @@ schemes:
       config: Debug
       targets:
         - WirebenchTests
-  WirebenchCLI:
-    build:
-      targets:
-        WirebenchCLI: all
-    run:
-      config: Debug

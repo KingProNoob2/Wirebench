@@ -657,6 +657,32 @@ public final class AppModel: @unchecked Sendable {
         resetZoom()
     }
 
+    /// Adopts a project built by the source editor as the open document, with no file yet: Save asks where it goes.
+    ///
+    /// The same setup as a project loaded from disk, except that there is no URL and nothing to compare against for the
+    /// edited flag — the project is new.
+    @MainActor
+    public func adoptCompiledProject(_ compiled: PCCProject) {
+        pause()
+        isRestoringUndo = true
+        self.project = compiled
+        ModulePinCatalog.invalidateSchemaCache()
+        isRestoringUndo = false
+        history.clear()
+        self.currentFileURL = nil
+        self.selectedPage = compiled.pages.first?.caption ?? "main"
+        self.selectedModuleId = nil
+        clearAnnotationSelection()
+        clearedPinValues = [:]
+        self.engine = installEngine(project: compiled)
+        refreshSnapshots()
+        self.tickCount = 0
+        self.simulationVersion = 0
+        self.isDocumentEdited = false
+        savedContent = Self.content(of: compiled)
+        self.needsZoomToFit = true
+    }
+
     @MainActor
     public func loadProject(url: URL) {
         pause()
@@ -1457,6 +1483,15 @@ public final class AppModel: @unchecked Sendable {
     }
 
     /// Light, dark or follow the system. Remembered between launches.
+    /// The PLC Swift editor's buffer. It lives here, not in the window's state, so closing the window and opening it
+    /// again brings back what was written instead of the template; it is kept across launches like the editor's settings.
+    public var swiftSource: String = UserDefaults.standard.string(forKey: "swiftSource") ?? "" {
+        didSet {
+            guard swiftSource != oldValue else { return }
+            UserDefaults.standard.set(swiftSource, forKey: "swiftSource")
+        }
+    }
+
     package var appearance: AppearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
         didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "appearance") }
     }

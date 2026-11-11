@@ -32,6 +32,12 @@ struct WirebenchApp: App {
                 .onChange(of: model.project == nil) { _, none in if none { dismissWindow(id: "agent") } }
         }
         .defaultSize(width: 380, height: 540)
+        // The PLC Swift editor: its own window, since it is a source buffer beside the sheet rather than a pane of it.
+        Window("PLC Swift", id: "swift") {
+            SwiftIDEView(model: model)
+                .preferredColorScheme(model.appearance.colorScheme)
+        }
+        .defaultSize(width: 1040, height: 620)
         // The block reference, one window at a time like the agent's.
         Window("Block Reference", id: "help") {
             HelpView(help: model.help)
@@ -59,6 +65,10 @@ struct WirebenchApp: App {
                 Button("Agent Panel") { openWindow(id: "agent") }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(model.project == nil)
+
+                // The source editor makes its own project, so it does not need one open.
+                Button("PLC Swift Editor") { openWindow(id: "swift") }
+                    .keyboardShortcut("e", modifiers: [.option, .command])
             }
 
             // Help ▸ Block Reference (⌘?), in place of the empty help the system adds.

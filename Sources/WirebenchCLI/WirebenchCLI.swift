@@ -4,6 +4,7 @@ import WirebenchLibrary
 import WirebenchEngine
 import WirebenchHardware
 import WirebenchModel
+import WirebenchSource
 
 @main
 struct WirebenchCLI {
@@ -71,6 +72,13 @@ struct WirebenchCLI {
             }
             printSymbolTable(path: args[2])
 
+        case "swift":
+            guard args.count >= 3 else {
+                print("Error: Missing file path. Usage: wirebench-cli swift <program.swift> [--out <dir>] [--name <name>]")
+                return
+            }
+            compileSwift(path: args[2], options: Array(args.dropFirst(3)))
+
         case "profile":
             guard args.count >= 3 else {
                 print("Error: Missing file path. Usage: wirebench-cli profile <project.pcc>")
@@ -95,6 +103,8 @@ struct WirebenchCLI {
           wirebench-cli blocks <project.pcc>       Show how each module resolves to a block type
           wirebench-cli profile <project.pcc>
                                                 Show the hardware profile and SystemCmd catalogue
+          wirebench-cli swift <program.swift> [--out <dir>] [--name <name>]
+                                                Compile PLC Swift (a subset of Embedded Swift) to <name>.pcc.
           wirebench-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet]
                                                 Compile the project to <name>.pbd and <name>.csv.
                                                 --optimize drops unused and switched-off (En = 0) logic and math,
@@ -400,6 +410,47 @@ struct WirebenchCLI {
             }
         } catch {
             print("Failed to parse project: \(error)")
+        }
+    }
+
+    // MARK: - PLC Swift
+
+    /// Compiles a PLC Swift file to a `.pcc`. The compiler is `WirebenchSource`; this is only the file handling and the
+    /// summary, so the IDE that comes later can call the same compiler.
+    static func compileSwift(path: String, options: [String]) {
+        let url = URL(fileURLWithPath: path)
+        var outDirectory = url.deletingLastPathComponent()
+        var name: String?
+        var index = 0
+        while index < options.count {
+            switch options[index] {
+            case "--out":
+                guard index + 1 < options.count else { print("--out needs a directory"); exit(2) }
+                outDirectory = URL(fileURLWithPath: options[index + 1])
+                index += 2
+            case "--name":
+                guard index + 1 < options.count else { print("--name needs a name"); exit(2) }
+                name = options[index + 1]
+                index += 2
+            default:
+                print("Unknown option: \(options[index])")
+                index += 1
+            }
+        }
+        do {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            let compiled = try SwiftSourceCompiler().compile(
+                source, projectName: name ?? url.deletingPathExtension().lastPathComponent)
+            try FileManager.default.createDirectory(at: outDirectory, withIntermediateDirectories: true)
+            let output = outDirectory.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".pcc")
+            try PCCSerializer().serialize(project: compiled.project).write(to: output, atomically: true, encoding: .utf8)
+            print("Compiled \(url.lastPathComponent) (\(compiled.entryPoint)): \(compiled.blockCount) blocks")
+            print("  inputs  \(compiled.usedInputs.map { "DI\($0)" }.joined(separator: ", "))")
+            print("  outputs \(compiled.writtenOutputs.map { "DO\($0)" }.joined(separator: ", "))")
+            print("  \(output.path)")
+        } catch {
+            print("Compile failed: \(error)")
+            exit(1)
         }
     }
 
