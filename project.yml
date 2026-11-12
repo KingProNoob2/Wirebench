@@ -30,7 +30,13 @@ settings:
     # them away and bring the warning back.
     DEAD_CODE_STRIPPING: true
     # `package` access (WirebenchModel's API for WirebenchApp) needs a package name; SwiftPM passes its own, Xcode does not.
-    OTHER_SWIFT_FLAGS: -package-name Wirebench
+    #
+    # The agent is a build option, off by default. To build it in, set WIREBENCH_AI_FLAGS to -DWIREBENCH_AI (one user-defined
+    # setting covers every target), or pass it on the command line:
+    #   xcodebuild ... WIREBENCH_AI_FLAGS=-DWIREBENCH_AI
+    # With SwiftPM the switch is WIREBENCH_AI=1 (see Package.swift).
+    WIREBENCH_AI_FLAGS: ""
+    OTHER_SWIFT_FLAGS: -package-name Wirebench $(WIREBENCH_AI_FLAGS)
 
   # A fourth SwiftPM-versus-Xcode trap, alongside the three on the targets below, and the one that
   # actually broke the app: under this SDK `@State` is a **macro** in an `xcodebuild` build but is

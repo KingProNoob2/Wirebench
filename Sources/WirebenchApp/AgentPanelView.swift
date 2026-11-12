@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import SwiftUI
 import WirebenchModel
 
@@ -288,3 +289,4 @@ private extension View {
         if #available(macOS 26.0, *) { scrollEdgeEffectHidden(true, for: .vertical) } else { self }
     }
 }
+#endif

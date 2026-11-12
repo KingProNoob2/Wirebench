@@ -649,6 +649,12 @@ struct Lowering {
             switch statement.kind {
             case .bind(let name, let expression):
                 if case .call(let callName, let arguments) = expression.kind, callName.hasPrefix("Block.") {
+                    // A call inside a branch would be registered in the branch's copy of the scan and lost, so the
+                    // block has to be created before the `if` and wired with `set`.
+                    if inBranch {
+                        throw SwiftSourceError(line: statement.line,
+                                               message: "a block cannot be created inside 'if' yet; create it before the branch and wire it with set")
+                    }
                     let index = try addBlockCall(callName, arguments, line: statement.line, scan: &scan)
                     blockInstances[name] = index
                     continue
@@ -682,11 +688,21 @@ struct Lowering {
                     throw SwiftSourceError(line: statement.line, message: "unknown name '\(name)'")
                 }
             case .blockSet(let instance, let pin, let value):
+                if inBranch {
+                    throw SwiftSourceError(line: statement.line,
+                                           message: "wiring a block cannot be inside 'if'; wire it before the branch")
+                }
                 guard let call = blockInstances[instance] else {
                     throw SwiftSourceError(line: statement.line,
                                            message: "'\(instance)' is not a block instance; 'set' needs a 'let name = Block...'")
                 }
                 let argument = try argumentValue(value, scan: &scan)
+                let block = scan.blockCalls[call]
+                let limit = BlockLabels.maxInputPins(for: block.guid)
+                guard pin >= 0, pin < limit else {
+                    throw SwiftSourceError(line: statement.line,
+                                           message: "'\(block.name)' has no input pin \(pin); it takes at most \(limit)")
+                }
                 while scan.blockCalls[call].inputs.count <= pin {
                     scan.blockCalls[call].inputs.append(.constant(.bool(false)))
                 }
@@ -697,13 +713,19 @@ struct Lowering {
                 let test = try lower(condition, scan: &scan)
                 let wasInBranch = inBranch
                 let savedEnv = env
+                let savedBlocks = blockInstances
+                let savedMacros = macroInstances
                 inBranch = true
                 var thenScan = scan
                 try lower(thenBody, into: &thenScan)
                 env = savedEnv
+                blockInstances = savedBlocks
+                macroInstances = savedMacros
                 var elseScan = scan
                 if let elseBody { try lower(elseBody, into: &elseScan) }
                 env = savedEnv
+                blockInstances = savedBlocks
+                macroInstances = savedMacros
                 inBranch = wasInBranch
                 for pin in Set(thenScan.outputs.keys).union(elseScan.outputs.keys) {
                     let whenTrue = thenScan.outputs[pin] ?? scan.outputs[pin] ?? .constant(false)
@@ -739,10 +761,10 @@ struct Lowering {
             } else {
                 switch argument.value.kind {
                 case .boolean(let value): inputs.append(.constant(.bool(value)))
-                case .integer(let value): inputs.append(.constant(.int32(Int32(value))))
+                case .integer(let value): inputs.append(.constant(integerValue(value)))
                 case .unary("-", let operand):
                     if case .integer(let value) = operand.kind {
-                        inputs.append(.constant(.int32(Int32(-value))))
+                        inputs.append(.constant(integerValue(-value)))
                     } else {
                         inputs.append(.signal(try lower(argument.value, scan: &scan)))
                     }
@@ -750,17 +772,29 @@ struct Lowering {
                 }
             }
         }
+        let limit = BlockLabels.maxInputPins(for: guid)
+        guard inputs.count <= limit else {
+            throw SwiftSourceError(line: line,
+                                   message: "'\(typeName)' takes at most \(limit) inputs, and \(inputs.count) were given")
+        }
         scan.blockCalls.append(BlockCall(guid: guid, name: typeName, inputs: inputs, params: params, line: line))
         return scan.blockCalls.count - 1
+    }
+
+    /// An integer as a pin value: 32-bit when it fits, 64-bit otherwise. `Int32(_:)` traps above its range, and a
+    /// literal large enough to need that is still a legal number in the language.
+    private func integerValue(_ value: Int) -> PinValue {
+        if let small = Int32(exactly: value) { return .int32(small) }
+        return .int64(Int64(value))
     }
 
     /// One block-call argument: a literal stays a constant, anything else becomes a signal.
     private func argumentValue(_ expression: SourceExpr, scan: inout LoweredScan) throws -> BlockArg {
         switch expression.kind {
         case .boolean(let value): return .constant(.bool(value))
-        case .integer(let value): return .constant(.int32(Int32(value)))
+        case .integer(let value): return .constant(integerValue(value))
         case .unary("-", let operand):
-            if case .integer(let value) = operand.kind { return .constant(.int32(Int32(-value))) }
+            if case .integer(let value) = operand.kind { return .constant(integerValue(-value)) }
             return .signal(try lower(expression, scan: &scan))
         default: return .signal(try lower(expression, scan: &scan))
         }
@@ -769,12 +803,12 @@ struct Lowering {
     private func constantValue(_ expression: SourceExpr) throws -> PinValue {
         switch expression.kind {
         case .boolean(let value): return .bool(value)
-        case .integer(let value): return .int32(Int32(value))
+        case .integer(let value): return integerValue(value)
         case .unary("-", let operand):
             guard case .integer(let value) = operand.kind else {
                 throw SwiftSourceError(line: expression.line, message: "expected a number")
             }
-            return .int32(Int32(-value))
+            return integerValue(-value)
         default:
             throw SwiftSourceError(line: expression.line, message: "a parameter takes a literal value")
         }

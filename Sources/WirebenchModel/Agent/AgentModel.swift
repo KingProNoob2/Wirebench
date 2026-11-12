@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Foundation
 import Observation
 
@@ -270,3 +271,4 @@ public final class AgentModel: @unchecked Sendable {
         }
     }
 }
+#endif

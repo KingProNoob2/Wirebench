@@ -86,6 +86,10 @@ private final class PageReader {
 
     private let modules: [PCCModule]
     private let wires: [Int: [Int: (module: Int, pin: Int)]]
+    /// The first 8xDI / 8xDO on the page: the one the source's `@DI`/`@DO` pins stand for. A page can hold more than
+    /// one of either (16 inputs as two blocks), and the extra ones are recovered as library blocks instead.
+    private let primaryDI: Int?
+    private let primaryDO: Int?
     private var usedOutputs: [Int: Set<Int>] = [:]
     private var names = NameSet()
     private var unsupported: [String] = []
@@ -102,6 +106,8 @@ private final class PageReader {
         var thenIds: Set<Int>
         var elseIds: Set<Int>
         var hasElse: Bool
+        /// A conditional inside this one cannot be expressed by flattening, so the group is left unrecovered.
+        var hadNested: Bool
     }
 
     /// Combinational blocks only: a conditional is recovered when gating them changes nothing, and its work is done by
@@ -138,7 +144,11 @@ private final class PageReader {
         self.macroPageByCallName = macroPageByCallName
         self.macroStructByCallName = macroStructByCallName
         self.isMacro = page.hasPrefix("*")
-        self.modules = project.modules.filter { $0.page == page }
+        let pageModules = project.modules.filter { $0.page == page }
+        self.modules = pageModules
+        let ordered = pageModules.sorted { $0.order < $1.order }
+        self.primaryDI = ordered.first { $0.guid == EightDIBlock.guid }?.id
+        self.primaryDO = ordered.first { $0.guid == EightDOBlock.guid }?.id
         var wires: [Int: [Int: (module: Int, pin: Int)]] = [:]
         for connection in project.inConnections {
             wires[connection.inModuleId, default: [:]][connection.inPinId] = (connection.outModuleId, connection.outPinId)
@@ -209,7 +219,9 @@ private final class PageReader {
         var sets: [String] = []
         for module in blockModules where boundBlocks.contains(module.id) {
             guard let name = blockNames[module.id] else { continue }
-            for pin in module.inPins.indices where wires[module.id]?[pin] != nil {
+            // Every input pin is written explicitly: an unwired pin holds a constant, and creating the block with no
+            // inputs would lose it.
+            for pin in module.inPins.indices {
                 guard let value = expression(module: module.id, pin: pin, depth: 0) else {
                     unsupported.append("\(module.name) input \(pin)")
                     continue
@@ -225,7 +237,9 @@ private final class PageReader {
         // A `Set` writes its input into the variable it is wired to; that is an assignment here, and inside a recovered
         // conditional it goes into the branch the `Set` sits in.
         for module in orderedModules() where module.guid == SetBlock.guid {
-            guard let value = expression(module: module.id, pin: 1, depth: 0) else {
+            // A `Set`'s X pin is typed Long in Dirigo, but the variable it writes here is Boolean, so an unwired
+            // constant is `true`/`false` and not the number 0.
+            guard let value = booleanValue(module: module.id, pin: 1) else {
                 unsupported.append("\(module.name) (Set)")
                 continue
             }
@@ -272,7 +286,7 @@ private final class PageReader {
                 }
             }
         } else {
-            for module in modules where module.guid == EightDOBlock.guid {
+            for module in modules where module.id == primaryDO {
                 for pin in module.inPins.indices.dropFirst()
                 where (isDriven(module: module.id, pin: pin) || module.inPins[pin].value.asBool) && pin - 1 <= 7 {
                     let index = pin - 1
@@ -321,7 +335,8 @@ private final class PageReader {
         guard let macroPage = macroPageByCallName[macro], let interface = interfaces[macroPage] else { return nil }
         var arguments: [String] = []
         for (index, pin) in interface.inputs.enumerated() {
-            guard let value = expression(module: module.id, pin: index, depth: 0) else { return nil }
+            // A macro's inputs are Boolean in this subset, whatever the call block's own pin types say.
+            guard let value = booleanValue(module: module.id, pin: index) else { return nil }
             arguments.append("\(pin): \(value)")
         }
         let called = macroStructByCallName[macro] ?? Identifier.of(macro, fallback: "Macro")
@@ -329,8 +344,11 @@ private final class PageReader {
     }
     private func isLibraryBlock(_ module: PCCModule) -> Bool {
         switch module.guid {
-        case EightDIBlock.guid, EightDOBlock.guid, BoolVarBlock.guid, SetBlock.guid,
-             MacroInterface.callGUID, MacroInterface.interfaceGUID:
+        case EightDIBlock.guid:
+            return module.id != primaryDI
+        case EightDOBlock.guid:
+            return module.id != primaryDO
+        case BoolVarBlock.guid, SetBlock.guid, MacroInterface.callGUID, MacroInterface.interfaceGUID:
             return false
         default:
             let kind = BlockTypeCatalog.info(forGuid: module.guid)?.delphiClass
@@ -344,31 +362,37 @@ private final class PageReader {
               let type = BlockLabels.sourceName(for: module.guid) else { return nil }
         var arguments: [String] = []
         let params = BlockLabels.paramLabels(for: module.guid)
+        let paramTypes = BlockLabels.paramTypes(for: module.guid)
         for (index, pin) in module.paramPins.enumerated() where index < params.count {
-            arguments.append("\(params[index]): \(literal(pin.value))")
+            // A fractional float parameter has no source spelling yet; leaving it out would silently change it.
+            let type = paramTypes.indices.contains(index) ? paramTypes[index] : ""
+            guard let text = literal(pin.value, type: type) else { return nil }
+            arguments.append("\(params[index]): \(text)")
         }
         return "        let \(name) = Block.\(type)(\(arguments.joined(separator: ", ")))"
     }
 
-    private func literal(_ value: PinValue) -> String {
+    /// A pin's value as source, by the pin's type. `nil` when the value has no source spelling (a fractional float).
+    private func literal(_ value: PinValue, type: String) -> String? {
+        if BlockLabels.isBooleanType(type) { return value.asBool ? "true" : "false" }
         switch value {
         case .bool(let flag): return flag ? "true" : "false"
         case .int16(let number): return "\(number)"
         case .int32(let number): return "\(number)"
         case .int64(let number): return "\(number)"
-        case .float(let number): return "\(Int(number))"
+        case .float(let number): return number == number.rounded() ? "\(Int(number))" : nil
         case .undefined: return "false"
         }
     }
 
     private func assignNames() {
         if !isMacro {
-            for module in modules where module.guid == EightDIBlock.guid {
+            for module in modules where module.id == primaryDI {
                 for pin in module.outPins.indices where usedOutputs[module.id]?.contains(pin) == true {
                     diNames[pin] = names.unique("di\(pin)")
                 }
             }
-            for module in modules where module.guid == EightDOBlock.guid {
+            for module in modules where module.id == primaryDO {
                 for pin in module.inPins.indices.dropFirst()
                 where (isDriven(module: module.id, pin: pin) || module.inPins[pin].value.asBool) && pin - 1 <= 7 {
                     outputNames[pin - 1] = names.unique("do\(pin - 1)")
@@ -393,14 +417,19 @@ private final class PageReader {
         guard let source = wires[module]?[pin] else {
             guard let producer = modules.first(where: { $0.id == module }),
                   producer.inPins.indices.contains(pin) else { return nil }
-            return producer.inPins[pin].value.asBool ? "true" : "false"
+            // An unwired pin is a constant, and its type is the pin's: a numeric 0 on a Boolean pin is `false`,
+            // not the number zero.
+            let types = BlockLabels.inputTypes(for: producer.guid, totalPins: producer.inPins.count)
+            let type = types.indices.contains(pin) ? types[pin] : ""
+            return literal(producer.inPins[pin].value, type: type)
         }
         guard let producer = modules.first(where: { $0.id == source.module }) else { return nil }
         if skipped.contains(producer.id) { return nil }
 
         switch producer.guid {
         case EightDIBlock.guid:
-            return diNames[source.pin] ?? "false"
+            if producer.id == primaryDI { return diNames[source.pin] ?? "false" }
+            return blockOutput(producer, source.pin)
         case BoolVarBlock.guid:
             return variableNames[producer.id]
         case MacroInterface.interfaceGUID:
@@ -429,11 +458,27 @@ private final class PageReader {
         case XorBlock.guid:
             return binary(producer, "!=", depth)
         default:
-            guard boundBlocks.contains(producer.id), let name = blockNames[producer.id] else { return nil }
-            let labels = BlockLabels.outputLabels(for: producer.guid)
-            guard labels.indices.contains(source.pin) else { return nil }
-            return "\(name).\(labels[source.pin])"
+            return blockOutput(producer, source.pin)
         }
+    }
+
+    /// A pin as a Boolean expression: an unwired constant becomes `true`/`false` even where Dirigo types the pin
+    /// numerically, which is what a `Set` writing a BoolVar needs.
+    private func booleanValue(module: Int, pin: Int) -> String? {
+        if wires[module]?[pin] == nil,
+           let producer = modules.first(where: { $0.id == module }),
+           producer.inPins.indices.contains(pin) {
+            return producer.inPins[pin].value.asBool ? "true" : "false"
+        }
+        return expression(module: module, pin: pin, depth: 0)
+    }
+
+    /// A library block's output pin as a source expression, once the block has been emitted.
+    private func blockOutput(_ producer: PCCModule, _ pin: Int) -> String? {
+        guard boundBlocks.contains(producer.id), let name = blockNames[producer.id] else { return nil }
+        let labels = BlockLabels.outputLabels(for: producer.guid)
+        guard labels.indices.contains(pin) else { return nil }
+        return "\(name).\(labels[pin])"
     }
 
     private func binary(_ module: PCCModule, _ op: String, _ depth: Int) -> String? {
@@ -463,7 +508,7 @@ private final class PageReader {
     /// merges exactly as Dirigo's gate does. Anything else — a counter, a timer, an 8xDO, a macro call — keeps its
     /// range skipped and is listed as not recovered.
     private func markConditionals() {
-        var open: (id: Int, then: Set<Int>, other: Set<Int>, inElse: Bool, nested: Int)?
+        var open: (id: Int, then: Set<Int>, other: Set<Int>, inElse: Bool, nested: Int, hadNested: Bool)?
         var groups: [ConditionalGroup] = []
         var skippedIds: Set<Int> = []
 
@@ -473,10 +518,11 @@ private final class PageReader {
             case "TMIfModule":
                 if var current = open {
                     current.nested += 1
+                    current.hadNested = true
                     current.then.insert(module.id)
                     open = current
                 } else {
-                    open = (module.id, [module.id], [], false, 0)
+                    open = (module.id, [module.id], [], false, 0, false)
                 }
             case "TMElseModule":
                 guard var current = open else { continue }
@@ -491,7 +537,8 @@ private final class PageReader {
                 } else {
                     current.other.insert(module.id)
                     groups.append(ConditionalGroup(id: current.id, thenIds: current.then,
-                                                   elseIds: current.other, hasElse: current.inElse))
+                                                   elseIds: current.other, hasElse: current.inElse,
+                                                   hadNested: current.hadNested))
                     open = nil
                 }
             default:
@@ -509,7 +556,7 @@ private final class PageReader {
         for group in groups {
             let inside = group.thenIds.union(group.elseIds)
             let sets = modules.filter { inside.contains($0.id) && $0.guid == SetBlock.guid }
-            let recoverable = !sets.isEmpty
+            let recoverable = !group.hadNested && !sets.isEmpty
                 && modules.filter { inside.contains($0.id) }.allSatisfy {
                     Self.pureGuids.contains($0.guid) || $0.guid == SetBlock.guid
                         || BlockTypeCatalog.info(forGuid: $0.guid)?.delphiClass == "TMElseModule"

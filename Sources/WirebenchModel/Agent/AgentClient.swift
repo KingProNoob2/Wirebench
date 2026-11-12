@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -222,3 +223,4 @@ public struct AgentClient: Sendable {
         return text.replacingOccurrences(of: key, with: "•••")
     }
 }
+#endif

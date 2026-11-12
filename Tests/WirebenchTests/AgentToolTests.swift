@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Testing
 import Foundation
 #if canImport(FoundationNetworking)
@@ -502,3 +503,4 @@ struct ToolTests {
     }
 }
 }
+#endif

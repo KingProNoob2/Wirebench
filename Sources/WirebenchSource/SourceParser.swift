@@ -448,7 +448,12 @@ public struct SourceParser {
         }
 
         mutating func statement(_ stmt: StmtSyntax) throws -> SourceStmt {
-            if stmt.is(ReturnStmtSyntax.self) { return SourceStmt(.returnVoid, line: line(stmt)) }
+            if let ret = stmt.as(ReturnStmtSyntax.self) {
+                if ret.expression != nil {
+                    throw failure(ret, "a function returns nothing; drop the value after 'return'")
+                }
+                return SourceStmt(.returnVoid, line: line(ret))
+            }
             if let exprStmt = stmt.as(ExpressionStmtSyntax.self) {
                 return try expressionStatement(exprStmt.expression)
             }

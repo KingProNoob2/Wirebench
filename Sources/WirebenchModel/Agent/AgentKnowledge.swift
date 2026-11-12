@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Foundation
 
 /// What the agent is told about Dirigo, and how it is to work. Facts here come from the program's own help (`docs/dirigo-modules.md`); the
@@ -87,3 +88,4 @@ enum AgentKnowledge {
     8. Do not save, open or create projects unless asked. save_project never overwrites a file other than the open project's own.
     """
 }
+#endif

@@ -43,9 +43,15 @@ struct GraphicBuilderTests {
         let project = try PCCParser().parse(xmlString: original)
         // Deliberately no exact counts. This is a file the user edits while working, and it changed
         // under an earlier version of this test — which is a fault in the test, not the code. What
-        // has to hold is that whatever the file contains survives a round trip intact.
+        // has to hold is that its content survives a save, and that saving is stable: the one thing a
+        // save does normalise is module coordinates, which the file stores as whole numbers because
+        // Dirigo reads them with `StrToInt` (a fractional one there is what made Dirigo refuse a file).
         #expect(!project.graphics.isEmpty, "the project has graphic objects")
-        #expect(PCCSerializer().serialize(project: project) == original)
+        let once = PCCSerializer().serialize(project: project)
+        let readBack = try PCCParser().parse(xmlString: once)
+        #expect(readBack.modules.allSatisfy { $0.x == $0.x.rounded() && $0.y == $0.y.rounded() },
+                "a saved module coordinate is a whole number")
+        #expect(PCCSerializer().serialize(project: readBack) == once, "a save is stable")
         for graphic in project.graphics where graphic.type == PCCGraphicBuilder.Kind.text.rawValue {
             #expect(!(graphic.text ?? "").isEmpty, "a text object must carry a character")
         }

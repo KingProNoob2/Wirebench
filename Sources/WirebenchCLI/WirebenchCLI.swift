@@ -33,6 +33,14 @@ struct WirebenchCLI {
             let useProfileScheduling = args.contains("--profile-scheduling")
             runSimulation(path: args[2], ticks: ticks, useProfileScheduling: useProfileScheduling)
 
+        case "resave":
+            guard args.count >= 3 else {
+                print("Error: Missing file path. Usage: wirebench-cli resave <project.pcc> [--out <file>]")
+                return
+            }
+            let output = args.count >= 5 && args[3] == "--out" ? args[4] : nil
+            resaveProject(path: args[2], output: output)
+
         case "roundtrip":
             guard args.count >= 3 else {
                 print("Error: Missing file path. Usage: wirebench-cli roundtrip <project.pcc>")
@@ -410,6 +418,30 @@ struct WirebenchCLI {
             }
         } catch {
             print("Failed to parse project: \(error)")
+        }
+    }
+
+    // MARK: - Resaving
+
+    /// Rewrites a project in the shape Dirigo reads. The one thing this changes is coordinates: they are written as
+    /// whole numbers, because Dirigo parses `X`/`Y` with `StrToInt` and refuses a file that has a fraction there.
+    static func resaveProject(path: String, output: String?) {
+        let url = URL(fileURLWithPath: path)
+        let target = output.map { URL(fileURLWithPath: $0) } ?? url
+        do {
+            let project = try PCCParser().parse(fileAt: url)
+            let xml = PCCSerializer().serialize(project: project)
+            if target == url {
+                let backup = url.appendingPathExtension("bak")
+                try? FileManager.default.removeItem(at: backup)
+                try FileManager.default.copyItem(at: url, to: backup)
+            }
+            try xml.write(to: target, atomically: true, encoding: .utf8)
+            print("Wrote \(target.path)")
+            if target == url { print("  the original is \(url.path).bak") }
+        } catch {
+            print("Failed: \(error)")
+            exit(1)
         }
     }
 

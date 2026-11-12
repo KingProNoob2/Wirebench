@@ -32,6 +32,16 @@ swift test            # on Linux add --skip CxxBlockFuzzTests; that suite needs 
 
 On Linux install `zlib1g-dev` first. Under a file sandbox, add `--disable-sandbox` to both commands.
 
+**The agent is a build option, off by default.** Nothing of it is compiled unless asked for:
+
+```bash
+WIREBENCH_AI=1 swift build          # and WIREBENCH_AI=1 swift test for its tests
+xcodebuild ... WIREBENCH_AI_FLAGS=-DWIREBENCH_AI   # or set that user-defined setting in Xcode
+```
+
+Without it the Agent window, its toolbar button and menu command, the network client and its commands in the Qt bridge
+are not built at all.
+
 ### macOS app
 
 ```bash
@@ -136,7 +146,11 @@ swift run wirebench-cli blocks    project.pcc      # how each module resolves to
 swift run wirebench-cli sim       project.pcc 20000
 swift run wirebench-cli build     project.pcc      # writes the program (.pbd) and symbol table (.csv)
 swift run wirebench-cli roundtrip project.pcc      # open, save, compare: nothing may be lost
+swift run wirebench-cli resave    project.pcc      # rewrite in Dirigo's format (whole-number coordinates), keeping a .bak
 ```
+
+Dirigo reads block and wire coordinates with `StrToInt`, so a file whose `X`/`Y` have a fraction makes it refuse the
+project ("is not a valid integer value"). Wirebench writes whole points; `resave` repairs a file an older build wrote.
 
 ## Layout
 

@@ -49,6 +49,29 @@ public enum BlockLabels {
         sourceNames.first { $0.value == guid }?.key
     }
 
+    public static func isBooleanType(_ type: String) -> Bool {
+        switch type.lowercased() {
+        case "boolean", "bit", "bool": return true
+        default: return false
+        }
+    }
+
+    /// The input pins' data types, in pin order, for a block configured with `totalPins` inputs.
+    public static func inputTypes(for guid: UUID, totalPins: Int) -> [String] {
+        guard let template = template(for: guid) else { return [] }
+        guard let placeholder = runPlaceholder(template) else {
+            return template.inputs.map(\.dataType)
+        }
+        let prefix = prefix(of: placeholder)
+        let fixed = template.inputs.filter { $0.abbrev != placeholder.abbrev && !isRunMember($0, prefix: prefix) }
+        let run = max(0, totalPins - fixed.count)
+        return fixed.map(\.dataType) + Array(repeating: placeholder.dataType, count: run)
+    }
+
+    public static func paramTypes(for guid: UUID) -> [String] {
+        template(for: guid)?.params.map(\.dataType) ?? []
+    }
+
     /// The output pins' source names, in pin order.
     public static func outputLabels(for guid: UUID) -> [String] {
         let names = template(for: guid)?.outputs.map(\.name) ?? []
@@ -62,28 +85,42 @@ public enum BlockLabels {
 
     /// How many operands a block with `totalPins` input pins was configured for, when it has a configurable run; `nil`
     /// when its pins are fixed.
+    /// The template's configurable run. Some blocks mark it with `isCountedInput`; others only name it
+    /// `X0 - Xn`, and Dirigo lets those grow too.
+    private static func runPlaceholder(_ template: BlockPinTemplate) -> PinTemplate? {
+        template.inputs.first { $0.isCountedInput || $0.abbrev.contains(" - ") }
+    }
+
     public static func countedInputCount(for guid: UUID, totalPins: Int) -> Int? {
-        guard let template = template(for: guid),
-              let placeholder = template.inputs.first(where: { $0.isCountedInput }) else { return nil }
-        let fixed = template.inputs.filter { !$0.isCountedInput && !isRunMember($0, prefix: prefix(of: placeholder)) }.count
-        return max(1, totalPins - fixed)
+        guard let template = template(for: guid), runPlaceholder(template) != nil else { return nil }
+        return max(1, totalPins - fixedInputCount(for: guid))
     }
 
     /// How many input pins the block has before its configurable run starts.
     public static func fixedInputCount(for guid: UUID) -> Int {
-        guard let template = template(for: guid),
-              let placeholder = template.inputs.first(where: { $0.isCountedInput }) else {
-            return template(for: guid)?.inputs.count ?? 0
+        guard let template = template(for: guid) else { return 0 }
+        guard let placeholder = runPlaceholder(template) else { return template.inputs.count }
+        let prefix = prefix(of: placeholder)
+        return template.inputs.filter { $0.abbrev != placeholder.abbrev && !isRunMember($0, prefix: prefix) }.count
+    }
+
+    /// The most input pins a block call may have: the template's own, or the fixed run plus a generous window for a
+    /// configurable block. A `set` beyond this is a mistake, not a bigger block.
+    public static func maxInputPins(for guid: UUID) -> Int {
+        guard let template = template(for: guid) else {
+            // No recovered pin layout: `BlockFactory` gives the block one generic pin, and a file can carry more.
+            return 256
         }
-        return template.inputs.filter { !$0.isCountedInput && !isRunMember($0, prefix: prefix(of: placeholder)) }.count
+        return hasConfigurableInputs(guid) ? fixedInputCount(for: guid) + 256 : template.inputs.count
     }
 
     public static func hasConfigurableInputs(_ guid: UUID) -> Bool {
-        template(for: guid)?.inputs.contains { $0.isCountedInput } ?? false
+        guard let template = template(for: guid) else { return false }
+        return runPlaceholder(template) != nil
     }
 
     private static func prefix(of placeholder: PinTemplate) -> String {
-        String(placeholder.abbrev.prefix(while: { $0 != "(" }))
+        String(placeholder.abbrev.prefix(while: { $0.isLetter }))
     }
 
     private static func isRunMember(_ spec: PinTemplate, prefix: String) -> Bool {

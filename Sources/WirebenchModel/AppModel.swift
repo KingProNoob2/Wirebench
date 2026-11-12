@@ -157,8 +157,11 @@ public final class AppModel: @unchecked Sendable {
     public var isPlaying: Bool = false
     /// What Copy last took: the blocks and the wires between them. See `AppModel+Clipboard`.
     package var clipboard: BlockClipboard?
-    /// The agent panel's state, shared by both frontends (`Agent/`).
+#if WIREBENCH_AI
+    /// The agent panel's state, shared by both frontends (`Agent/`). Only present in a build made with
+    /// `WIREBENCH_AI`, which is off by default.
     public let agent = AgentModel()
+#endif
     /// The block reference window's state, shared by both frontends (`Help/`).
     public let help = HelpModel()
     /// Whether a host timer (the Qt app's) drives the simulation, so `hostPlay()` starts it; the SwiftUI app plays on its own task.
@@ -396,7 +399,9 @@ public final class AppModel: @unchecked Sendable {
         usageDefaults = defaults
         blockUsage = BlockUsageModel.load(from: defaults)
         AppModel.shared = self
+#if WIREBENCH_AI
         agent.toolbox = AgentToolbox(model: self)
+#endif
     }
 
     /// Bumps the version that tells the canvas its live values have changed.

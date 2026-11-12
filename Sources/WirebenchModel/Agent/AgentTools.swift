@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Foundation
 import WirebenchCore
 import WirebenchLibrary
@@ -628,3 +629,4 @@ public final class AgentToolbox: @unchecked Sendable {
 private extension Array {
     subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
+#endif

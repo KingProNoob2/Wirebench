@@ -186,8 +186,9 @@ enum TortureProjects {
         wide.inPins[6].value = .int16(-32768)
         wide.inPins[7].value = .undefined
         wide.outPins = [Pin(id: 0, value: .bool(false), rights: 2)]
-        wide.x = -1234.5
-        wide.y = 9876.25
+        // Coordinates are whole numbers in the file: Dirigo reads them with `StrToInt`.
+        wide.x = -1234
+        wide.y = 9876
 
         var unicodeModule = module(NotBlock.guid, id: 2, name: unicode, order: 20, page: "stránka & <2>")
         unicodeModule.inPins[0] = Pin(id: 0, value: .bool(true), inverted: true,

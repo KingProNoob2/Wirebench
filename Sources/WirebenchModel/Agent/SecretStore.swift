@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Foundation
 #if canImport(Security)
 import Security
@@ -121,3 +122,4 @@ public final class InMemorySecretStore: SecretStore, @unchecked Sendable {
     public func write(_ secret: String, account: String) -> Bool { lock.withLock { secrets[account] = secret }; return true }
     public func delete(account: String) { lock.withLock { _ = secrets.removeValue(forKey: account) } }
 }
+#endif

@@ -330,6 +330,7 @@ enum BridgeCommands {
             if let index = int(arguments, "index") { model.removePLCCommand(at: index) }
             return ["ok": true, "plc": plcState(model)]
         case "agentState":
+#if WIREBENCH_AI
             let agent = model.agent
             return ["ok": true, "state": [
                 "presets": agent.presets.map { ["id": $0.id, "name": $0.name, "needsKey": $0.needsKey, "keyHelp": $0.keyHelp] },
@@ -342,6 +343,17 @@ enum BridgeCommands {
                 "canEdit": agent.canEdit, "toolsRefused": agent.toolsRefused, "toolsRefusal": agent.toolsRefusal, "currentAction": agent.currentAction,
                 "messages": agent.messages.map { ["role": $0.role.rawValue, "text": $0.text, "failed": $0.failed] },
             ] as [String: Any]]
+#else
+            // The agent is a build option, off by default: the Qt panel gets a state it can draw as unavailable, with
+            // every field it binds to present and empty rather than undefined.
+            return ["ok": true, "state": [
+                "available": false, "presets": [] as [[String: Any]], "provider": "", "model": "", "baseURL": "",
+                "custom": false, "needsKey": false, "keyHelp": "", "hasKey": false, "keyLocation": "",
+                "sending": false, "error": "", "blocker": "", "models": [] as [String], "loadingModels": false,
+                "modelsError": "", "modelsHint": "", "canEdit": false, "toolsRefused": false, "toolsRefusal": "",
+                "currentAction": "", "messages": [] as [[String: Any]],
+            ] as [String: Any]]
+#endif
         case "helpState":
             let help = model.help
             let strings = help.strings
@@ -373,6 +385,7 @@ enum BridgeCommands {
         // The page for a block of the project, by its id: what "Help" in a block's menu and in the inspector open.
         case "helpShowBlock":
             if let id = int(arguments, "id"), let module = model.module(id: id) { model.help.show(blockNamed: HelpModel.blockName(of: module)) }
+#if WIREBENCH_AI
         case "agentSetProvider": model.agent.providerID = arguments["id"] as? String ?? model.agent.providerID
         case "agentSetModel": model.agent.model = arguments["value"] as? String ?? model.agent.model
         case "agentSetBaseURL": model.agent.baseURL = arguments["value"] as? String ?? model.agent.baseURL
@@ -382,6 +395,11 @@ enum BridgeCommands {
         case "agentSetCanEdit": model.agent.canEdit = arguments["value"] as? Bool ?? model.agent.canEdit
         case "agentClear": model.agent.clear()
         case "agentRefreshModels": model.agent.refreshModels()
+#else
+        case "agentSetProvider", "agentSetModel", "agentSetBaseURL", "agentSetKey", "agentRemoveKey",
+             "agentSend", "agentSetCanEdit", "agentClear", "agentRefreshModels":
+            return ["ok": false, "error": "the agent is not built in"]
+#endif
         case "palette":
             let query = arguments["query"] as? String ?? ""
             // The SwiftUI picker's scope and order: every catalogue type but the bare macro ones, best match first, ties going to

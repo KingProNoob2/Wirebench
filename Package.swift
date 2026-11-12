@@ -1,5 +1,11 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+/// The agent is a build option, off unless asked for: `WIREBENCH_AI=1 swift build` (or `swift test`) defines
+/// `WIREBENCH_AI`, and nothing of the agent is compiled without it.
+let aiSettings: [SwiftSetting] = ProcessInfo.processInfo.environment["WIREBENCH_AI"] == "1"
+    ? [.define("WIREBENCH_AI")] : []
 
 // The SwiftUI app only exists where SwiftUI does; every other target is portable (Linux builds them).
 #if os(macOS)
@@ -8,7 +14,8 @@ let appTargets: [Target] = [
     .executableTarget(
         name: "WirebenchApp",
         dependencies: ["WirebenchModel", "WirebenchCore", "WirebenchLibrary", "WirebenchEngine", "WirebenchHardware",
-                       "WirebenchSource"]
+                       "WirebenchSource"],
+        swiftSettings: aiSettings
     ),
 ]
 let appTestDependencies: [Target.Dependency] = ["WirebenchApp"]
@@ -58,7 +65,8 @@ let featureTargets: [Target] = [
         name: "WirebenchBridge",
         dependencies: ["WirebenchModel", "WirebenchCore", "WirebenchLibrary"],
         path: "Sources/WirebenchBridge",
-        publicHeadersPath: "include"
+        publicHeadersPath: "include",
+        swiftSettings: aiSettings
     ),
     // PLC Swift: the source front end and its lowering to blocks, on top of Swift's own parser.
     .target(
@@ -77,7 +85,8 @@ let featureTargets: [Target] = [
     // The application's state and commands, with no view code: the SwiftUI app and any other frontend sit on it.
     .target(
         name: "WirebenchModel",
-        dependencies: ["WirebenchCore", "WirebenchLibrary", "WirebenchEngine", "WirebenchHardware"]
+        dependencies: ["WirebenchCore", "WirebenchLibrary", "WirebenchEngine", "WirebenchHardware"],
+        swiftSettings: aiSettings
     ),
     .testTarget(
         name: "WirebenchTests",
@@ -85,7 +94,8 @@ let featureTargets: [Target] = [
         // They were previously reachable only through the GUI, which is how a coordinate-space
         // mistake in `PinHitTest` survived a green test suite and a successful build.
         dependencies: ["WirebenchCore", "WirebenchLibrary", "WirebenchEngine", "WirebenchHardware", "WirebenchModel",
-                       "WirebenchSource"] + appTestDependencies
+                       "WirebenchSource"] + appTestDependencies,
+        swiftSettings: aiSettings
     ),
 ]
 

@@ -23,7 +23,9 @@ struct WirebenchApp: App {
                     appDelegate.model = model
                 }
         }
-        // A window of its own for the agent, one at a time: opening it again brings it forward.
+#if WIREBENCH_AI
+        // A window of its own for the agent, one at a time: opening it again brings it forward. Only in a build made with
+        // `WIREBENCH_AI`, which is off by default.
         Window("Agent", id: "agent") {
             AgentPanelView(agent: model.agent)
                 .preferredColorScheme(model.appearance.colorScheme)
@@ -32,6 +34,7 @@ struct WirebenchApp: App {
                 .onChange(of: model.project == nil) { _, none in if none { dismissWindow(id: "agent") } }
         }
         .defaultSize(width: 380, height: 540)
+#endif
         // The PLC Swift editor: its own window, since it is a source buffer beside the sheet rather than a pane of it.
         Window("PLC Swift", id: "swift") {
             SwiftIDEView(model: model)
@@ -61,10 +64,12 @@ struct WirebenchApp: App {
                 }
                 .keyboardShortcut("i", modifiers: [.control, .command])
 
+#if WIREBENCH_AI
                 // The agent works on the open project, so it is not offered without one.
                 Button("Agent Panel") { openWindow(id: "agent") }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(model.project == nil)
+#endif
 
                 // The source editor makes its own project, so it does not need one open.
                 Button("PLC Swift Editor") { openWindow(id: "swift") }

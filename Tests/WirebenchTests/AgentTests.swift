@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Testing
 import Foundation
 #if canImport(FoundationNetworking)
@@ -375,3 +376,4 @@ struct AgentTests {
         #expect(store.reads == 2)
     }
 }
+#endif

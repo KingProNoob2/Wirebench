@@ -596,11 +596,13 @@ public struct MainView: View {
 
         inspectorBalance
 
+#if WIREBENCH_AI
         ToolbarItem(placement: .primaryAction) {
             Button { openWindow(id: "agent") } label: { Label("Agent", systemImage: "sparkles") }
                 .help(model.project == nil ? "Open a project to use the agent" : "Agent Panel (⇧⌘A)")
                 .disabled(model.project == nil)
         }
+#endif
 
         ToolbarItem(placement: .primaryAction) {
             // The pane animates in and out; the button only starts it. A toggle, so it is drawn pressed — highlighted

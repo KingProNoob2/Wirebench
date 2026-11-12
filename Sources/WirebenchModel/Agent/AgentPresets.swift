@@ -1,3 +1,4 @@
+#if WIREBENCH_AI
 import Foundation
 
 /// A chatbot service the agent panel can talk to. All of them are reached through the OpenAI chat-completions API
@@ -43,3 +44,4 @@ public struct AgentPreset: Identifiable, Equatable, Sendable {
 
     public static func preset(id: String) -> AgentPreset { all.first { $0.id == id } ?? all[0] }
 }
+#endif

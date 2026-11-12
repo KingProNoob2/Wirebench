@@ -1142,7 +1142,7 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_9391A175-8949-45B0-BE12-ADB28255CF19" /* Wirebench */ = {
+		"TEMP_48C51567-5277-49F5-8F7D-2862C1C6240D" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
 				1A521C0652DDE7C0AFB37D41 /* Release.xcconfig */,
@@ -2188,10 +2188,11 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_SWIFT_FLAGS = "-package-name Wirebench";
+				OTHER_SWIFT_FLAGS = "-package-name Wirebench $(WIREBENCH_AI_FLAGS)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
+				WIREBENCH_AI_FLAGS = "";
 			};
 			name = Release;
 		};
@@ -2483,12 +2484,13 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_SWIFT_FLAGS = "-package-name Wirebench";
+				OTHER_SWIFT_FLAGS = "-package-name Wirebench $(WIREBENCH_AI_FLAGS)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
+				WIREBENCH_AI_FLAGS = "";
 			};
 			name = Debug;
 		};

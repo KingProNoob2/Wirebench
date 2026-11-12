@@ -175,6 +175,14 @@ public final class PCCSerializer: @unchecked Sendable {
         .node(name: PCCElement.modules, attrs: [:], children: modules.map(moduleElement))
     }
 
+    /// A point as Dirigo stores it: a whole number, clamped to a range no page can exceed. A damaged file can carry a
+    /// huge or non-finite coordinate, and converting it straight to `Int` would trap while saving.
+    private func coordinate(_ value: Double) -> Int {
+        guard value.isFinite else { return 0 }
+        let limit = 1_000_000_000.0
+        return Int(min(max(value.rounded(), -limit), limit))
+    }
+
     private func moduleElement(_ mod: PCCModule) -> XMLOut {
         var a = Attrs(mod.rawAttributes)
         // A GUID this model could not read (a damaged file) stays exactly as the file spells it: replacing it with the
@@ -188,8 +196,10 @@ public final class PCCSerializer: @unchecked Sendable {
         }
         a.str("NAME", mod.name)
         a.int("ID", mod.id)
-        a.dbl("X", mod.x)
-        a.dbl("Y", mod.y)
+        // Dirigo reads every coordinate with `StrToInt`: a fractional one makes it fail to open the file at all
+        // ("... is not a valid integer value"). The canvas works in points, so the file gets whole points.
+        a.int("X", coordinate(mod.x))
+        a.int("Y", coordinate(mod.y))
         a.int("ORDER", mod.order)
         a.int("THREAD_ID", mod.threadId)
         a.str("PAGE", mod.page)
@@ -273,15 +283,15 @@ public final class PCCSerializer: @unchecked Sendable {
         a.int("OUT_PIN_ID", conn.outPinId)
         // NAME_X / NAME_Y appear on every connection in some projects and on none in others, so
         // emit them when the file had them, or once they carry a non-zero value.
-        if conn.nameX != 0 || a.bag["NAME_X"] != nil { a.dbl("NAME_X", conn.nameX) }
-        if conn.nameY != 0 || a.bag["NAME_Y"] != nil { a.dbl("NAME_Y", conn.nameY) }
+        if conn.nameX != 0 || a.bag["NAME_X"] != nil { a.int("NAME_X", coordinate(conn.nameX)) }
+        if conn.nameY != 0 || a.bag["NAME_Y"] != nil { a.int("NAME_Y", coordinate(conn.nameY)) }
 
         var children: [XMLOut] = []
         if !conn.points.isEmpty {
             let points = conn.points.map { pt -> XMLOut in
                 var pa = Attrs()
-                pa.dbl("X", pt.x)
-                pa.dbl("Y", pt.y)
+                pa.int("X", coordinate(pt.x))
+                pa.int("Y", coordinate(pt.y))
                 return .leaf(name: "POINT", attrs: pa.result)
             }
             children.append(.node(name: "POINTS", attrs: [:], children: points))
@@ -314,8 +324,8 @@ public final class PCCSerializer: @unchecked Sendable {
         if !g.nodes.isEmpty {
             let nodes = g.nodes.map { node -> XMLOut in
                 var na = Attrs()
-                na.dbl("X", node.x)
-                na.dbl("Y", node.y)
+                na.int("X", coordinate(node.x))
+                na.int("Y", coordinate(node.y))
                 return .leaf(name: "NODE", attrs: na.result)
             }
             children.append(.node(name: "NODES", attrs: [:], children: nodes))

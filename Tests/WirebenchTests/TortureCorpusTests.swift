@@ -192,7 +192,7 @@ struct TortureCorpusTests {
         #expect(read.pages.map(\.caption) == project.pages.map(\.caption))
         let wide = try #require(read.modules.first { $0.id == 1 })
         #expect(wide.inPins.count == 65)
-        #expect(wide.x == -1234.5 && wide.y == 9876.25)
+        #expect(wide.x == -1234 && wide.y == 9876)
         let readWide = try #require(read.modules.first { $0.id == 1 })
         let wroteWide = try #require(project.modules.first { $0.id == 1 })
         // The text is what a file keeps, and it is kept even where the number no longer fits a 32-bit Int.
