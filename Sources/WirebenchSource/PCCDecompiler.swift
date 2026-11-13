@@ -350,6 +350,9 @@ private final class PageReader {
     private func blockDeclaration(_ module: PCCModule) -> String? {
         guard let name = blockNames[module.id],
               let rawType = BlockLabels.sourceName(for: module.guid) else { return nil }
+        // The array blocks carry typed pins; the subset's recovery is still BOOL-only, so list them rather than
+        // emitting a read that would land on a Boolean wire.
+        if let info = BlockTypeCatalog.info(forGuid: module.guid), info.blockName.contains("Array") { return nil }
         let type = Identifier.type(rawType)
         let params = BlockLabels.paramLabels(for: module.guid)
         let paramTypes = BlockLabels.paramTypes(for: module.guid)
@@ -440,6 +443,9 @@ private final class PageReader {
     private func blockStatement(_ module: PCCModule) -> String? {
         guard let name = blockNames[module.id],
               let rawType = BlockLabels.sourceName(for: module.guid) else { return nil }
+        // The array blocks carry typed pins; the subset's recovery is still BOOL-only, so list them rather than
+        // emitting a read that would land on a Boolean wire.
+        if let info = BlockTypeCatalog.info(forGuid: module.guid), info.blockName.contains("Array") { return nil }
         let type = Identifier.type(rawType)
         var arguments: [String] = []
         let params = BlockLabels.paramLabels(for: module.guid)

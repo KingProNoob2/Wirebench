@@ -29,6 +29,10 @@ END_PROGRAM
 - **Programs.** `PROGRAM Name … END_PROGRAM`; the first one is the page the document opens on. Every program is a page.
 - **Pins.** `name AT %IXn : BOOL` is digital input *n*, `name AT %QXn : BOOL` output *n*, 0–7. A program gets one `8xDI`
   and one `8xDO`; a variable is read at the scan's start.
+- **Arrays.** `a : ARRAY[0..15] OF INT;` declares an array in the PLC data area (INT or LONG; there is no
+  `CreateFloatArray` block). `a[3] := 5;` writes a slot and `x := a[3];` reads one; the declared lower bound is
+  subtracted because the array blocks are 0-based. A read sees the value the scan began with; writes happen after the
+  scan's other work, in source order. At most 16 arrays (the PLC's Id range 0–15).
 - **State.** A value declared in `VAR` without an address is a stored variable — a `BoolVar`/`IntVar`/`LongVar`/
   `FloatVar` plus the `Set` that writes it. It becomes visible from the next scan, exactly like Dirigo's own clocked
   behaviour. An initialiser (`:= 5`) is the variable's configured value (`INIT_VALUE`).
@@ -68,6 +72,7 @@ END_PROGRAM
 | `AT %IXn` / `AT %QXn` | one `8xDI` / one `8xDO`, pins in order |
 | stored `BOOL` | `BoolVar` + `Set` |
 | stored `INT`/`LONG`/`REAL` | `IntVar`/`LongVar`/`FloatVar` + `Set`; value in `INIT_VALUE` |
+| array | `CreateIntArray`/`CreateLongArray` + `Read…Array`/`Write…Array` |
 | arithmetic/comparison | `IAdd`/`ISub`/`IMul`/`Div`, `LAdd`/`LSub`, `FAdd`/`FSub`/`FMul`/`FDiv`/`FMod`, `Comparator`/`LComparator` |
 | numeric `IF` merge | `ISwitch`/`LSwitch`/`FSwitch` |
 | `IF` | a selection of wires (`select`), folded where the condition is constant |
@@ -117,6 +122,8 @@ same compiler.
 - `CASE` labels must be disjoint whole numbers or ranges; a `REAL` selector and overlapping labels are refused.
 - `FOR` needs literal bounds/step and unrolls to at most 256 iterations; an instance cannot be called once per
   iteration (the same block call twice in one scan is refused). `WHILE` and `REPEAT` are refused.
+- Arrays are INT/LONG only, at most 16, and cannot be written inside IF or CASE; REAL arrays have no create block.
+  A read in the same scan as a write sees the value from before the scan.
 - A variable written inside a conditional in a FOR body is read back as the scan-start value, not the value the
   previous iteration wrote (the dataflow model's general rule).
 - A block call cannot sit inside `IF` (its wiring has no condition); create the block before the branch.

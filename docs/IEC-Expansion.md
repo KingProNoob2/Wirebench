@@ -71,7 +71,11 @@ A loop is not expressible as dataflow without unrolling or a state machine. Deci
 iterations) at compile time; `WHILE`/`REPEAT` need a counted state machine or are refused. Document the choice
 in `docs/Structured-Text.md`; tests must pin the semantics, including the iteration cap.
 
-## Stage 4: functions and arrays
+## Stage 4: functions and arrays (INT/LONG arrays done; functions not started)
+
+Array declarations, element reads and writes are lowered to `Create…Array`/`Read…Array`/`Write…Array` with the
+lower bound subtracted, at most 16 arrays and no REAL arrays (no create block). Array writes are listed in recovery
+rather than recovered. FUNCTIONS are still not implemented: typed `FUNCTION` interfaces need typed macro pins first.
 
 Functions (`FUNCTION f : INT ... END_FUNCTION`) lower to a macro-style page plus a call block, or are refused
 until the macro backend supports typed interfaces. Arrays need `ArrayRead`/`ArrayWrite` (or the catalogue's

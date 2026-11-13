@@ -187,6 +187,8 @@ indirect enum NumExpr: Equatable {
     case binary(String, NumExpr, NumExpr, NumType)
     /// `condition ? a : b`, lowered to `ISwitch`/`LSwitch`/`FSwitch`.
     case select(BoolExpr, NumExpr, NumExpr, NumType)
+    /// `a[i]`, lowered to `ReadIntArray`/`ReadLongArray`.
+    case arrayRead(String, NumExpr, NumType)
 }
 
 /// A lowered value: a Boolean signal, or a number with its type.
@@ -296,6 +298,8 @@ final class Emitter {
     private var placed = 0
     private var digitalInput: Int?
     private var variableBlocks: [String: Int] = [:]
+    /// Each declared array's `Create…Array` block and its PLC Id.
+    private var arrayBlocks: [String: (create: Int, id: Int, type: NumType)] = [:]
     private var macroInputs: Int?
     private var macroOutputs: Int?
     private var calls: [CallSite] = []
@@ -401,6 +405,16 @@ final class Emitter {
             if !summary.outputs.isEmpty { macroOutputs = makeInterface(.outputs, names: summary.outputs) }
         }
 
+        // Arrays are allocated once per scan before anything reads them; the block keeps its contents for the same
+        // length, so the store survives between scans.
+        for (offset, array) in unit.arrays.enumerated() {
+            let block = addBlock(try guid(array.type == .int ? "CreateIntArray" : "CreateLongArray"))
+            setIn(block, 0, .bool(true))
+            setIn(block, 1, .int32(Int32(offset)))
+            setIn(block, 2, .int32(Int32(array.length)))
+            arrayBlocks[array.name.lowercased()] = (block, offset, array.type == .int ? .int : .long)
+        }
+
         // Variables exist before anything reads them: a read is the block's output, the value at the start of the scan.
         // The writes go in last, so everything that reads a variable reads it before the scan updates it.
         for variable in unit.variables {
@@ -466,6 +480,15 @@ final class Emitter {
             let set = addBlock(SetBlock.guid)
             connect(set, 1, value)
             connect(set, 2, .pin(module: variableBlock, outPin: 0))
+        }
+        // Array writes happen last in source order: reads earlier in the scan see the value the scan began with.
+        for write in lowered.arrayWrites {
+            guard let array = arrayBlocks[write.array.lowercased()] else { continue }
+            let block = addBlock(try guid(array.type == .int ? "WriteIntArray" : "WriteLongArray"))
+            connect(block, 0, .constant(true))
+            connect(block, 1, .number(.int32(Int32(array.id))))
+            connect(block, 2, try materialiseNumber(write.index))
+            connect(block, 3, try materialiseNumber(write.value))
         }
         return summary
     }
@@ -602,6 +625,15 @@ final class Emitter {
             connect(block, 1, left)
             connect(block, 2, right)
             return .pin(module: block, outPin: 0)
+        case .arrayRead(let name, let index, let type):
+            guard let array = arrayBlocks[name.lowercased()] else {
+                throw SourceError(line: 0, message: "unknown array '\(name)'")
+            }
+            let block = addBlock(try guid(type == .int ? "ReadIntArray" : "ReadLongArray"))
+            connect(block, 0, .constant(true))
+            connect(block, 1, .number(.int32(Int32(array.id))))
+            connect(block, 2, try materialiseNumber(index))
+            return .pin(module: block, outPin: 0)
         case .select(let condition, let whenTrue, let whenFalse, let type):
             guard let blockGuid = switchBlock(type) else {
                 throw SourceError(line: 0, message: "no selector for \(type.name)")
@@ -707,9 +739,18 @@ struct CallSite {
 }
 
 /// What a unit's body lowered to.
+/// A write into an array, in source order; the emitter turns each into a `Write…Array` block.
+struct ArrayWrite {
+    var array: String
+    var index: NumExpr
+    var value: NumExpr
+    var line: Int
+}
+
 struct LoweredScan {
     var outputs: [Int: Value] = [:]
     var variableWrites: [String: Value] = [:]
+    var arrayWrites: [ArrayWrite] = []
     var calls: [CallSite] = []
     var blockCalls: [BlockCall] = []
     /// Which instances the body actually calls; an uncalled one is not emitted at all.
@@ -776,6 +817,10 @@ struct Lowering {
         unit.variables.first { $0.name.lowercased() == name.lowercased() }?.type
     }
 
+    private func arrayInfo(_ name: String) -> SourceArray? {
+        unit.arrays.first { $0.name.lowercased() == name.lowercased() }
+    }
+
     private func numType(_ type: SourceType) -> NumType? {
         switch type {
         case .bool: return nil
@@ -829,6 +874,12 @@ struct Lowering {
         }
     }
 
+    /// The array blocks are 0-based; an `ARRAY[5..7]` element at `5` is slot 0.
+    private func offsetArrayIndex(_ index: NumExpr, by array: SourceArray, type: NumType) -> NumExpr {
+        guard array.lower != 0 else { return index }
+        return .binary("-", index, .constant(type == .long ? .int64(Int64(array.lower)) : .int32(Int32(array.lower))), type)
+    }
+
     private func defaultValue(for name: String) -> Value {
         guard let type = variableType(name) else { return .bool(.variable(name)) }
         switch type {
@@ -865,6 +916,9 @@ struct Lowering {
                         throw SourceError(line: statement.line, message: "'\(name)' is a BOOL output pin; a number cannot drive it")
                     }
                     scan.outputs[index] = value
+                } else if arrayInfo(name) != nil {
+                    throw SourceError(line: statement.line,
+                                      message: "'\(name)' is an array; assign an element as in '\(name)[0] := …'")
                 } else if let variable = variableName(name), let type = variableType(variable) {
                     scan.variableWrites[variable.lowercased()] = try stored(value, in: type, line: statement.line, name: name)
                 } else if inputPin(name) != nil {
@@ -917,6 +971,27 @@ struct Lowering {
                         }
                     }
                 }
+            case .arrayAssign(let name, let indexExpression, let valueExpression):
+                if inBranch {
+                    throw SourceError(line: statement.line,
+                                      message: "an array write cannot be inside IF or CASE")
+                }
+                guard let array = arrayInfo(name) else {
+                    throw SourceError(line: statement.line, message: "unknown array '\(name)'")
+                }
+                let (index, indexType) = try numberValue(try lower(indexExpression, scan: &scan), line: statement.line)
+                guard indexType != .real else {
+                    throw SourceError(line: statement.line, message: "an array index is an integer, not REAL")
+                }
+                let (value, valueType) = try numberValue(try lower(valueExpression, scan: &scan), line: statement.line)
+                if array.type == .int, valueType != .int {
+                    throw SourceError(line: statement.line, message: "'\(name)' is an INT array; a \(valueType.name) cannot be stored in it")
+                }
+                if array.type == .long, valueType == .real {
+                    throw SourceError(line: statement.line, message: "'\(name)' is a LONG array; a REAL cannot be stored in it")
+                }
+                scan.arrayWrites.append(ArrayWrite(array: name, index: offsetArrayIndex(index, by: array, type: indexType),
+                                                   value: value, line: statement.line))
             case .block(let body):
                 try lower(body, into: &scan)
             case .ifThen(let condition, let thenBody, let elseBody):
@@ -1009,6 +1084,10 @@ struct Lowering {
                 case .real: return .number(.variable(variable), .real)
                 }
             }
+            if arrayInfo(name) != nil {
+                throw SourceError(line: expression.line,
+                                  message: "'\(name)' is an array; read an element as in '\(name)[0]'")
+            }
             if instance(name) != nil {
                 throw SourceError(line: expression.line,
                                   message: "'\(name)' is an instance; read one of its outputs, as in '\(name).Y'")
@@ -1051,6 +1130,16 @@ struct Lowering {
             case nil:
                 throw SourceError(line: expression.line, message: "unknown instance '\(instanceName)'")
             }
+        case .element(let base, let indexExpression):
+            guard case .name(let arrayName) = base.kind, let array = arrayInfo(arrayName) else {
+                throw SourceError(line: expression.line, message: "only a declared array can be indexed")
+            }
+            let (index, indexType) = try numberValue(try lower(indexExpression, scan: &scan), line: expression.line)
+            guard indexType != .real else {
+                throw SourceError(line: expression.line, message: "an array index is an integer, not REAL")
+            }
+            let type: NumType = array.type == .int ? .int : .long
+            return .number(.arrayRead(arrayName, offsetArrayIndex(index, by: array, type: indexType), type), type)
         case .unary(let op, let operand):
             switch op {
             case "!":

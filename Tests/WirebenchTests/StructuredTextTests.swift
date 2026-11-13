@@ -522,6 +522,91 @@ struct StructuredTextTests {
         }
     }
 
+    @Test("An INT array writes and reads through the data area")
+    func arrayReadWrite() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            a : ARRAY[0..3] OF INT;
+            n : INT := 0;
+        END_VAR
+            a[1] := 42;
+            n := a[1] + 1;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        #expect(compiled.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "CreateIntArray")?.guid })
+        #expect(compiled.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "ReadIntArray")?.guid })
+        #expect(compiled.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "WriteIntArray")?.guid })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)   // writes 42; the read earlier in the scan saw 0
+        core.step(deltaMs: 10, now: Self.now)   // now reads 42
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 43)
+    }
+
+    @Test("An array's declared lower bound is honoured")
+    func arrayLowerBound() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            a : ARRAY[5..7] OF INT;
+            n : INT := 0;
+        END_VAR
+            a[5] := 7;
+            n := a[5];
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 7)
+    }
+
+    @Test("Array refusals: REAL elements, a reversed range, a REAL index, a write in IF, a bare name")
+    func arrayRefusals() {
+        let cases: [(String, String)] = [
+            ("""
+             PROGRAM P
+             VAR a : ARRAY[0..3] OF REAL; END_VAR
+             END_PROGRAM
+             """, "only INT and LONG arrays"),
+            ("""
+             PROGRAM P
+             VAR a : ARRAY[3..1] OF INT; END_VAR
+             END_PROGRAM
+             """, "count upwards"),
+            ("""
+             PROGRAM P
+             VAR a : ARRAY[0..3] OF INT; n : INT := 0; END_VAR
+                 n := a[1.5];
+             END_PROGRAM
+             """, "integer, not REAL"),
+            ("""
+             PROGRAM P
+             VAR a : ARRAY[0..3] OF INT; b AT %IX0 : BOOL; END_VAR
+                 IF b THEN
+                     a[1] := 2;
+                 END_IF;
+             END_PROGRAM
+             """, "cannot be inside IF"),
+            ("""
+             PROGRAM P
+             VAR a : ARRAY[0..3] OF INT; n : INT := 0; END_VAR
+                 n := a;
+             END_PROGRAM
+             """, "read an element"),
+        ]
+        for (source, fragment) in cases {
+            let message = Self.error(source)
+            #expect(message?.contains(fragment) == true, "\(fragment): \(message ?? "compiled")")
+        }
+    }
+
     @Test("Completion offers keywords, block types, instance names and an instance's outputs")
     func completion() {
         let source = """

@@ -28,6 +28,8 @@ public struct SourceExpr: Equatable, Sendable {
         case name(String)
         /// `t.result`: one of a function-block instance's outputs.
         case member(SourceExpr, String)
+        /// `a[3]`: one element of a declared array.
+        case element(SourceExpr, SourceExpr)
         case unary(String, SourceExpr)
         case binary(String, SourceExpr, SourceExpr)
     }
@@ -54,6 +56,8 @@ public struct SourceArgument: Equatable, Sendable {
 public struct SourceStmt: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case assign(String, SourceExpr)
+        /// `a[3] := value;` — a write into the PLC array store.
+        case arrayAssign(String, SourceExpr, SourceExpr)
         /// `t(value := x);`: calls a function-block or block instance with named arguments.
         case call(String, [SourceArgument])
         case ifThen(SourceExpr, [SourceStmt], [SourceStmt]?)
@@ -124,6 +128,25 @@ public struct SourceVariable: Equatable, Sendable {
     }
 }
 
+/// `a : ARRAY[0..15] OF INT;` — an array in the PLC data area, addressed by index.
+public struct SourceArray: Equatable, Sendable {
+    public var name: String
+    public var lower: Int
+    public var upper: Int
+    public var type: SourceType
+    public var line: Int
+
+    public init(name: String, lower: Int, upper: Int, type: SourceType, line: Int) {
+        self.name = name
+        self.lower = lower
+        self.upper = upper
+        self.type = type
+        self.line = line
+    }
+
+    public var length: Int { upper - lower + 1 }
+}
+
 /// `running : TON;` — a declared instance of a function block or of a block from the catalogue.
 public struct SourceInstance: Equatable, Sendable {
     public var name: String
@@ -145,16 +168,18 @@ public struct SourceUnit: Equatable, Sendable {
     public var kind: Kind
     public var pins: [SourcePin]
     public var variables: [SourceVariable]
+    public var arrays: [SourceArray]
     public var instances: [SourceInstance]
     public var body: [SourceStmt]
     public var line: Int
 
     public init(name: String, kind: Kind, pins: [SourcePin] = [], variables: [SourceVariable] = [],
-                instances: [SourceInstance] = [], body: [SourceStmt] = [], line: Int) {
+                arrays: [SourceArray] = [], instances: [SourceInstance] = [], body: [SourceStmt] = [], line: Int) {
         self.name = name
         self.kind = kind
         self.pins = pins
         self.variables = variables
+        self.arrays = arrays
         self.instances = instances
         self.body = body
         self.line = line
@@ -314,6 +339,19 @@ public struct SourceParser {
                 address = try addressPin()
             }
             try expectSymbol(":")
+            if isKeyword("ARRAY") {
+                guard region == "VAR", address == nil else {
+                    throw error("an ARRAY is declared in a plain VAR block")
+                }
+                let array = try arrayDeclaration(name: name, line: nameToken.line)
+                guard !isNameTaken(name, in: unit) else { throw error("'\(name)' is declared twice") }
+                guard unit.arrays.count < 16 else {
+                    throw error("this subset has at most 16 arrays (the PLC's Id range 0–15)")
+                }
+                unit.arrays.append(array)
+                try expectSymbol(";")
+                continue
+            }
             let declared = try typeName()
             var initial: SourceLiteral?
             if case .scalar(let scalar) = declared { initial = try initialValue(for: scalar) }
@@ -362,8 +400,27 @@ public struct SourceParser {
     private func isNameTaken(_ name: String, in unit: SourceUnit) -> Bool {
         let folded = name.lowercased()
         return unit.variables.contains { $0.name.lowercased() == folded }
+            || unit.arrays.contains { $0.name.lowercased() == folded }
             || unit.instances.contains { $0.name.lowercased() == folded }
             || unit.pins.contains { $0.name.lowercased() == folded }
+    }
+
+    /// `ARRAY[0..15] OF INT` after the colon and name have been read.
+    private mutating func arrayDeclaration(name: String, line: Int) throws -> SourceArray {
+        advance()   // ARRAY
+        try expectSymbol("[")
+        let lower = try signedInteger("an ARRAY bound")
+        try expectSymbol("..")
+        let upper = try signedInteger("an ARRAY bound")
+        try expectSymbol("]")
+        try expectKeyword("OF")
+        let element = try typeName()
+        guard case .scalar(let type) = element, type == .int || type == .long else {
+            throw error("only INT and LONG arrays are supported (there is no CreateFloatArray block)")
+        }
+        guard lower <= upper else { throw error("an ARRAY range must count upwards") }
+        guard upper - lower + 1 <= 4096 else { throw error("an ARRAY of \(upper - lower + 1) elements is too large") }
+        return SourceArray(name: name, lower: lower, upper: upper, type: type, line: line)
     }
 
     /// `AT %IX0` / `AT %QX0` — input and output bits, 0 to 7.
@@ -469,6 +526,15 @@ public struct SourceParser {
             throw error("expected a statement but found \(describe(current))")
         }
         let name = advance()
+        if isSymbol("[") {
+            advance()
+            let index = try expression()
+            try expectSymbol("]")
+            try expectSymbol(":=")
+            let value = try expression()
+            try expectSymbol(";")
+            return SourceStmt(.arrayAssign(name.text, index, value), line: name.line)
+        }
         if isSymbol("(") {
             let arguments = try argumentList()
             try expectSymbol(";")
@@ -688,6 +754,11 @@ public struct SourceParser {
             }
             return SourceStmt(.assign(target, substitute(expression, index: index, value: value, bindings: bindings)),
                               line: statement.line)
+        case .arrayAssign(let name, let indexExpression, let expression):
+            return SourceStmt(.arrayAssign(name,
+                                           substitute(indexExpression, index: index, value: value, bindings: bindings),
+                                           substitute(expression, index: index, value: value, bindings: bindings)),
+                              line: statement.line)
         case .call(let name, let arguments):
             return SourceStmt(.call(name, arguments.map {
                 SourceArgument(label: $0.label,
@@ -724,6 +795,10 @@ public struct SourceParser {
         case .member(let base, let member):
             return SourceExpr(.member(substitute(base, index: index, value: value, bindings: bindings), member),
                               line: expression.line)
+        case .element(let base, let subscriptIndex):
+            return SourceExpr(.element(substitute(base, index: index, value: value, bindings: bindings),
+                                          substitute(subscriptIndex, index: index, value: value, bindings: bindings)),
+                              line: expression.line)
         case .unary(let op, let operand):
             return SourceExpr(.unary(op, substitute(operand, index: index, value: value, bindings: bindings)),
                               line: expression.line)
@@ -750,7 +825,7 @@ public struct SourceParser {
             for name in assignedNames(in: thenBody).union(assignedNames(in: elseBody ?? [])) {
                 bindings.removeValue(forKey: name.lowercased())
             }
-        case .call:
+        case .call, .arrayAssign:
             break
         }
     }
@@ -758,6 +833,8 @@ public struct SourceParser {
     private func nodeCount(_ statement: SourceStmt) -> Int {
         switch statement.kind {
         case .assign(_, let expression): return 1 + nodeCount(expression)
+        case .arrayAssign(_, let indexExpression, let expression):
+            return 1 + nodeCount(indexExpression) + nodeCount(expression)
         case .call(_, let arguments): return 1 + arguments.reduce(0) { $0 + nodeCount($1.value) }
         case .ifThen(let condition, let thenBody, let elseBody):
             return 1 + nodeCount(condition) + thenBody.reduce(0) { $0 + nodeCount($1) }
@@ -771,6 +848,7 @@ public struct SourceParser {
         case .boolean, .integer, .real: return 1
         case .name: return 1
         case .member(let base, _): return 1 + nodeCount(base)
+        case .element(let base, let indexExpression): return 1 + nodeCount(base) + nodeCount(indexExpression)
         case .unary(_, let operand): return 1 + nodeCount(operand)
         case .binary(_, let left, let right): return 1 + nodeCount(left) + nodeCount(right)
         }
@@ -785,7 +863,7 @@ public struct SourceParser {
             case .ifThen(_, let thenBody, let elseBody):
                 names.formUnion(assignedNames(in: thenBody))
                 names.formUnion(assignedNames(in: elseBody ?? []))
-            case .call: break
+            case .call, .arrayAssign: break
             }
         }
         return names
@@ -924,6 +1002,12 @@ public struct SourceParser {
         if token.kind == .identifier {
             advance()
             var base = SourceExpr(.name(token.text), line: token.line)
+            if isSymbol("[") {
+                advance()
+                let index = try expression()
+                try expectSymbol("]")
+                base = SourceExpr(.element(base, index), line: token.line)
+            }
             while isSymbol(".") {
                 advance()
                 guard current.kind == .identifier else {
@@ -961,12 +1045,13 @@ struct STLexer {
         "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
         "IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE",
         "FOR", "TO", "BY", "DO", "END_FOR", "WHILE", "END_WHILE", "REPEAT", "UNTIL", "END_REPEAT",
+        "ARRAY", "OF",
         "AND", "OR", "XOR", "NOT", "MOD", "AT",
         "TRUE", "FALSE",
         "BOOL", "INT", "LONG", "REAL", "LREAL", "WORD",
     ]
 
-    static let symbols = [":=", "<=", ">=", "<>", "..", ";", ":", ",", "(", ")", ".", "%",
+    static let symbols = [":=", "<=", ">=", "<>", "..", ";", ":", ",", "(", ")", "[", "]", ".", "%",
                           "*", "/", "+", "-", "=", "<", ">"]
 
     init(_ source: String) { scalars = Array(source) }
