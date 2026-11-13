@@ -51,7 +51,7 @@ comparison driving a `%QX` output, widening (`INT + LONG`), an IF on a numeric v
 refusals: assigning REAL to INT, REAL comparison, writing a pin with a number, reading an output before assignment.
 Simulation through `CxxSimulationCore` and a `.pcc` round trip of the emitted project.
 
-## Stage 2: CASE (done)
+## Stage 2: CASE (done, verified)
 
 Implemented by parsing CASE into an IF/ELSIF chain of selector comparisons (equality for a single label, `>=`/`<=`
 for a range), so the existing merge/type rules apply. Overlapping labels, a REAL selector and a missing `END_CASE`
@@ -60,7 +60,7 @@ are refused; labels may be negative; tests cover selection, ranges and the refus
 `CASE selector OF 1: ... 2, 3: ... ELSE ... END_CASE`. Selector is INT/LONG. Lower through `ISwitch`/`LSwitch`
 or comparison chains; each arm merges per the IF rules. Refuse REAL selectors and overlapping labels.
 
-## Stage 3: FOR / WHILE / REPEAT (FOR done, WHILE/REPEAT refused)
+## Stage 3: FOR / WHILE / REPEAT (FOR done and verified; WHILE/REPEAT refused)
 
 `FOR` with literal bounds/step is unrolled (cap 256 iterations) with index and unconditional-write substitution; the
 index is a compile-time binding. `WHILE`/`REPEAT` are parsed far enough to refuse with a reason: a live condition cannot
@@ -71,7 +71,7 @@ A loop is not expressible as dataflow without unrolling or a state machine. Deci
 iterations) at compile time; `WHILE`/`REPEAT` need a counted state machine or are refused. Document the choice
 in `docs/Structured-Text.md`; tests must pin the semantics, including the iteration cap.
 
-## Stage 4: functions and arrays (INT/LONG arrays done; functions not started)
+## Stage 4: functions and arrays (INT/LONG arrays done and verified; functions not started)
 
 Arrays are only accepted in a PROGRAM (a function block's array would collide on the PLC's Id range).
 Array declarations, element reads and writes are lowered to `Create…Array`/`Read…Array`/`Write…Array` with the

@@ -102,6 +102,11 @@ back as `di0`, `do0`, `state`. Digital I/O is recovered by **hardware channel**:
 counted/hidden `8xDO` (`PIN_COUNT`, `HIDDEN_PIN_MASK`) declares the channels it exposes (`AT %IX4`, `AT %QX1`). A channel
 above 7 has no spelling in the subset and is listed instead of moved to another pin.
 
+## Verification
+
+Stages 1–4 (typed values, CASE, FOR, arrays) are covered by `StructuredTextTests`; the full suite, the 144-block
+differential suite, the Xcode app/CLI and Qt builds are green as of the array/loop work.
+
 ## Recovery and typed values
 
 A typed variable is **not** recovered as a typed `VAR` yet: the `Set` that writes it is listed under
