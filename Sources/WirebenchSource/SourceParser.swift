@@ -57,6 +57,8 @@ public struct SourceStmt: Equatable, Sendable {
         /// `t(value := x);`: calls a function-block or block instance with named arguments.
         case call(String, [SourceArgument])
         case ifThen(SourceExpr, [SourceStmt], [SourceStmt]?)
+        /// A sequence of statements: an unrolled loop, lowered inline (not as an IF branch).
+        case block([SourceStmt])
     }
 
     public var kind: Kind
@@ -186,6 +188,8 @@ public struct SourceProgram: Equatable, Sendable {
 public struct SourceParser {
     private var tokens: [STToken]
     private var index = 0
+    /// The unit being parsed, so `FOR` can check the index's declared type while its statements are read.
+    private var currentUnit: SourceUnit?
 
     public init(_ source: String) throws {
         tokens = try STLexer.tokenize(source)
@@ -276,6 +280,7 @@ public struct SourceParser {
         let keyword = advance()
         let name = try expectIdentifier("a name after \(kind == .program ? "PROGRAM" : "FUNCTION_BLOCK")").text
         var unit = SourceUnit(name: name, kind: kind, line: keyword.line)
+        currentUnit = unit
         var sawStatement = false
         while !isAtEnd {
             if kind == .program && isKeyword("END_PROGRAM") { advance(); return unit }
@@ -283,6 +288,7 @@ public struct SourceParser {
             if isKeyword("VAR") || isKeyword("VAR_INPUT") || isKeyword("VAR_OUTPUT") {
                 if sawStatement { throw error("declare every variable before the first statement") }
                 try variableBlock(into: &unit)
+                currentUnit = unit
                 continue
             }
             sawStatement = true
@@ -452,6 +458,13 @@ public struct SourceParser {
     private mutating func statement() throws -> SourceStmt {
         if isKeyword("IF") { return try ifStatement() }
         if isKeyword("CASE") { return try caseStatement() }
+        if isKeyword("FOR") { return try forStatement() }
+        if isKeyword("WHILE") {
+            throw error("WHILE is not supported: a loop over a live condition cannot be dataflow; use FOR with constant bounds or a counter")
+        }
+        if isKeyword("REPEAT") {
+            throw error("REPEAT is not supported: a loop over a live condition cannot be dataflow; use FOR with constant bounds or a counter")
+        }
         guard current.kind == .identifier else {
             throw error("expected a statement but found \(describe(current))")
         }
@@ -575,10 +588,10 @@ public struct SourceParser {
         return labels
     }
 
-    private mutating func signedInteger() throws -> Int {
+    private mutating func signedInteger(_ what: String = "a CASE label") throws -> Int {
         var negative = false
         if isSymbol("-") { advance(); negative = true }
-        guard current.kind == .integer else { throw error("a CASE label is a whole number") }
+        guard current.kind == .integer else { throw error("\(what) is a whole number") }
         let token = advance()
         guard let value = Int(token.text) else { throw error("the number \(token.text) is too large", at: token) }
         return negative ? -value : value
@@ -602,6 +615,180 @@ public struct SourceParser {
             }
         }
         return combined ?? SourceExpr(.boolean(false), line: line)
+    }
+
+    /// `FOR i := 1 TO 3 [BY step] DO … END_FOR`. The loop is unrolled at compile time: bounds and step must be
+    /// whole-number literals, the body is capped at 256 iterations, and reads of the index and of variables assigned
+    /// earlier in the unrolled body are substituted with their expressions so the sequence keeps the loop's meaning.
+    /// The index is a compile-time binding: it is not written to a runtime variable after the loop.
+    private mutating func forStatement() throws -> SourceStmt {
+        let keyword = advance()   // FOR
+        let indexToken = try expectIdentifier("a loop variable")
+        let index = indexToken.text
+        let declaredVariables = currentUnit?.variables ?? []
+        if let variable = declaredVariables.first(where: { $0.name.lowercased() == index.lowercased() }),
+           variable.type != .int && variable.type != .long {
+            throw error("a FOR index is INT or LONG, not \(variable.type.name)")
+        }
+        try expectSymbol(":=")
+        let start = try signedInteger("a FOR bound")
+        try expectKeyword("TO")
+        let end = try signedInteger("a FOR bound")
+        var step = 1
+        if isKeyword("BY") {
+            advance()
+            step = try signedInteger("a FOR step")
+        }
+        guard step != 0 else { throw error("a FOR step cannot be zero") }
+        guard abs(start) <= 1_000_000, abs(end) <= 1_000_000, abs(step) <= 1_000_000 else {
+            throw error("FOR bounds are too large; keep start, end and step within ±1,000,000")
+        }
+        try expectKeyword("DO")
+        let body = try statements { $0 == "END_FOR" }
+        try expectKeyword("END_FOR")
+        try expectSymbol(";")
+
+        // The iteration values, in order, bounded before anything is expanded.
+        var values: [Int] = []
+        var value = start
+        if step > 0 {
+            while value <= end, values.count < 257 { values.append(value); value += step }
+        } else {
+            while value >= end, values.count < 257 { values.append(value); value += step }
+        }
+        guard values.count <= 256 else {
+            throw error("this FOR unrolls to more than 256 iterations; the cap is 256")
+        }
+
+        var bindings: [String: SourceExpr] = [:]
+        var unrolled: [SourceStmt] = []
+        var nodes = 0
+        for iteration in values {
+            for statement in body {
+                let substituted = try substitute(statement, index: index, value: iteration, bindings: bindings)
+                // Substituting `n := n + n` grows exponentially; stop before a small loop becomes a huge tree.
+                nodes += nodeCount(substituted)
+                guard nodes <= 50_000 else {
+                    throw error("this FOR body grows too large when unrolled; simplify the loop")
+                }
+                unrolled.append(substituted)
+                updateBindings(from: substituted, index: index, into: &bindings)
+            }
+        }
+        return SourceStmt(.block(unrolled), line: keyword.line)
+    }
+
+    private func substitute(_ statement: SourceStmt, index: String, value: Int,
+                            bindings: [String: SourceExpr]) throws -> SourceStmt {
+        switch statement.kind {
+        case .assign(let target, let expression):
+            guard target.lowercased() != index.lowercased() else {
+                throw SourceError(line: statement.line,
+                                  message: "a FOR index cannot be assigned inside the loop")
+            }
+            return SourceStmt(.assign(target, substitute(expression, index: index, value: value, bindings: bindings)),
+                              line: statement.line)
+        case .call(let name, let arguments):
+            return SourceStmt(.call(name, arguments.map {
+                SourceArgument(label: $0.label,
+                               value: substitute($0.value, index: index, value: value, bindings: bindings))
+            }), line: statement.line)
+        case .ifThen(let condition, let thenBody, let elseBody):
+            var thenSub: [SourceStmt] = []
+            for inner in thenBody {
+                thenSub.append(try substitute(inner, index: index, value: value, bindings: bindings))
+            }
+            var elseSub: [SourceStmt]?
+            if let elseBody {
+                var bodies: [SourceStmt] = []
+                for inner in elseBody {
+                    bodies.append(try substitute(inner, index: index, value: value, bindings: bindings))
+                }
+                elseSub = bodies
+            }
+            return SourceStmt(.ifThen(substitute(condition, index: index, value: value, bindings: bindings),
+                                      thenSub, elseSub), line: statement.line)
+        case .block(let body):
+            return SourceStmt(.block(try body.map { try substitute($0, index: index, value: value, bindings: bindings) }),
+                              line: statement.line)
+        }
+    }
+
+    private func substitute(_ expression: SourceExpr, index: String, value: Int,
+                            bindings: [String: SourceExpr]) -> SourceExpr {
+        switch expression.kind {
+        case .name(let name):
+            if name.lowercased() == index.lowercased() { return SourceExpr(.integer(value), line: expression.line) }
+            if let bound = bindings[name.lowercased()] { return bound }
+            return expression
+        case .member(let base, let member):
+            return SourceExpr(.member(substitute(base, index: index, value: value, bindings: bindings), member),
+                              line: expression.line)
+        case .unary(let op, let operand):
+            return SourceExpr(.unary(op, substitute(operand, index: index, value: value, bindings: bindings)),
+                              line: expression.line)
+        case .binary(let op, let left, let right):
+            return SourceExpr(.binary(op,
+                                      substitute(left, index: index, value: value, bindings: bindings),
+                                      substitute(right, index: index, value: value, bindings: bindings)),
+                              line: expression.line)
+        case .boolean, .integer, .real:
+            return expression
+        }
+    }
+
+    /// Walks the substituted statements in order and remembers the expression a variable was last assigned. A
+    /// conditional write cannot be substituted safely, so it drops the bindings for everything it may assign.
+    private func updateBindings(from statement: SourceStmt, index: String, into bindings: inout [String: SourceExpr]) {
+        switch statement.kind {
+        case .assign(let target, let expression):
+            guard target.lowercased() != index.lowercased() else { return }
+            bindings[target.lowercased()] = expression
+        case .block(let body):
+            for inner in body { updateBindings(from: inner, index: index, into: &bindings) }
+        case .ifThen(_, let thenBody, let elseBody):
+            for name in assignedNames(in: thenBody).union(assignedNames(in: elseBody ?? [])) {
+                bindings.removeValue(forKey: name.lowercased())
+            }
+        case .call:
+            break
+        }
+    }
+
+    private func nodeCount(_ statement: SourceStmt) -> Int {
+        switch statement.kind {
+        case .assign(_, let expression): return 1 + nodeCount(expression)
+        case .call(_, let arguments): return 1 + arguments.reduce(0) { $0 + nodeCount($1.value) }
+        case .ifThen(let condition, let thenBody, let elseBody):
+            return 1 + nodeCount(condition) + thenBody.reduce(0) { $0 + nodeCount($1) }
+                + (elseBody ?? []).reduce(0) { $0 + nodeCount($1) }
+        case .block(let body): return 1 + body.reduce(0) { $0 + nodeCount($1) }
+        }
+    }
+
+    private func nodeCount(_ expression: SourceExpr) -> Int {
+        switch expression.kind {
+        case .boolean, .integer, .real: return 1
+        case .name: return 1
+        case .member(let base, _): return 1 + nodeCount(base)
+        case .unary(_, let operand): return 1 + nodeCount(operand)
+        case .binary(_, let left, let right): return 1 + nodeCount(left) + nodeCount(right)
+        }
+    }
+
+    private func assignedNames(in statements: [SourceStmt]) -> Set<String> {
+        var names: Set<String> = []
+        for statement in statements {
+            switch statement.kind {
+            case .assign(let target, _): names.insert(target)
+            case .block(let body): names.formUnion(assignedNames(in: body))
+            case .ifThen(_, let thenBody, let elseBody):
+                names.formUnion(assignedNames(in: thenBody))
+                names.formUnion(assignedNames(in: elseBody ?? []))
+            case .call: break
+            }
+        }
+        return names
     }
 
     private mutating func argumentList() throws -> [SourceArgument] {
@@ -773,6 +960,7 @@ struct STLexer {
         "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK",
         "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
         "IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE",
+        "FOR", "TO", "BY", "DO", "END_FOR", "WHILE", "END_WHILE", "REPEAT", "UNTIL", "END_REPEAT",
         "AND", "OR", "XOR", "NOT", "MOD", "AT",
         "TRUE", "FALSE",
         "BOOL", "INT", "LONG", "REAL", "LREAL", "WORD",

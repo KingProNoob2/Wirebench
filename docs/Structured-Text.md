@@ -39,8 +39,15 @@ END_PROGRAM
   is refused; so are `LONG` multiply/divide and `INT` modulo, which have no block. Pins are still BOOL.
 - **Expressions.** `AND`, `OR`, `XOR`, `NOT`, `=`, `<>`, parentheses. `TRUE`/`FALSE` and integer literals. Numeric
   arithmetic is refused with a message; this subset is Boolean.
-- **Statements.** `name := expression;`, `instance(arguments);`, `IF … THEN … ELSIF … ELSE … END_IF;`, and
-  `CASE selector OF 1: … 2, 3: … 5..7: … ELSE … END_CASE;`. CASE labels are whole numbers or ranges and must not
+- **Statements.** `name := expression;`, `instance(arguments);`, `IF … THEN … ELSIF … ELSE … END_IF;`,
+  `CASE selector OF 1: … 2, 3: … 5..7: … ELSE … END_CASE;`, and
+  `FOR i := 1 TO n [BY step] DO … END_FOR;`. FOR bounds and step must be whole-number literals and the body is
+  unrolled at compile time (at most 256 iterations); the index is a compile-time binding, not a runtime variable after
+  the loop. Reads of variables assigned unconditionally earlier in the unrolled body are substituted with those
+  expressions, so `n := n + 1` counts correctly; a conditional write is not substituted (it falls back to the
+  variable's value at the start of the scan). `WHILE` and `REPEAT` are refused: a loop over a live condition cannot be
+  expressed as dataflow — use FOR with constant bounds or a counter.
+  CASE labels are whole numbers or ranges and must not
   overlap; the selector must be `INT`/`LONG` (a `REAL` selector needs a float comparator, which the catalogue lacks).
   CASE is lowered to the same comparisons and merges as an IF chain.
 - **Function blocks.** `FUNCTION_BLOCK Name VAR_INPUT … VAR_OUTPUT … END_FUNCTION_BLOCK` is a macro page. Its inputs and
@@ -106,8 +113,12 @@ same compiler.
 
 - `BOOL` pins only: `AT %IXn`/`%QXn` and `VAR_INPUT`/`VAR_OUTPUT` are BOOL; typed values are internal variables.
 - `REAL` comparisons, `LONG` multiply/divide and `INT` modulo have no block and are refused. Arrays, structures,
-  `FOR`, `WHILE`, `REPEAT`, `VAR_GLOBAL` and direct addresses other than `%IX`/`%QX` are refused.
+  `VAR_GLOBAL` and direct addresses other than `%IX`/`%QX` are refused.
 - `CASE` labels must be disjoint whole numbers or ranges; a `REAL` selector and overlapping labels are refused.
+- `FOR` needs literal bounds/step and unrolls to at most 256 iterations; an instance cannot be called once per
+  iteration (the same block call twice in one scan is refused). `WHILE` and `REPEAT` are refused.
+- A variable written inside a conditional in a FOR body is read back as the scan-start value, not the value the
+  previous iteration wrote (the dataflow model's general rule).
 - A block call cannot sit inside `IF` (its wiring has no condition); create the block before the branch.
 - A `%QX` output must be assigned before it is read, and an output written only inside `IF` must also be written before the
   `IF` or in both branches — otherwise the compiler refuses it rather than silently driving the pin.

@@ -402,6 +402,126 @@ struct StructuredTextTests {
         }
     }
 
+    @Test("FOR unrolls constant bounds and counts sequentially")
+    func forCounts() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            FOR i := 1 TO 3 DO
+                n := n + 1;
+            END_FOR;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 3)
+    }
+
+    @Test("FOR substitutes the index into each unrolled body")
+    func forIndex() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            n : INT := 0;
+            i : INT;
+        END_VAR
+            FOR i := 1 TO 3 DO
+                n := n + i;
+            END_FOR;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 6, "0 + 1 + 2 + 3")
+    }
+
+    @Test("FOR goes downwards with a negative BY")
+    func forNegativeStep() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            FOR i := 3 TO 1 BY -1 DO
+                n := n + 1;
+            END_FOR;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 3)
+    }
+
+    @Test("Loop refusals: a live bound, a zero step, an index write, the cap, WHILE and REPEAT")
+    func loopRefusals() {
+        let cases: [(String, String)] = [
+            ("""
+             PROGRAM P
+             VAR n : INT := 2; END_VAR
+                 FOR i := 1 TO n DO
+                     n := n + 1;
+                 END_FOR;
+             END_PROGRAM
+             """, "FOR bound"),
+            ("""
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 FOR i := 1 TO 3 BY 0 DO
+                     n := n + 1;
+                 END_FOR;
+             END_PROGRAM
+             """, "step cannot be zero"),
+            ("""
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 FOR i := 1 TO 3 DO
+                     i := i + 1;
+                 END_FOR;
+             END_PROGRAM
+             """, "index cannot be assigned"),
+            ("""
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 FOR i := 1 TO 1000 DO
+                     n := n + 1;
+                 END_FOR;
+             END_PROGRAM
+             """, "256"),
+            ("""
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 WHILE n < 3 DO
+                     n := n + 1;
+                 END_WHILE;
+             END_PROGRAM
+             """, "WHILE is not supported"),
+            ("""
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 REPEAT
+                     n := n + 1;
+                 UNTIL n = 3
+                 END_REPEAT;
+             END_PROGRAM
+             """, "REPEAT is not supported"),
+        ]
+        for (source, fragment) in cases {
+            let message = Self.error(source)
+            #expect(message?.contains(fragment) == true, "\(fragment): \(message ?? "compiled")")
+        }
+    }
+
     @Test("Completion offers keywords, block types, instance names and an instance's outputs")
     func completion() {
         let source = """

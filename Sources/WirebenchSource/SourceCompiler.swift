@@ -917,6 +917,8 @@ struct Lowering {
                         }
                     }
                 }
+            case .block(let body):
+                try lower(body, into: &scan)
             case .ifThen(let condition, let thenBody, let elseBody):
                 let test = try boolValue(lower(condition, scan: &scan), line: statement.line, what: "an IF condition")
                 let wasInBranch = inBranch

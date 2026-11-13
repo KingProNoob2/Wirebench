@@ -60,7 +60,11 @@ are refused; labels may be negative; tests cover selection, ranges and the refus
 `CASE selector OF 1: ... 2, 3: ... ELSE ... END_CASE`. Selector is INT/LONG. Lower through `ISwitch`/`LSwitch`
 or comparison chains; each arm merges per the IF rules. Refuse REAL selectors and overlapping labels.
 
-## Stage 3: FOR / WHILE / REPEAT
+## Stage 3: FOR / WHILE / REPEAT (FOR done, WHILE/REPEAT refused)
+
+`FOR` with literal bounds/step is unrolled (cap 256 iterations) with index and unconditional-write substitution; the
+index is a compile-time binding. `WHILE`/`REPEAT` are parsed far enough to refuse with a reason: a live condition cannot
+be dataflow without a state machine, which this stage does not add.
 
 A loop is not expressible as dataflow without unrolling or a state machine. Decide per construct:
 `FOR` with constant bounds and no early `EXIT` can unroll (bounded by a documented maximum, e.g. 10 000
