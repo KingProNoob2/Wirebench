@@ -90,111 +90,104 @@ Open one with **File ▸ Open**, `wirebench-cli info project.mfl`, or any other 
 
 ## Definition reference
 
-Every definition in Maraflow's `BlockCatalog` and what the importer does with it. `inert` means an Unresolved placeholder with the original pins and constants: the topology is kept, simulation is not.
+All 93 statically registered Maraflow definitions are native `MaraflowBlock` entries in the C++ core with exact
+pins; `Macro.User.*` is dynamic and becomes a macro call. Definitions with no evaluator in Maraflow's own
+`SimulationEngine` are native no-ops, matching it.
 
-| Maraflow definition | Wirebench | Note |
+| Maraflow definition | Type | Status |
 |---|---|---|
-| `Bool.And` | native | exact Maraflow pins |
-| `Bool.Nand` | native | exact Maraflow pins |
-| `Bool.Or` | native | exact Maraflow pins |
-| `Bool.Nor` | native | exact Maraflow pins |
-| `Bool.Xor` | native | exact Maraflow pins |
-| `Bool.Xnor` | native | exact Maraflow pins |
-| `Bool.Not` | native | exact Maraflow pins |
-| `Bool.RS` | native | exact Maraflow pins |
-| `Bool.SR` | native | exact Maraflow pins |
-| `Math.Add` | `IAdd` |  |
-| `Math.Sub` | `ISub` |  |
-| `Math.Mul` | `IMul` |  |
-| `Math.Div` | `Div` | Err output dropped |
-| `Math.Min` | inert |  |
-| `Math.Max` | inert |  |
-| `Math.Mod` | inert |  |
-| `Math.Pow` | inert |  |
-| `Math.Abs` | `IAbs` |  |
-| `Math.Neg` | `INeg` |  |
-| `Math.Sqrt` | `FSqrt` |  |
-| `Math.Sin` | `FSin` |  |
-| `Math.Cos` | `FCos` |  |
-| `Math.Clamp` | inert |  |
-| `Math.Random` | inert |  |
-| `Math.Scale` | inert |  |
-| `Math.PID` | inert |  |
-| `IO.DI` | `8xDI` | channel 0 |
-| `IO.DO` | `8xDO` | channel 0 |
-| `IO.8xDI` | `8xDI` |  |
-| `IO.8xDO` | `8xDO` |  |
-| `IO.AI` | `8xAI` | channel 0 |
-| `IO.AO` | `2xAO` | channel 0; Ok dropped |
-| `IO.PWM` | inert |  |
-| `IO.Encoder` | `IRC` | Vel lands on Null |
-| `Comm.ModbusRTU.MbRtuRead` | inert |  |
-| `Comm.ModbusRTU.MbRtuWrite` | inert |  |
-| `Comm.ModbusTCP.MbTcpRead` | inert |  |
-| `Comm.ModbusTCP.MbTcpWrite` | inert |  |
-| `Comm.REST.RestGet` | inert |  |
-| `Comm.REST.RestPost` | inert |  |
-| `Comm.DS18B20.DS18B20Read` | inert |  |
-| `Comm.I2C.I2CRead` | inert |  |
-| `Comm.I2C.I2CWrite` | inert |  |
-| `Comm.SPI.SPITransfer` | inert |  |
-| `Main.Arrays.ArrayRead` | inert |  |
-| `Main.Arrays.ArrayWrite` | inert |  |
-| `Main.Comparators.EQ` | `Comparator` | AEqB |
-| `Main.Comparators.NE` | `Comparator` | AEqB inverted |
-| `Main.Comparators.GT` | `Comparator` | AGtB |
-| `Main.Comparators.GE` | `Comparator` | ALtB inverted |
-| `Main.Comparators.LT` | `Comparator` | ALtB |
-| `Main.Comparators.LE` | `Comparator` | AGtB inverted |
-| `Main.Comparators.InRange` | `InRange` | Min/Max to Low/High parameters |
-| `Main.Comparators.Hysteresis` | inert |  |
-| `Main.Conversion.PackBits` | `Bits2Int` |  |
-| `Main.Conversion.UnpackBits` | `Int2Bits` | En dropped |
-| `Main.Execution.ReadReg` | inert |  |
-| `Main.Execution.WriteReg` | inert |  |
-| `Main.Execution.Interrupt` | inert |  |
-| `Main.Safety.EStop` | inert |  |
-| `Main.Filters.MovingAvg` | inert |  |
-| `Main.Filters.LowPass` | inert |  |
-| `Main.Filters.Debounce` | `DelayFilter` | Tms counts cycles |
-| `Main.Switches.Sel` | `ISwitch` |  |
-| `Main.Switches.Mux` | inert |  |
-| `Main.Switches.Demux` | `IDemux` |  |
-| `Main.Timers.DateTime` | inert |  |
-| `Main.Timers.DecodeDate` | `DecodeDate` | date fields kept; time dropped |
-| `Main.Timers.EncodeDate` | `EncodeDate` | date fields kept; time dropped |
-| `Main.Timers.PulseGen` | `PulseGen` | Act held true; THi/TLo to TOn/TOff |
-| `Main.Timers.PulseLen` | inert |  |
-| `Main.Timers.SinglePulse` | `SinglePulse` | In to Tr; TOn defaults to one cycle |
-| `Main.Timers.Timer` | `Timer` | PT to Dly; Q/ET to outputs |
-| `Main.Timers.Counter` | inert |  |
-| `Macro.MacroIn` | Inputs interface | macro sheet input |
-| `Macro.MacroOut` | Outputs interface | macro sheet output |
-| `Macro.User.*` | `Macro` call | macro page by name |
-| `Visual.Segment` | `Segment` |  |
-| `Visual.Value` | `Value` |  |
-| `Visual.Vars.BoolVar` | `BoolVar` |  |
-| `Visual.Vars.IntVar` | `IntVar` |  |
-| `Visual.Vars.LongVar` | `LongVar` |  |
-| `Ladder.Contact.NO` | rung logic | 8xDI contact |
-| `Ladder.Contact.NC` | rung logic | 8xDI + Not |
-| `Ladder.Contact.POS` | inert |  |
-| `Ladder.Contact.NEG` | inert |  |
-| `Ladder.Coil.NORMAL` | rung logic | 8xDO coil |
-| `Ladder.Coil.NEGATED` | rung logic | 8xDO + Not |
-| `Ladder.Coil.SET` | inert |  |
-| `Ladder.Coil.RESET` | inert |  |
-| `Ladder.Coil.POS` | inert |  |
-| `Ladder.Coil.NEG` | inert |  |
-| `Ladder.Coil.WRITE_REG` | inert |  |
-| `Ladder.Coil.ANALOG` | inert |  |
+| `Bool.And` | And | native |
+| `Bool.Nand` | Nand | native |
+| `Bool.Or` | Or | native |
+| `Bool.Nor` | Nor | native |
+| `Bool.Xor` | Xor | native |
+| `Bool.Xnor` | Xnor | native |
+| `Bool.Not` | Not | native |
+| `Bool.RS` | RS | native |
+| `Bool.SR` | SR | native |
+| `Math.Add` | Add | native |
+| `Math.Sub` | Sub | native |
+| `Math.Mul` | Mul | native |
+| `Math.Min` | Min | native |
+| `Math.Max` | Max | native |
+| `Math.Div` | Div | native |
+| `Math.Mod` | Mod | native |
+| `Math.Pow` | Pow | native |
+| `Math.Abs` | Abs | native |
+| `Math.Neg` | Neg | native |
+| `Math.Sqrt` | Sqrt | native |
+| `Math.Sin` | Sin | native |
+| `Math.Cos` | Cos | native |
+| `Math.Clamp` | Clamp | native |
+| `Math.Random` | Random | native |
+| `Math.Scale` | Scale | native |
+| `Math.PID` | PID | native |
+| `IO.DI` | DI | native |
+| `IO.DO` | DO | native |
+| `IO.8xDI` | 8x DI | native |
+| `IO.8xDO` | 8x DO | native |
+| `IO.AI` | AI | native |
+| `IO.AO` | AO | native |
+| `IO.PWM` | PWM | native |
+| `IO.Encoder` | Encoder | native |
+| `Comm.ModbusRTU.MbRtuRead` | MbRtuRead | native |
+| `Comm.ModbusRTU.MbRtuWrite` | MbRtuWrite | native |
+| `Comm.ModbusTCP.MbTcpRead` | MbTcpRead | native |
+| `Comm.ModbusTCP.MbTcpWrite` | MbTcpWrite | native |
+| `Comm.REST.RestGet` | RestGet | native |
+| `Comm.REST.RestPost` | RestPost | native |
+| `Comm.DS18B20.DS18B20Read` | DS18B20 | native |
+| `Comm.I2C.I2CRead` | I2CRead | native |
+| `Comm.I2C.I2CWrite` | I2CWrite | native |
+| `Comm.SPI.SPITransfer` | SPITransfer | native |
+| `Main.Arrays.ArrayRead` | ArrayRead | native |
+| `Main.Arrays.ArrayWrite` | ArrayWrite | native |
+| `Main.Comparators.EQ` | EQ | native |
+| `Main.Comparators.NE` | NE | native |
+| `Main.Comparators.GT` | GT | native |
+| `Main.Comparators.GE` | GE | native |
+| `Main.Comparators.LT` | LT | native |
+| `Main.Comparators.LE` | LE | native |
+| `Main.Comparators.InRange` | InRange | native |
+| `Main.Comparators.Hysteresis` | Hysteresis | native |
+| `Main.Conversion.PackBits` | PackBits | native |
+| `Main.Conversion.UnpackBits` | UnpackBits | native |
+| `Main.Execution.ReadReg` | ReadReg | native |
+| `Main.Execution.WriteReg` | WriteReg | native |
+| `Main.Execution.Interrupt` | Interrupt | native |
+| `Main.Safety.EStop` | EStop | native |
+| `Main.Filters.MovingAvg` | MovingAvg | native |
+| `Main.Filters.LowPass` | LowPass | native |
+| `Main.Filters.Debounce` | Debounce | native |
+| `Main.Switches.Sel` | Sel | native |
+| `Main.Switches.Mux` | Mux | native |
+| `Main.Switches.Demux` | Demux | native |
+| `Main.Timers.DateTime` | DateTime | native |
+| `Main.Timers.DecodeDate` | DecodeDate | native |
+| `Main.Timers.EncodeDate` | EncodeDate | native |
+| `Main.Timers.PulseGen` | PulseGen | native |
+| `Main.Timers.PulseLen` | PulseLen | native |
+| `Main.Timers.SinglePulse` | SinglePulse | native |
+| `Main.Timers.Timer` | Timer | native |
+| `Main.Timers.Counter` | Counter | native |
+| `Macro.MacroIn` | MacroIn | native |
+| `Macro.MacroOut` | MacroOut | native |
+| `Visual.Segment` | Segment | native |
+| `Visual.Value` | Value | native |
+| `Visual.Vars.BoolVar` | BoolVar | native |
+| `Visual.Vars.IntVar` | IntVar | native |
+| `Visual.Vars.LongVar` | LongVar | native |
+| `Ladder.Contact.NO` | NO Contact (--| |--) | native |
+| `Ladder.Contact.NC` | NC Contact (--|/|--) | native |
+| `Ladder.Contact.POS` | Rising Contact (--|P|--) | native |
+| `Ladder.Contact.NEG` | Falling Contact (--|N|--) | native |
+| `Ladder.Coil.NORMAL` | Normal Coil (--( )--) | native |
+| `Ladder.Coil.NEGATED` | Negated Coil (--(/)--) | native |
+| `Ladder.Coil.SET` | Set Coil (--(S)--) | native |
+| `Ladder.Coil.RESET` | Reset Coil (--(R)--) | native |
+| `Ladder.Coil.POS` | Rising Coil (--(P)--) | native |
+| `Ladder.Coil.NEG` | Falling Coil (--(N)--) | native |
+| `Ladder.Coil.WRITE_REG` | Write Register (--[REG :=]--) | native |
+| `Ladder.Coil.ANALOG` | Analog Output / Move (--[AO :=]--) | native |
 
-Counts: 54 mapped, 40 inert placeholders.
-
-The **Bool**, **Math**, **Main.Comparators**, **Main.Conversion**, **Main.Switches**, **I/O**, **Main.Timers**,
-**Main.Filters**, **Main.Arrays**, **Main.Safety**, **Visual**, **Communication** and **Ladder** groups now import as
-native `MaraflowBlock` entries (deterministic UUID v5, exact pins, C++ semantics), not as Dirigo approximations. This includes
-Maraflow's own silent no-ops (`Math.Pow`, `Math.PID`, `InRange`, `Hysteresis`, `Demux`, every communication/filter/array
-block, `EncodeDate`) remain no-ops exactly as in its `SimulationEngine`; the implemented I/O, timer, counter, date, visual
-variable and E-Stop paths are ported. Only `Main.Execution` and the two macro boundary types are still on the old path. The table's per-row Wirebench target still describes the Stage-1 fallback for the groups not
-yet native; the remaining definitions move over stage by stage.
+Counts: 93 native, 0 inert placeholders.

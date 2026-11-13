@@ -203,6 +203,7 @@ struct Module {
     int64_t s[3] = {0, 0, 0};      /* StepDriver: position, speed, target */
     double floatVar = 0;           /* FloatVar: the variable itself, not a pin */
     std::vector<std::pair<int64_t, int64_t>> caseRanges;   /* Case */
+    std::map<std::string, std::string> strings;             /* native Maraflow string configuration */
     /* Connection indices into `WirebenchSim::connections`, in file order. Resolved once when the
        simulation is created: the per-wire id lookups these replace were most of a step's cost. */
     std::vector<size_t> incoming;
@@ -1033,7 +1034,28 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
             return;
         }
         case WIREBENCH_BLOCK_MARAFLOW: {
-            if (m.inPins.empty() || !asBool(m.inPins[0])) return;   /* En gate; outputs hold when low */
+            if (m.variant == MARAFLOW_Main_Execution_ReadReg || m.variant == MARAFLOW_Main_Execution_WriteReg) {
+                const bool enabled = !m.inPins.empty() && asBool(m.inPins[0]);
+                const bool rising = enabled && !m.flagB;
+                m.flagB = enabled;
+                const std::string mode = m.strings.count("TriggerMode") ? m.strings["TriggerMode"] : "";
+                const bool risingMode = mode.rfind("Rising", 0) == 0;
+                const bool shouldRun = risingMode ? rising : enabled;
+                const std::string name = m.strings.count("RegisterName") ? m.strings["RegisterName"] : "REG_0";
+                if (m.variant == MARAFLOW_Main_Execution_WriteReg) {
+                    if (shouldRun && m.inPins.size() > 1) {
+                        const double value = asFloat(m.inPins[1]);
+                        sim->operands[name] = value;
+                        if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(value, m.outPins[0]);
+                    } else if (!m.outPins.empty()) {
+                        m.outPins[0] = maraflowNumber(sim->operands.count(name) ? sim->operands[name] : 0.0, m.outPins[0]);
+                    }
+                } else if (shouldRun && !m.outPins.empty()) {
+                    m.outPins[0] = maraflowNumber(sim->operands.count(name) ? sim->operands[name] : 0.0, m.outPins[0]);
+                }
+                return;
+            }
+            if (m.hasEnable && !m.inPins.empty() && !asBool(m.inPins[0])) return;   /* En gate; outputs hold */
             switch (m.variant) {
                 case MARAFLOW_Bool_And:
                 case MARAFLOW_Bool_Nand:
@@ -1375,8 +1397,47 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     }
                     return;
                 }
+                case MARAFLOW_Main_Execution_Interrupt: {
+                    const std::string source = m.strings.count("InterruptSource") ? m.strings["InterruptSource"] : "TIM_IC1";
+                    const std::string edgeMode = m.strings.count("TriggerEdge") ? m.strings["TriggerEdge"] : "RISING";
+                    const std::string captureMode = m.strings.count("CaptureMode") ? m.strings["CaptureMode"] : "PULSE_WIDTH_US";
+                    const std::string latchPolicy = m.strings.count("LatchPolicy") ? m.strings["LatchPolicy"] : "HOLD_FIRST_UNTIL_RST";
+                    double simulated = 1160.0;
+                    if (m.strings.count("SimPulseValue")) {
+                        try { simulated = std::stod(m.strings["SimPulseValue"]); } catch (...) {}
+                    }
+                    bool event = false;
+                    double captured = simulated;
+                    if (source.rfind("EXTI_DI", 0) == 0) {
+                        const std::string channel = source.substr(5);
+                        const bool current = sim->operands.count(channel) ? sim->operands[channel] != 0.0 : false;
+                        const bool previous = m.flagA;
+                        m.flagA = current;
+                        const bool rising = current && !previous;
+                        const bool falling = !current && previous;
+                        if ((edgeMode == "RISING" && rising) || (edgeMode == "FALLING" && falling)
+                            || (edgeMode == "BOTH" && (rising || falling))) {
+                            event = true;
+                            if (captureMode.rfind("GPIO_STATE", 0) == 0) captured = current ? 1.0 : 0.0;
+                        }
+                    }
+                    const bool latched = m.s[1] >= 0.5;
+                    if (event) {
+                        if (captureMode == "EDGE_COUNT") {
+                            m.s[0] += 1.0;
+                        } else if (!latched || latchPolicy == "OVERWRITE_LATEST") {
+                            m.s[0] = captured;
+                        }
+                        m.s[1] = 1.0;
+                    }
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(m.s[0], m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(m.s[1] >= 0.5);
+                    const bool reset = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    if (reset && m.s[1] >= 0.5) m.s[1] = 0.0;
+                    return;
+                }
                 default:
-                    return;   /* not ported yet: hold the outputs */
+                    return;   /* no-op, matching Maraflow's own evaluator */
             }
         }
         case WIREBENCH_BLOCK_IF:
@@ -2086,6 +2147,11 @@ void wirebench_sim_reset_module(WirebenchSim *sim, int32_t index) {
 void wirebench_sim_set_variant(WirebenchSim *sim, int32_t index, int32_t variant) {
     if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
     sim->modules[index].variant = variant;
+}
+
+void wirebench_sim_set_string(WirebenchSim *sim, int32_t index, const char *key, const char *value) {
+    if (!sim || !key || !value || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
+    sim->modules[index].strings[key] = value;
 }
 
 void wirebench_sim_propagate(WirebenchSim *sim) {

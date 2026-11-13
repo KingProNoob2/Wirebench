@@ -250,6 +250,8 @@ public enum MaraflowCatalog {
         "Ladder.Contact.NO", "Ladder.Contact.NC", "Ladder.Contact.POS", "Ladder.Contact.NEG",
         "Ladder.Coil.NORMAL", "Ladder.Coil.NEGATED", "Ladder.Coil.SET", "Ladder.Coil.RESET",
         "Ladder.Coil.POS", "Ladder.Coil.NEG", "Ladder.Coil.WRITE_REG", "Ladder.Coil.ANALOG",
+        "Main.Execution.ReadReg", "Main.Execution.WriteReg", "Main.Execution.Interrupt",
+        "Macro.MacroIn", "Macro.MacroOut",
     ]
 
     /// All definitions keyed by definition id (e.g. `Bool.And`).

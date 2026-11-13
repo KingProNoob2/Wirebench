@@ -249,6 +249,11 @@ public struct MaraflowImporter {
         module.rawAttributes["MARAFLOW_DEF"] = definition.id
         module.rawAttributes["MARAFLOW_TYPE"] = block.typeName
         module.rawAttributes["MARAFLOW_ID"] = block.id
+        if !block.description.isEmpty { module.rawAttributes["MARAFLOW_DESCRIPTION"] = block.description }
+        for (key, value) in block.properties {
+            let safe = String(key.map { $0.isLetter || $0.isNumber || $0 == "_" ? $0 : "_" })
+            module.rawAttributes["MARAFLOW_PROP_\(safe)"] = value
+        }
         for (index, pin) in block.inputs.enumerated() where index < module.inPins.count {
             module.inPins[index].value = value(for: pin)
             if !pin.short.isEmpty { module.inPins[index].name = pin.short }

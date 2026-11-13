@@ -327,6 +327,9 @@ void wirebench_sim_reset_module(WirebenchSim *sim, int32_t index);
 /// Changes a module's `variant` live (an RS block's priority, a timer's mode), keeping its state.
 void wirebench_sim_set_variant(WirebenchSim *sim, int32_t index, int32_t variant);
 
+/// Per-module string configuration the C++ core cannot read from a project (a register name, an interrupt source).
+void wirebench_sim_set_string(WirebenchSim *sim, int32_t index, const char *key, const char *value);
+
 /// The whole-project wire and macro sweep, outside a step: an edit made by hand reaches its consumers now.
 void wirebench_sim_propagate(WirebenchSim *sim);
 

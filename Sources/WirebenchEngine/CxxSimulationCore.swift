@@ -369,6 +369,18 @@ public final class CxxSimulationCore {
                 }
             }
         }
+        // Native Maraflow string configuration (register names, interrupt sources). The C ABI takes C strings.
+        for (position, mod) in project.modules.enumerated() where MaraflowCatalog.definition(forGuid: mod.guid) != nil {
+            for key in ["RegisterName", "TriggerMode", "InterruptSource", "TriggerEdge",
+                        "CaptureMode", "LatchPolicy", "SimPulseValue"] {
+                guard let value = mod.rawAttributes["MARAFLOW_PROP_\(key)"] else { continue }
+                key.withCString { keyCString in
+                    value.withCString { valueCString in
+                        wirebench_sim_set_string(created, Int32(position), keyCString, valueCString)
+                    }
+                }
+            }
+        }
         // Thread periods from the hardware profile.
         for threadId in Set(project.modules.map(\.threadId)) {
             if let thread = profile?.thread(id: threadId), thread.intervalMs > 0 {

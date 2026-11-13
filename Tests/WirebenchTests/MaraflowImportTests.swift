@@ -31,7 +31,8 @@ struct MaraflowImportTests {
 
     static func block(_ prefix: String, id: String, definition: String, type: String, name: String,
                       gridX: Int, gridY: Int, order: Int,
-                      inputs: [(String, String, String, String)], outputs: [(String, String, String, String)]) -> [(String, String)] {
+                      inputs: [(String, String, String, String)], outputs: [(String, String, String, String)],
+                      properties: [(String, String)] = []) -> [(String, String)] {
         var entries: [(String, String)] = [
             (prefix + "id", id),
             (prefix + "defId", definition),
@@ -43,10 +44,14 @@ struct MaraflowImportTests {
             (prefix + "order", "\(order)"),
             (prefix + "color", "clDefault"),
             (prefix + "description", ""),
-            (prefix + "propCount", "0"),
+            (prefix + "propCount", "\(properties.count)"),
             (prefix + "inCount", "\(inputs.count)"),
             (prefix + "outCount", "\(outputs.count)"),
         ]
+        for (index, property) in properties.enumerated() {
+            entries.append((prefix + "prop.\(index).k", property.0))
+            entries.append((prefix + "prop.\(index).v", property.1))
+        }
         for (index, pin) in inputs.enumerated() {
             entries.append((prefix + "in.\(index).short", pin.0))
             entries.append((prefix + "in.\(index).full", pin.1))
@@ -256,6 +261,80 @@ struct MaraflowImportTests {
                                   ("In", "Edge Trigger Input", "BOOL", "1")],
                          outputs: [("Q", "Single-Cycle Pulse Output", "BOOL", "0")])
         return propertiesXML(entries)
+    }
+
+    @Test("Every static Maraflow definition is a native block")
+    func everyDefinitionIsNative() {
+        #expect(MaraflowCatalog.all.count == 93)
+        #expect(MaraflowCatalog.ported.count == MaraflowCatalog.all.count)
+        #expect(MaraflowCatalog.all.allSatisfy { BlockTypeCatalog.info(forGuid: $0.guid) != nil })
+    }
+
+    @Test("Native I/O channels share the operand map and visual variables show their value")
+    func nativeIOAndVariables() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "IO"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "3"),
+            ("page.0.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "do", definition: "IO.DO", type: "DO", name: "DO1",
+                              gridX: 2, gridY: 2, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("X", "Drive", "BOOL", "1")],
+                              outputs: [("Y", "Confirmed", "BOOL", "0")],
+                              properties: [("Channel", "DO2")])
+        entries += Self.block("page.0.block.1.", id: "di", definition: "IO.DI", type: "DI", name: "DI1",
+                              gridX: 10, gridY: 2, order: 20,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Y", "State", "BOOL", "0")],
+                              properties: [("Channel", "DI2")])
+        entries += Self.block("page.0.block.2.", id: "var", definition: "Visual.Vars.IntVar", type: "IntVar", name: "IntVar1",
+                              gridX: 18, gridY: 2, order: 30, inputs: [],
+                              outputs: [("Y", "Value", "INT", "0")],
+                              properties: [("CurrentValue", "7")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "io")
+        let output = try #require(outcome.project.modules.first { $0.name == "DO1" })
+        let input = try #require(outcome.project.modules.first { $0.name == "DI1" })
+        let variable = try #require(outcome.project.modules.first { $0.name == "IntVar1" })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: output.id)[0].asBool, "DO confirms its driven state")
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 7)
+        // The engine's UI toggle is the channel source in a real simulation; here DO writes DO2, so DI2 stays low.
+        #expect(core.outPins(moduleId: input.id)[0].asBool == false)
+    }
+
+    @Test("Execution registers are shared by ReadReg and WriteReg")
+    func nativeRegisters() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "Registers"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "2"),
+            ("page.0.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "write", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "Write1", gridX: 2, gridY: 2, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "42")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "REG_3")])
+        entries += Self.block("page.0.block.1.", id: "read", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read1", gridX: 10, gridY: 2, order: 20,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_3")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "registers")
+        let write = try #require(outcome.project.modules.first { $0.name == "Write1" })
+        let read = try #require(outcome.project.modules.first { $0.name == "Read1" })
+        #expect(write.guid == MaraflowCatalog.byId["Main.Execution.WriteReg"]?.guid)
+        #expect(read.guid == MaraflowCatalog.byId["Main.Execution.ReadReg"]?.guid)
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: write.id)[0].asInt == 42)
+        #expect(core.outPins(moduleId: read.id)[0].asInt == 42, "ReadReg sees WriteReg's shared register")
     }
 
     @Test("Native math, comparators and conversion blocks simulate")
