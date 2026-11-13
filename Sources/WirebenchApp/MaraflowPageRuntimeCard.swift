@@ -3,6 +3,7 @@ import SwiftUI
 /// A Maraflow Structured Text or ladder page has one hidden runtime module and no ordinary blocks. The sheet used to
 /// draw that module as a card (`ST Main_ST #-1 …`), which read like a broken block. This explains the page instead.
 struct MaraflowPageRuntimeCard: View {
+    @Environment(\.openWindow) private var openWindow
     let kind: String
     let detail: String
     let code: String
@@ -14,6 +15,11 @@ struct MaraflowPageRuntimeCard: View {
             Text(detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if kind.hasPrefix("Structured") {
+                Button("Edit Structured Text…") { openWindow(id: "swift") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
             if !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(code.split(separator: "\n", omittingEmptySubsequences: false).prefix(10).joined(separator: "\n"))
                     .font(.system(size: 10, design: .monospaced))

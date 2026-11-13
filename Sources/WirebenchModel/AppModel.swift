@@ -654,6 +654,7 @@ public final class AppModel: @unchecked Sendable {
     private func performNewProject() {
         pause()
         swiftSource = ""
+        maraflowSTPageIndex = nil
 
         let newProj = PCCProject(
             name: "Untitled",
@@ -710,6 +711,41 @@ public final class AppModel: @unchecked Sendable {
         self.needsZoomToFit = true
     }
 
+    private static func firstMaraflowSTPage(in project: PCCProject) -> (index: Int, code: String)? {
+        for (index, page) in project.pages.enumerated() {
+            guard let module = project.modules.first(where: { $0.page == page.caption && $0.guid == MaraflowStPage.guid })
+            else { continue }
+            return (index, module.rawAttributes["MARAFLOW_ST_CODE"] ?? "")
+        }
+        return nil
+    }
+
+    /// The imported ST page code for `pageIndex` (defaults to the first one).
+    public func maraflowSTCode(pageIndex: Int? = nil) -> String? {
+        guard let project, let index = pageIndex ?? maraflowSTPageIndex,
+              project.pages.indices.contains(index) else { return nil }
+        let caption = project.pages[index].caption
+        return project.modules.first { $0.page == caption && $0.guid == MaraflowStPage.guid }?
+            .rawAttributes["MARAFLOW_ST_CODE"]
+    }
+
+    /// Writes edited source back into the imported Maraflow ST page and rebuilds the simulation with it.
+    @MainActor
+    public func applyMaraflowSTCode(_ code: String) {
+        guard var project, let index = maraflowSTPageIndex,
+              project.pages.indices.contains(index) else { return }
+        let caption = project.pages[index].caption
+        guard let moduleIndex = project.modules.firstIndex(where: {
+            $0.page == caption && $0.guid == MaraflowStPage.guid
+        }) else { return }
+        project.modules[moduleIndex].rawAttributes["MARAFLOW_ST_CODE"] = code
+        project.maraflow?.properties["page.\(index).stCode"] = code
+        self.project = project
+        engine = installEngine(project: project)
+        simulationDidChange()
+        isDocumentEdited = true
+    }
+
     @MainActor
     public func loadProject(url: URL) {
         pause()
@@ -752,6 +788,11 @@ public final class AppModel: @unchecked Sendable {
             selectedWire = nil
             configuringModuleId = nil
             swiftSource = ""
+            maraflowSTPageIndex = nil
+            if let st = Self.firstMaraflowSTPage(in: proj) {
+                maraflowSTPageIndex = st.index
+                swiftSource = st.code
+            }
             clearAnnotationSelection()
             // Module ids mean other blocks in another document.
             clearedPinValues = [:]
@@ -1678,6 +1719,10 @@ public final class AppModel: @unchecked Sendable {
     }
 
     /// Light, dark or follow the system. Remembered between launches.
+    /// The imported Maraflow ST page whose code is in `swiftSource`, if the open document has one. The editor uses this
+    /// to edit the page directly rather than decompiling it into a new native project.
+    public var maraflowSTPageIndex: Int?
+
     /// The Structured Text editor's buffer. It lives here, not in the window's state, so closing the window and opening it
     /// again brings back what was written instead of the template; it is kept across launches like the editor's settings.
     public var swiftSource: String = UserDefaults.standard.string(forKey: "structuredTextSource") ?? "" {

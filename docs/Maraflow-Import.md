@@ -94,6 +94,9 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 - **Inspector:** with nothing selected, the inspector shows the Maraflow target/language, symbolic tags, E-Stop mode
   and rules, per-page language/block/rung counts, graphics, bus bundles and hidden-wire counts.
 - **CLI:** `wirebench-cli info` prints the same metadata summary next to the module/page counts.
+- **Pure ST projects:** loading one puts its ST page source straight into the Structured Text editor; the page card's
+  *Edit Structured Text…* button opens it. Editing there and pressing **Apply to Page** writes the buffer back to the
+  native ST page, updates the preserved `page.N.stCode`, and rebuilds the simulation.
 - **Preserved and counted, not drawn:** wire route points, net names, bus ids and hidden flags; the inspector and CLI
   report bus/hidden counts, and the raw `.mfl` properties remain the source of truth for a future `.mfl` exporter.
 

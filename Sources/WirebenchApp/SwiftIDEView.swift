@@ -86,7 +86,10 @@ struct SwiftIDEView: View {
         model.swiftSource.split(separator: "\n", omittingEmptySubsequences: false).count
     }
 
+    private var isMaraflowPage: Bool { model.maraflowSTPageIndex != nil }
+
     private var statusText: String {
+        if isMaraflowPage { return "\(lineCount) lines · Maraflow ST page" }
         if isEmpty { return model.project == nil ? "No source yet" : "No source for this document" }
         if let compiled {
             let inputs = compiled.usedInputs.map { "DI\($0)" }.joined(separator: " ")
@@ -108,14 +111,25 @@ struct SwiftIDEView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text(isEmpty ? "No source" : (compiled == nil ? "Problems" : "Compiled"))
-                    .font(.headline)
+                if isMaraflowPage {
+                    Text("Maraflow Structured Text page")
+                        .font(.headline)
+                    Text("This imported page runs through the native Maraflow ST interpreter. Edit the source and press Apply to Page to write it back and rebuild the simulation.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(isEmpty ? "No source" : (compiled == nil ? "Problems" : "Compiled"))
+                        .font(.headline)
+                }
 
-                if isEmpty { emptyState }
+                if isEmpty && !isMaraflowPage { emptyState }
 
-                if !outlineRows.isEmpty { outlineView }
+                if !isMaraflowPage, !outlineRows.isEmpty { outlineView }
 
-                if let failure {
+                if isMaraflowPage {
+                    // The page is interpreted directly; the subset compiler's report does not apply.
+                } else if let failure {
                     Text(failure)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -242,15 +256,23 @@ struct SwiftIDEView: View {
             Button("Recover from Project", systemImage: "arrow.down.doc") { recoverFromProject() }
                 .disabled(model.project == nil)
                 .help("Write the open project's blocks back into source")
-            Button("Compile", systemImage: "hammer") { rebuild() }
-                .keyboardShortcut("r", modifiers: .command)
-                .help("Compile the source (⌘R)")
-            Button("Open in Wirebench", systemImage: "arrow.up.forward.app") { openInWirebench() }
-                .disabled(compiled == nil)
-                .help("Replace the open document with the compiled project")
-            Button("Save .wbp…", systemImage: "square.and.arrow.down") { save() }
-                .disabled(compiled == nil)
-                .help("Save the compiled project as a .wbp file")
+            if isMaraflowPage {
+                Button("Apply to Page", systemImage: "checkmark.circle") {
+                    model.applyMaraflowSTCode(model.swiftSource)
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .help("Write this source back to the Maraflow ST page and rebuild")
+            } else {
+                Button("Compile", systemImage: "hammer") { rebuild() }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Compile the source (⌘R)")
+                Button("Open in Wirebench", systemImage: "arrow.up.forward.app") { openInWirebench() }
+                    .disabled(compiled == nil)
+                    .help("Replace the open document with the compiled project")
+                Button("Save .wbp…", systemImage: "square.and.arrow.down") { save() }
+                    .disabled(compiled == nil)
+                    .help("Save the compiled project as a .wbp file")
+            }
         }
     }
 
@@ -296,7 +318,11 @@ struct SwiftIDEView: View {
     /// Recovers the open project's source: the pages, pins and logic the subset can express.
     private func recoverFromProject() {
         guard let project = model.project else { return }
-        model.swiftSource = PCCDecompiler().source(for: project, named: documentName)
+        if let code = model.maraflowSTCode() {
+            model.swiftSource = code
+        } else {
+            model.swiftSource = PCCDecompiler().source(for: project, named: documentName)
+        }
     }
 
     /// The open document's name: the file's, or the project's when it has one.
@@ -316,6 +342,13 @@ struct SwiftIDEView: View {
 
     private func rebuild() {
         spans = SourceHighlighter.spans(in: model.swiftSource)
+        if isMaraflowPage {
+            outlineRows = []
+            compiled = nil
+            diagnostics = []
+            failure = nil
+            return
+        }
         if let program = try? SourceParser.parse(model.swiftSource) {
             var rows: [(String, Int)] = []
             for unit in program.units {
