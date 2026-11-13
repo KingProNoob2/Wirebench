@@ -529,9 +529,10 @@ public struct SourceParser {
         try expectSymbol("]")
         try expectKeyword("OF")
         let element = try typeName()
-        guard case .scalar(let type) = element, type == .int || type == .long else {
-            throw error("only INT and LONG arrays are supported (there is no CreateFloatArray block)")
+        guard case .scalar(let type) = element else {
+            throw error("an ARRAY element type must be BOOL? No — INT, LONG or REAL")
         }
+        guard type != .bool else { throw error("a BOOL array has no block; use INT, LONG or REAL") }
         guard lower <= upper else { throw error("an ARRAY range must count upwards") }
         guard abs(lower) <= 1_000_000, abs(upper) <= 1_000_000 else {
             throw error("an ARRAY bound is too large; keep it within ±1,000,000")

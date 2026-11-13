@@ -75,7 +75,8 @@ in `docs/Structured-Text.md`; tests must pin the semantics, including the iterat
 
 Arrays are only accepted in a PROGRAM (a function block's array would collide on the PLC's Id range).
 Array declarations, element reads and writes are lowered to `Create…Array`/`Read…Array`/`Write…Array` with the
-lower bound subtracted, at most 16 arrays and no REAL arrays (no create block). Array writes are listed in recovery
+lower bound subtracted and at most 16 arrays; REAL arrays use `CreateLongArray` (which allocates Long or Float slots)
+with the Float read/write blocks. Array writes are listed in recovery
 rather than recovered. FUNCTIONS are implemented as pure expression functions inlined at the call (one assignment to the function
 name, parameters and literals only, argument count and return type checked, recursion refused). Local variables,
 control flow inside functions, and typed function-block interfaces remain out of scope.

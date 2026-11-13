@@ -413,11 +413,12 @@ final class Emitter {
         // Arrays are allocated once per scan before anything reads them; the block keeps its contents for the same
         // length, so the store survives between scans.
         for (offset, array) in unit.arrays.enumerated() {
+            // `CreateLongArray` also allocates Float arrays; `CreateIntArray` is Int only.
             let block = addBlock(try guid(array.type == .int ? "CreateIntArray" : "CreateLongArray"))
             setIn(block, 0, .bool(true))
             setIn(block, 1, .int32(Int32(offset)))
             setIn(block, 2, .int32(Int32(array.length)))
-            arrayBlocks[array.name.lowercased()] = (block, offset, array.type == .int ? .int : .long)
+            arrayBlocks[array.name.lowercased()] = (block, offset, array.type == .int ? .int : array.type == .long ? .long : .real)
         }
 
         // Variables exist before anything reads them: a read is the block's output, the value at the start of the scan.
@@ -489,7 +490,8 @@ final class Emitter {
         // Array writes happen last in source order: reads earlier in the scan see the value the scan began with.
         for write in lowered.arrayWrites {
             guard let array = arrayBlocks[write.array.lowercased()] else { continue }
-            let block = addBlock(try guid(array.type == .int ? "WriteIntArray" : "WriteLongArray"))
+            let block = addBlock(try guid(array.type == .int ? "WriteIntArray"
+                                          : array.type == .long ? "WriteLongArray" : "WriteFloatArray"))
             connect(block, 0, .constant(true))
             connect(block, 1, .number(.int32(Int32(array.id))))
             connect(block, 2, try materialiseNumber(write.index))
@@ -634,7 +636,7 @@ final class Emitter {
             guard let array = arrayBlocks[name.lowercased()] else {
                 throw SourceError(line: 0, message: "unknown array '\(name)'")
             }
-            let block = addBlock(try guid(type == .int ? "ReadIntArray" : "ReadLongArray"))
+            let block = addBlock(try guid(type == .int ? "ReadIntArray" : type == .long ? "ReadLongArray" : "ReadFloatArray"))
             connect(block, 0, .constant(true))
             connect(block, 1, .number(.int32(Int32(array.id))))
             connect(block, 2, try materialiseNumber(index))
@@ -1248,7 +1250,12 @@ struct Lowering {
                 throw SourceError(line: expression.line, message: "an array index is an integer, not REAL")
             }
             try checkArrayBounds(index, array: array, line: expression.line)
-            let type: NumType = array.type == .int ? .int : .long
+            let type: NumType
+            switch array.type {
+            case .int: type = .int
+            case .long: type = .long
+            default: type = .real
+            }
             return .number(.arrayRead(arrayName, offsetArrayIndex(index, by: array, type: indexType), type), type)
         case .unary(let op, let operand):
             switch op {

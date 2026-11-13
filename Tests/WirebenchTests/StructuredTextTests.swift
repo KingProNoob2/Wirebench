@@ -567,14 +567,37 @@ struct StructuredTextTests {
         #expect(core.outPins(moduleId: variable.id)[0].asInt == 7)
     }
 
+    @Test("A REAL array allocates via CreateLongArray and reads/writes Float slots")
+    func realArray() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            a : ARRAY[0..3] OF REAL;
+            r : REAL := 0;
+        END_VAR
+            a[0] := 1.5;
+            r := a[0] + 0.5;
+        END_PROGRAM
+        """)
+        let guid: (String) -> UUID? = { BlockTypeCatalog.info(forBlockName: $0)?.guid }
+        #expect(compiled.project.modules.contains { $0.guid == guid("CreateLongArray") })
+        #expect(compiled.project.modules.contains { $0.guid == guid("ReadFloatArray") })
+        #expect(compiled.project.modules.contains { $0.guid == guid("WriteFloatArray") })
+        let variable = try #require(compiled.project.modules.first { $0.guid == guid("FloatVar") })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(abs(core.outPins(moduleId: variable.id)[0].asFloat - 2.0) < 0.001)
+    }
+
     @Test("Array refusals: REAL elements, a reversed range, a REAL index, a write in IF, a bare name")
     func arrayRefusals() {
         let cases: [(String, String)] = [
             ("""
              PROGRAM P
-             VAR a : ARRAY[0..3] OF REAL; END_VAR
+             VAR a : ARRAY[0..3] OF BOOL; END_VAR
              END_PROGRAM
-             """, "only INT and LONG arrays"),
+             """, "no block"),
             ("""
              PROGRAM P
              VAR a : ARRAY[3..1] OF INT; END_VAR
