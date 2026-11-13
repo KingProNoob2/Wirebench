@@ -27,6 +27,6 @@ set_source_files_properties(qml/AppTheme.qml PROPERTIES QT_QML_SINGLETON_TYPE TR
 qt_add_qml_module(wirebench-qt
     URI Wirebench
     VERSION 1.0
-    QML_FILES qml/Main.qml qml/AppTheme.qml qml/BlockCard.qml qml/Wire.qml qml/SheetGrid.qml qml/BlockLibrary.qml qml/Inspector.qml qml/Icon.qml qml/IconButton.qml qml/Panel.qml qml/SmoothRect.qml qml/MainMenu.qml qml/TextPrompt.qml qml/ConfirmDialog.qml qml/CardFrame.qml qml/ConfigDialog.qml qml/BuildDialog.qml qml/SettingsDialog.qml qml/PLCConfigDialog.qml qml/PopupList.qml qml/GraphicItem.qml qml/AgentWindow.qml qml/HelpWindow.qml
+    QML_FILES qml/Main.qml qml/AppTheme.qml qml/BlockCard.qml qml/Wire.qml qml/SheetGrid.qml qml/BlockLibrary.qml qml/Inspector.qml qml/Icon.qml qml/IconButton.qml qml/Panel.qml qml/SmoothRect.qml qml/MainMenu.qml qml/TextPrompt.qml qml/ConfirmDialog.qml qml/CardFrame.qml qml/ConfigDialog.qml qml/BuildDialog.qml qml/SettingsDialog.qml qml/PLCConfigDialog.qml qml/PopupList.qml qml/GraphicItem.qml qml/AgentWindow.qml qml/HelpWindow.qml qml/MaraflowGraphicItem.qml qml/MaraflowPageCard.qml qml/MaraflowSTDialog.qml
     RESOURCE_PREFIX /qt/qml
 )

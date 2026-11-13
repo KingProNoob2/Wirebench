@@ -295,6 +295,14 @@ ApplicationWindow {
             scale: window.zoom
             transformOrigin: Item.TopLeft
 
+            Repeater { model: controller.maraflowGraphics; delegate: MaraflowGraphicItem {} }
+
+            MaraflowPageCard {
+                visible: controller.maraflowPage.kind !== undefined
+                pageInfo: controller.maraflowPage
+                onEditRequested: maraflowSTDialog.open()
+            }
+
             Repeater {
                 model: controller.graphics
                 delegate: GraphicItem {
@@ -830,6 +838,11 @@ ApplicationWindow {
         }
     }
     BuildDialog { id: buildDialog }
+    MaraflowSTDialog {
+        id: maraflowSTDialog
+        code: controller.maraflowPage.code || ""
+        onSourceApplied: code => controller.command({cmd: "applyMaraflowSTCode", code: code})
+    }
     Timer { running: startDialog === "open"; interval: 400; onTriggered: { openDialog.open() } }
     Component.onCompleted: if (startDialog === "menu") mainMenu.open(); else if (startDialog === "settings") settingsDialog.open(); else if (startDialog === "plcConfig") plcConfigDialog.open(); else if (startDialog === "build") buildDialog.show(0); else if (startDialog === "hardware") buildDialog.show(1); else if (startConfig) { const ids = controller.selectedIds(); if (ids.length) configDialog.openFor(ids[0]) }
 

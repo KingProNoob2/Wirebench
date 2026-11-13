@@ -314,6 +314,12 @@ enum BridgeCommands {
                 model.pendingFilePanel = nil
             default: return ["ok": false, "error": "unknown export"]
             }
+        case "pressMaraflowBinding":
+            guard let target = arguments["target"] as? String, !target.isEmpty else { return ["ok": false, "error": "no target"] }
+            model.pressMaraflowBinding(target)
+        case "applyMaraflowSTCode":
+            guard let code = arguments["code"] as? String else { return ["ok": false, "error": "no code"] }
+            model.applyMaraflowSTCode(code)
         case "refreshPorts": model.refreshPorts()
         case "selectPort": model.selectedPortPath = arguments["path"] as? String ?? ""
         case "upload": model.uploadCompiledProgram()

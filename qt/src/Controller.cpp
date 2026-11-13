@@ -62,6 +62,7 @@ void Controller::refresh() {
     m_modules.setItems(m_scene.value("modules").toList());
     m_wires.setItems(wires);
     m_graphics.setItems(m_scene.value("graphics").toList());
+    m_maraflowGraphics.setItems(m_scene.value("maraflowGraphics").toList());
 
     // The inspector follows a single selected block.
     m_inspector.clear();

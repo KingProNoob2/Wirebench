@@ -92,6 +92,42 @@ public struct SceneSnapshot: Codable, Sendable {
         public var selected: Bool
     }
 
+
+    /// One Maraflow graphic object on the current page, already resolved for painting.
+    public struct MaraflowGraphic: Codable, Sendable {
+        public var index: Int
+        public var kind: String
+        public var x: Double
+        public var y: Double
+        public var w: Double
+        public var h: Double
+        public var text: String
+        public var stroke: String
+        public var fill: String
+        public var filled: Bool
+        public var strokeWidth: Double
+        public var dashed: Bool
+        public var ngonSides: Int
+        public var fontSize: Int
+        /// The object is an indicator and its bound output is high.
+        public var active: Bool
+        public var indicator: Bool
+        public var activeStroke: String
+        public var activeFill: String
+        public var boundTargetPin: String
+        /// A visual button's bound input is currently on.
+        public var pressed: Bool
+    }
+
+    /// The hidden runtime page behind a Maraflow ST or ladder sheet.
+    public struct MaraflowPageInfo: Codable, Sendable {
+        public var kind: String
+        public var code: String
+        public var lines: Int
+        public var threadId: Int
+        public var order: Int
+    }
+
     /// The user's preferences, which the model remembers between launches.
     public struct Settings: Codable, Sendable {
         public var appearance: String
@@ -142,6 +178,10 @@ public struct SceneSnapshot: Codable, Sendable {
     public var modules: [Module]
     public var wires: [Wire]
     public var graphics: [Graphic]
+    /// Maraflow's own graphics (signed boxes, buttons, indicators), kept separate from Dirigo's `graphics`.
+    public var maraflowGraphics: [MaraflowGraphic]
+    /// Its ST/LD page runtime, when the current page is one.
+    public var maraflowPage: MaraflowPageInfo?
     public var playing: Bool
     /// False until a project is opened or created; a frontend shows its welcome screen then.
     public var hasProject: Bool
@@ -213,12 +253,70 @@ public struct SceneSnapshot: Codable, Sendable {
         }
     }
 
+    private static func maraflowColour(_ value: Int) -> String {
+        let rgb = UInt32(bitPattern: Int32(value)) & 0xFF_FFFF
+        return String(format: "#%02X%02X%02X", (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
+    }
+
+    @MainActor
+    static func maraflowGraphics(of model: AppModel, page: String) -> [MaraflowGraphic] {
+        guard let project = model.project, let extras = project.maraflow,
+              let pageIndex = project.pages.firstIndex(where: { $0.caption == page }) else { return [] }
+        return extras.graphics(onPageIndex: pageIndex).enumerated().map { index, graphic in
+            let kind = graphic.kind.uppercased()
+            let active = graphic.indicatorEnabled && !graphic.indicatorPin.isEmpty
+                && model.maraflowBooleanValue(graphic.indicatorPin)
+            var pressed = false
+            if kind == "VISUAL_BUTTON", !graphic.boundTargetPin.isEmpty,
+               let binding = model.maraflowBinding(graphic.boundTargetPin, output: false),
+               let node = model.getNode(id: binding.moduleId), binding.pinIndex < node.block.inPins.count {
+                pressed = node.block.inPins[binding.pinIndex].asBool
+            }
+            let x1 = Double(graphic.gridX) * 32, y1 = Double(graphic.gridY) * 32
+            let x2 = Double(graphic.gridX + graphic.gridW) * 32
+            let y2 = Double(graphic.gridY + graphic.gridH) * 32
+            let isLine = kind == "LINE", isText = kind == "TEXT"
+            return MaraflowGraphic(
+                index: index, kind: kind,
+                x: isLine || isText ? x1 : min(x1, x2),
+                y: isLine || isText ? y1 : min(y1, y2),
+                w: isLine ? Double(graphic.gridW * 32) : max(32, abs(x2 - x1)),
+                h: isLine ? Double(graphic.gridH * 32) : max(32, abs(y2 - y1)),
+                text: graphic.text,
+                stroke: maraflowColour(graphic.strokeRgb),
+                fill: maraflowColour(graphic.indicatorEnabled ? graphic.indicatorInactiveColor : graphic.fillRgb),
+                filled: graphic.filled,
+                strokeWidth: Double(max(1, graphic.strokeWidth)),
+                dashed: graphic.dashed,
+                ngonSides: max(3, graphic.ngonSides),
+                fontSize: graphic.fontSize,
+                active: active,
+                indicator: graphic.indicatorEnabled && !graphic.indicatorPin.isEmpty,
+                activeStroke: maraflowColour(graphic.strokeRgb),
+                activeFill: maraflowColour(graphic.indicatorEnabled ? graphic.indicatorActiveColor : 0x76D7C4),
+                boundTargetPin: graphic.boundTargetPin,
+                pressed: pressed)
+        }
+    }
+
+    @MainActor
+    static func maraflowPage(of model: AppModel, page: String) -> MaraflowPageInfo? {
+        guard let project = model.project,
+              let module = project.modules.first(where: { $0.page == page &&
+                  ($0.guid == MaraflowStPage.guid || $0.guid == MaraflowLdPage.guid) }) else { return nil }
+        let code = module.rawAttributes["MARAFLOW_ST_CODE"] ?? ""
+        return MaraflowPageInfo(kind: module.guid == MaraflowStPage.guid ? "Structured Text" : "Ladder",
+                                code: code,
+                                lines: code.split(separator: "\n", omittingEmptySubsequences: false).count,
+                                threadId: module.threadId, order: module.order)
+    }
+
     @MainActor
     public static func make(of model: AppModel, layout: WireLayout,
                             dragOffsets: [Int: CGSize] = [:], graphicDrag: [Int: CGSize] = [:], quit: Bool = false) -> SceneSnapshot {
         let project = model.project
         let page = model.selectedPage
-        let onPage = project?.modules.filter { $0.page == page } ?? []
+        let onPage = project?.modules.filter { $0.page == page && !BlockRole.isMaraflowPageRuntime($0) } ?? []
         let ids = Set(onPage.map(\.id))
         let byId = Dictionary((project?.modules ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -283,12 +381,14 @@ public struct SceneSnapshot: Codable, Sendable {
             title: model.projectTitle, file: model.currentFileURL?.path ?? "", page: page, pages: project?.pages.map(\.caption) ?? [],
             pagesInfo: (project?.pages ?? []).map { page in
                 PageInfo(caption: page.caption, macro: page.caption.hasPrefix("*"),
-                         count: project?.modules.filter { $0.page == page.caption }.count ?? 0)
+                         count: project?.modules.filter { $0.page == page.caption && !BlockRole.isMaraflowPageRuntime($0) }.count ?? 0)
             },
             question: model.pendingUnsavedIntent != nil ? "unsaved" : "",
             panel: { switch model.pendingFilePanel { case .open: return "open"; case .saveAs: return "saveAs"; default: return "" } }(),
             quit: quit,
-            modules: modules, wires: wires, graphics: graphics(of: model, page: page, drag: graphicDrag), playing: model.isPlaying, hasProject: model.project != nil, tick: model.tickCount,
+            modules: modules, wires: wires, graphics: graphics(of: model, page: page, drag: graphicDrag),
+            maraflowGraphics: maraflowGraphics(of: model, page: page), maraflowPage: maraflowPage(of: model, page: page),
+            playing: model.isPlaying, hasProject: model.project != nil, tick: model.tickCount,
             hardware: Hardware(
                 connected: model.isHardwareConnected, uploading: model.isUploading, port: model.selectedPortPath,
                 ports: model.availablePorts.map { ["path": $0.path, "name": $0.name] },

@@ -92,6 +92,11 @@ confirmation, block counts); right-click a block (configure, rename, reset, dele
 and `Delete` to remove it; zoom in and out, actual size, fit and the preset list (click the percentage); undo and redo; settings; the inspector, the
 configuration dialogs and the PLC link.
 
+**Maraflow projects.** A `.mfl` opens like any other project. Its FBD blocks and wires are the native Maraflow blocks; its
+graphic objects are drawn by `MaraflowGraphicItem` (signed boxes, all shape kinds, dashed strokes, visual buttons and live
+indicator colours); its ST/LD page is shown as a draggable page card instead of a fake block, with the source preview and
+a **Structured Text…** dialog that writes edits back through `applyMaraflowSTCode` and rebuilds the simulation.
+
 **Not in the Qt app (the SwiftUI app has them):** the inspector for a shape or a text object (pen, brush, font, geometry); dragging a text object (neither
 app drags text, but SwiftUI edits it from the inspector); the sidebar's search that highlights matching blocks on the sheet; assigning a block to an
 `If`/`Switch` container from its menu; reordering switch cases; the category sidebar and macro rows in the add-block picker; keyboard shortcuts that use

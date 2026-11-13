@@ -15,6 +15,8 @@ class Controller : public QObject {
     Q_PROPERTY(QObject *modules READ modules CONSTANT)
     Q_PROPERTY(QObject *wires READ wires CONSTANT)
     Q_PROPERTY(QObject *graphics READ graphics CONSTANT)
+    Q_PROPERTY(QObject *maraflowGraphics READ maraflowGraphics CONSTANT)
+    Q_PROPERTY(QVariantMap maraflowPage READ maraflowPage NOTIFY sceneChanged)
     Q_PROPERTY(QString title READ title NOTIFY projectChanged)
     Q_PROPERTY(QString file READ file NOTIFY projectChanged)
     Q_PROPERTY(QString page READ page NOTIFY projectChanged)
@@ -44,6 +46,8 @@ public:
     QObject *modules() { return &m_modules; }
     QObject *wires() { return &m_wires; }
     QObject *graphics() { return &m_graphics; }
+    QObject *maraflowGraphics() { return &m_maraflowGraphics; }
+    QVariantMap maraflowPage() const { return m_scene.value("maraflowPage").toMap(); }
     QString title() const { return m_scene.value("title").toString(); }
     QString file() const { return m_scene.value("file").toString(); }
     QString page() const { return m_scene.value("page").toString(); }
@@ -112,6 +116,7 @@ private:
     JsonListModel m_modules{"id"};
     JsonListModel m_wires{"key"};
     JsonListModel m_graphics{"index"};
+    JsonListModel m_maraflowGraphics{"index"};
     bool m_blurEnabled = true;
     double m_blurDepth = 0.55;
     QVariantMap m_scene;
