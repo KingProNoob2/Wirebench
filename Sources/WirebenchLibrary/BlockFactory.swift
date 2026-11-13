@@ -94,6 +94,18 @@ public enum BlockFactory {
     /// The help documents a configurable block as its first two operands *plus* a general
     /// `X(N-1)` row, so the general row replaces the operands rather than adding to them: `And`
     /// with N = 2 becomes `En, X0, X1`, matching what Dirigo itself writes.
+    /// A pin's starting value. An output whose template says `-` (no default) starts at its type's zero rather than
+    /// "no value yet", so a new block has a readable Y before the simulation runs.
+    static func defaultPinValue(for spec: PinTemplate, isOutput: Bool) -> PinValue {
+        let parsed = PinValue.parse(spec.defaultValue)
+        guard isOutput, case .undefined = parsed else { return parsed }
+        switch spec.dataType.lowercased() {
+        case "boolean", "bit", "bool": return .bool(false)
+        case "float", "real": return .float(0)
+        default: return .int32(0)
+        }
+    }
+
     static func makePins(
         from specs: [PinTemplate],
         counted: Int?,
@@ -104,7 +116,7 @@ public enum BlockFactory {
         func append(_ spec: PinTemplate, abbrev: String) {
             pins.append(Pin(
                 id: pins.count,
-                value: PinValue.parse(spec.defaultValue),
+                value: defaultPinValue(for: spec, isOutput: isOutput),
                 inverted: false,
                 rights: isOutput ? 2 : 0,
                 name: nil,

@@ -123,7 +123,7 @@ struct LiveValuesCanvas: View, Equatable {
             let frame = frames[index]
             let snapshot = snapshots[module.id]
             let inputValues = snapshot?.inValues ?? module.inPins.map(\.value)
-            let outputValues = snapshot?.outValues ?? []
+            let outputValues = snapshot?.outValues ?? module.outPins.map(\.value)
             let inputs = (0..<module.inPins.count).map {
                 PinRows.row(inputValues, $0, label: ModulePinCatalog.inputPinLabel(for: module, index: $0), inputOf: module.guid)
             }

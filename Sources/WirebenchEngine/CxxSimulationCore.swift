@@ -240,6 +240,19 @@ public final class CxxSimulationCore {
             // this engine is checked against were made without applying them. A variable's configured value comes
             // from `INIT_VALUE` (IntVar/LongVar/FloatVar) or its block default.
             (block as? SystemCmdBlock)?.applyDefinition()
+            // A block class may leave an output undefined until it first runs; give it the type's zero so the sheet
+            // shows a value before the simulation starts and after Reset rebuilds the core.
+            let outTypes = BlockLabels.outputTypes(for: mod.guid)
+            for idx in 0..<block.outPins.count where idx < mod.outPins.count {
+                guard case .undefined = block.outPins[idx], !outTypes.isEmpty else { continue }
+                let type = outTypes.indices.contains(idx) ? outTypes[idx] : (outTypes.last ?? "")
+                switch type.lowercased() {
+                case "boolean", "bit", "bool": block.outPins[idx] = .bool(false)
+                case "float", "real": block.outPins[idx] = .float(0)
+                case "int", "long", "word", "int/long": block.outPins[idx] = .int32(0)
+                default: break
+                }
+            }
             let kind = Self.kind(forGUID: mod.guid) ?? WIREBENCH_BLOCK_UNRESOLVED
             if kind != WIREBENCH_BLOCK_UNRESOLVED { ported += 1 }
             index[mod.id] = Int32(clamping: position)

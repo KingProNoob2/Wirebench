@@ -1358,6 +1358,9 @@ public final class AppModel: @unchecked Sendable {
         if let project { engine = installEngine(project: project) }
         heldButtons = []
         tickCount = 0
+        // Force a republish: the digest shortcut must not leave the last run's values on the sheet.
+        snapshots = [:]
+        refreshSnapshots()
         simulationDidChange()
     }
 
