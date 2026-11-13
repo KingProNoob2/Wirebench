@@ -30,6 +30,8 @@ public struct SourceExpr: Equatable, Sendable {
         case member(SourceExpr, String)
         /// `a[3]`: one element of a declared array.
         case element(SourceExpr, SourceExpr)
+        /// `Add(1, 2)`: a call of a declared FUNCTION, inlined at lowering.
+        case functionCall(String, [SourceExpr])
         case unary(String, SourceExpr)
         case binary(String, SourceExpr, SourceExpr)
     }
@@ -128,6 +130,37 @@ public struct SourceVariable: Equatable, Sendable {
     }
 }
 
+/// One `VAR_INPUT` parameter of a `FUNCTION`.
+public struct SourceParameter: Equatable, Sendable {
+    public var name: String
+    public var type: SourceType
+    public var line: Int
+
+    public init(name: String, type: SourceType, line: Int) {
+        self.name = name
+        self.type = type
+        self.line = line
+    }
+}
+
+/// `FUNCTION Add : INT VAR_INPUT a, b : INT; END_VAR Add := a + b; END_FUNCTION` — a pure expression with
+/// parameters, inlined at every call.
+public struct SourceFunction: Equatable, Sendable {
+    public var name: String
+    public var returnType: SourceType
+    public var parameters: [SourceParameter]
+    public var body: SourceExpr
+    public var line: Int
+
+    public init(name: String, returnType: SourceType, parameters: [SourceParameter], body: SourceExpr, line: Int) {
+        self.name = name
+        self.returnType = returnType
+        self.parameters = parameters
+        self.body = body
+        self.line = line
+    }
+}
+
 /// `a : ARRAY[0..15] OF INT;` — an array in the PLC data area, addressed by index.
 public struct SourceArray: Equatable, Sendable {
     public var name: String
@@ -193,9 +226,11 @@ public struct SourceUnit: Equatable, Sendable {
 
 public struct SourceProgram: Equatable, Sendable {
     public var units: [SourceUnit]
+    public var functions: [SourceFunction]
 
-    public init(units: [SourceUnit] = []) {
+    public init(units: [SourceUnit] = [], functions: [SourceFunction] = []) {
         self.units = units
+        self.functions = functions
     }
 
     /// The page the document opens on: the first `PROGRAM`.
@@ -215,6 +250,9 @@ public struct SourceParser {
     private var index = 0
     /// The unit being parsed, so `FOR` can check the index's declared type while its statements are read.
     private var currentUnit: SourceUnit?
+    /// Expressions the parser has seen assigned unconditionally so far in this statement sequence. A `FOR` starts
+    /// from these, so a loop continues from a value assigned earlier in the same scan instead of the scan-start value.
+    private var sequenceBindings: [String: SourceExpr] = [:]
 
     public init(_ source: String) throws {
         tokens = try STLexer.tokenize(source)
@@ -282,23 +320,95 @@ public struct SourceParser {
 
     private mutating func program() throws -> SourceProgram {
         var units: [SourceUnit] = []
+        var functions: [SourceFunction] = []
         while !isAtEnd {
             if isKeyword("PROGRAM") {
                 units.append(try unit(.program))
             } else if isKeyword("FUNCTION_BLOCK") {
                 units.append(try unit(.functionBlock))
+            } else if isKeyword("FUNCTION") {
+                functions.append(try functionDeclaration())
             } else {
-                throw error("expected PROGRAM or FUNCTION_BLOCK but found \(describe(current))")
+                throw error("expected PROGRAM, FUNCTION_BLOCK or FUNCTION but found \(describe(current))")
             }
         }
         guard units.contains(where: { $0.kind == .program }) else {
             throw SourceError(line: 1, message: "the file declares no PROGRAM; write 'PROGRAM Main ... END_PROGRAM'")
         }
-        let names = units.map { $0.name.lowercased() }
+        let names = (units.map(\.name) + functions.map(\.name)).map { $0.lowercased() }
         if Set(names).count != names.count {
-            throw SourceError(line: 1, message: "two programs or function blocks have the same name")
+            throw SourceError(line: 1, message: "two programs, function blocks or functions have the same name")
         }
-        return SourceProgram(units: units)
+        return SourceProgram(units: units, functions: functions)
+    }
+
+    /// `FUNCTION name : TYPE VAR_INPUT p : TYPE; END_VAR name := expression; END_FUNCTION`.
+    private mutating func functionDeclaration() throws -> SourceFunction {
+        let keyword = advance()   // FUNCTION
+        let nameToken = try expectIdentifier("a name after FUNCTION")
+        let name = nameToken.text
+        try expectSymbol(":")
+        let returnType = try scalarType("a FUNCTION return type")
+        var parameters: [SourceParameter] = []
+        if isKeyword("VAR_INPUT") {
+            advance()
+            while !isKeyword("END_VAR") {
+                if isAtEnd { throw error("the VAR_INPUT block is not closed with END_VAR") }
+                let parameterToken = try expectIdentifier("a parameter name")
+                try expectSymbol(":")
+                let type = try scalarType("a parameter type")
+                try expectSymbol(";")
+                guard !parameters.contains(where: { $0.name.lowercased() == parameterToken.text.lowercased() }) else {
+                    throw error("'\(parameterToken.text)' is declared twice")
+                }
+                parameters.append(SourceParameter(name: parameterToken.text, type: type, line: parameterToken.line))
+            }
+            advance()   // END_VAR
+        }
+        if isKeyword("VAR") || isKeyword("VAR_OUTPUT") || isKeyword("VAR_IN_OUT") {
+            throw error("a FUNCTION has VAR_INPUT parameters only")
+        }
+        let bodyStatements = try statements { $0 == "END_FUNCTION" }
+        try expectKeyword("END_FUNCTION")
+        guard bodyStatements.count == 1,
+              case .assign(let target, let expression) = bodyStatements[0].kind,
+              target.lowercased() == name.lowercased() else {
+            throw error("a FUNCTION body is one assignment to its name, as in '\(name) := …;'")
+        }
+        try validateFunctionBody(expression, parameters: Set(parameters.map { $0.name.lowercased() }))
+        return SourceFunction(name: name, returnType: returnType, parameters: parameters, body: expression,
+                              line: keyword.line)
+    }
+
+    private mutating func scalarType(_ what: String) throws -> SourceType {
+        let declared = try typeName()
+        guard case .scalar(let type) = declared else {
+            throw error("\(what) must be BOOL, INT, LONG or REAL")
+        }
+        return type
+    }
+
+    /// A FUNCTION body may use its parameters and literals only: no caller variables, instances or arrays.
+    private func validateFunctionBody(_ expression: SourceExpr, parameters: Set<String>) throws {
+        switch expression.kind {
+        case .boolean, .integer, .real:
+            break
+        case .name(let name):
+            guard parameters.contains(name.lowercased()) else {
+                throw SourceError(line: expression.line,
+                                  message: "a FUNCTION body can only use its parameters; '\(name)' is not one")
+            }
+        case .member, .element:
+            throw SourceError(line: expression.line,
+                              message: "a FUNCTION body cannot read instances or arrays")
+        case .unary(_, let operand):
+            try validateFunctionBody(operand, parameters: parameters)
+        case .binary(_, let left, let right):
+            try validateFunctionBody(left, parameters: parameters)
+            try validateFunctionBody(right, parameters: parameters)
+        case .functionCall(_, let arguments):
+            for argument in arguments { try validateFunctionBody(argument, parameters: parameters) }
+        }
     }
 
     private mutating func unit(_ kind: SourceUnit.Kind) throws -> SourceUnit {
@@ -306,6 +416,7 @@ public struct SourceParser {
         let name = try expectIdentifier("a name after \(kind == .program ? "PROGRAM" : "FUNCTION_BLOCK")").text
         var unit = SourceUnit(name: name, kind: kind, line: keyword.line)
         currentUnit = unit
+        sequenceBindings = [:]
         var sawStatement = false
         while !isAtEnd {
             if kind == .program && isKeyword("END_PROGRAM") { advance(); return unit }
@@ -513,7 +624,9 @@ public struct SourceParser {
         var statements: [SourceStmt] = []
         while !isAtEnd, !end(current.text.uppercased()) {
             if isSymbol(";") { advance(); continue }
-            statements.append(try statement())
+            let statement = try statement()
+            statements.append(statement)
+            updateBindings(from: statement, index: "", into: &sequenceBindings)
         }
         return statements
     }
@@ -556,7 +669,9 @@ public struct SourceParser {
         let keyword = advance()   // IF
         let condition = try expression()
         try expectKeyword("THEN")
+        let saved = sequenceBindings
         let thenBody = try statements { $0 == "ELSIF" || $0 == "ELSE" || $0 == "END_IF" }
+        sequenceBindings = saved
         var elseBody: [SourceStmt]?
         if isKeyword("ELSIF") {
             // `ELSIF c THEN …` is an `ELSE IF c THEN … END_IF` in the tree. The chain does not consume the closing
@@ -568,6 +683,10 @@ public struct SourceParser {
         }
         try expectKeyword("END_IF")
         try expectSymbol(";")
+        sequenceBindings = saved
+        for name in assignedNames(in: thenBody).union(assignedNames(in: elseBody ?? [])) {
+            sequenceBindings.removeValue(forKey: name.lowercased())
+        }
         return SourceStmt(.ifThen(condition, thenBody, elseBody), line: keyword.line)
     }
 
@@ -716,7 +835,9 @@ public struct SourceParser {
             throw error("FOR bounds are too large; keep start, end and step within ±1,000,000")
         }
         try expectKeyword("DO")
+        let seed = sequenceBindings
         let body = try statements { $0 == "END_FOR" }
+        sequenceBindings = seed
         try expectKeyword("END_FOR")
         try expectSymbol(";")
 
@@ -732,7 +853,7 @@ public struct SourceParser {
             throw error("this FOR unrolls to more than 256 iterations; the cap is 256")
         }
 
-        var bindings: [String: SourceExpr] = [:]
+        var bindings = seed
         var unrolled: [SourceStmt] = []
         var nodes = 0
         for iteration in values {
@@ -805,6 +926,10 @@ public struct SourceParser {
             return SourceExpr(.element(substitute(base, index: index, value: value, bindings: bindings),
                                           substitute(subscriptIndex, index: index, value: value, bindings: bindings)),
                               line: expression.line)
+        case .functionCall(let name, let arguments):
+            return SourceExpr(.functionCall(name, arguments.map {
+                substitute($0, index: index, value: value, bindings: bindings)
+            }), line: expression.line)
         case .unary(let op, let operand):
             return SourceExpr(.unary(op, substitute(operand, index: index, value: value, bindings: bindings)),
                               line: expression.line)
@@ -855,6 +980,7 @@ public struct SourceParser {
         case .name: return 1
         case .member(let base, _): return 1 + nodeCount(base)
         case .element(let base, let indexExpression): return 1 + nodeCount(base) + nodeCount(indexExpression)
+        case .functionCall(_, let arguments): return 1 + arguments.reduce(0) { $0 + nodeCount($1) }
         case .unary(_, let operand): return 1 + nodeCount(operand)
         case .binary(_, let left, let right): return 1 + nodeCount(left) + nodeCount(right)
         }
@@ -1007,6 +1133,19 @@ public struct SourceParser {
         }
         if token.kind == .identifier {
             advance()
+            if isSymbol("(") {
+                advance()
+                var arguments: [SourceExpr] = []
+                if !isSymbol(")") {
+                    while true {
+                        arguments.append(try expression())
+                        if isSymbol(",") { advance(); continue }
+                        break
+                    }
+                }
+                try expectSymbol(")")
+                return SourceExpr(.functionCall(token.text, arguments), line: token.line)
+            }
             var base = SourceExpr(.name(token.text), line: token.line)
             if isSymbol("[") {
                 advance()
@@ -1051,7 +1190,7 @@ struct STLexer {
         "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
         "IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE",
         "FOR", "TO", "BY", "DO", "END_FOR", "WHILE", "END_WHILE", "REPEAT", "UNTIL", "END_REPEAT",
-        "ARRAY", "OF",
+        "ARRAY", "OF", "FUNCTION", "END_FUNCTION",
         "AND", "OR", "XOR", "NOT", "MOD", "AT",
         "TRUE", "FALSE",
         "BOOL", "INT", "LONG", "REAL", "LREAL", "WORD",

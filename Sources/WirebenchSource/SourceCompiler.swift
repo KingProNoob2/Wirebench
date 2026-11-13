@@ -42,6 +42,8 @@ public struct SourceCompiler {
         }
         var macrosByName: [String: SourceUnit] = [:]
         for block in program.macros { macrosByName[block.name.lowercased()] = block }
+        var functionsByName: [String: SourceFunction] = [:]
+        for function in program.functions { functionsByName[function.name.lowercased()] = function }
         try checkRecursion(units: program.units, macros: macrosByName)
 
         var project = PCCProject(name: mainPage.name.isEmpty ? projectName : mainPage.name, profile: "Sybas Duino-E")
@@ -68,7 +70,8 @@ public struct SourceCompiler {
                                   thread: unit.kind == .functionBlock ? 0 : threadId,
                                   allocator: allocator,
                                   intervalMs: interval,
-                                  macros: macrosByName)
+                                  macros: macrosByName,
+                                  functions: functionsByName)
             let summary = try emitter.emit(unit)
             modules.append(contentsOf: emitter.modules)
             connections.append(contentsOf: emitter.connections)
@@ -294,6 +297,7 @@ final class Emitter {
     private let allocator: SourceCompiler.IDAllocator
     private let intervalMs: Int
     private let macros: [String: SourceUnit]
+    private let functions: [String: SourceFunction]
     private var order = 10
     private var placed = 0
     private var digitalInput: Int?
@@ -311,12 +315,13 @@ final class Emitter {
     private static let columns = 4
 
     init(page: String, thread: Int, allocator: SourceCompiler.IDAllocator, intervalMs: Int,
-         macros: [String: SourceUnit]) {
+         macros: [String: SourceUnit], functions: [String: SourceFunction]) {
         self.page = page
         self.thread = thread
         self.allocator = allocator
         self.intervalMs = intervalMs
         self.macros = macros
+        self.functions = functions
     }
 
     @discardableResult
@@ -392,7 +397,7 @@ final class Emitter {
     // MARK: - Compiling one unit
 
     func emit(_ unit: SourceUnit) throws -> UnitSummary {
-        var lowering = Lowering(unit: unit, macros: macros, intervalMs: intervalMs)
+        var lowering = Lowering(unit: unit, macros: macros, intervalMs: intervalMs, functions: functions)
         let lowered = try lowering.lower(unit.body)
         calls = lowered.calls
         blockCalls = lowered.blockCalls
@@ -763,6 +768,7 @@ struct Lowering {
     let unit: SourceUnit
     let macros: [String: SourceUnit]
     let intervalMs: Int
+    let functions: [String: SourceFunction]
     private var instances: [String: Instance] = [:]
     private var inBranch = false
 
@@ -771,10 +777,12 @@ struct Lowering {
         case block(index: Int)
     }
 
-    init(unit: SourceUnit, macros: [String: SourceUnit], intervalMs: Int) {
+    init(unit: SourceUnit, macros: [String: SourceUnit], intervalMs: Int,
+         functions: [String: SourceFunction]) {
         self.unit = unit
         self.macros = macros
         self.intervalMs = intervalMs
+        self.functions = functions
     }
 
     mutating func lower(_ statements: [SourceStmt]) throws -> LoweredScan {
@@ -871,6 +879,59 @@ struct Lowering {
             return .number(expr, .real)
         case (_, .bool):
             throw SourceError(line: line, message: "'\(name)' is \(type.name); a BOOL cannot be stored in it")
+        }
+    }
+
+    /// Inline a FUNCTION: parameters become the caller's argument expressions, nested calls are expanded first.
+    private func expand(_ expression: SourceExpr, parameters: [SourceParameter], arguments: [SourceExpr],
+                        depth: Int, line: Int) throws -> SourceExpr {
+        guard depth < 32 else {
+            throw SourceError(line: line, message: "a function call is recursive or nested too deeply")
+        }
+        switch expression.kind {
+        case .name(let name):
+            if let index = parameters.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+                return arguments[index]
+            }
+            return expression
+        case .functionCall(let name, let callArguments):
+            guard let function = functions[name.lowercased()] else {
+                throw SourceError(line: line, message: "unknown function '\(name)'")
+            }
+            guard callArguments.count == function.parameters.count else {
+                throw SourceError(line: line,
+                                  message: "'\(name)' takes \(function.parameters.count) argument(s), not \(callArguments.count)")
+            }
+            var expandedArguments: [SourceExpr] = []
+            for argument in callArguments {
+                expandedArguments.append(try expand(argument, parameters: parameters, arguments: arguments,
+                                                    depth: depth + 1, line: line))
+            }
+            return try expand(function.body, parameters: function.parameters, arguments: expandedArguments,
+                              depth: depth + 1, line: line)
+        case .unary(let op, let operand):
+            return SourceExpr(.unary(op, try expand(operand, parameters: parameters, arguments: arguments,
+                                                    depth: depth + 1, line: line)), line: expression.line)
+        case .binary(let op, let left, let right):
+            return SourceExpr(.binary(op,
+                                      try expand(left, parameters: parameters, arguments: arguments, depth: depth + 1, line: line),
+                                      try expand(right, parameters: parameters, arguments: arguments, depth: depth + 1, line: line)),
+                              line: expression.line)
+        case .member, .element:
+            throw SourceError(line: line, message: "a FUNCTION body cannot read instances or arrays")
+        case .boolean, .integer, .real:
+            return expression
+        }
+    }
+
+    private func expandNodeCount(_ expression: SourceExpr) -> Int {
+        switch expression.kind {
+        case .boolean, .integer, .real, .name: return 1
+        case .member(let base, _): return 1 + expandNodeCount(base)
+        case .element(let base, let indexExpression): return 1 + expandNodeCount(base) + expandNodeCount(indexExpression)
+        case .functionCall(_, let arguments): return 1 + arguments.reduce(0) { $0 + expandNodeCount($1) }
+        case .unary(_, let operand): return 1 + expandNodeCount(operand)
+        case .binary(_, let left, let right): return 1 + expandNodeCount(left) + expandNodeCount(right)
         }
     }
 
@@ -1144,6 +1205,39 @@ struct Lowering {
                 return .bool(.blockOutput(index, position))
             case nil:
                 throw SourceError(line: expression.line, message: "unknown instance '\(instanceName)'")
+            }
+        case .functionCall(let name, let arguments):
+            guard let function = functions[name.lowercased()] else {
+                throw SourceError(line: expression.line, message: "unknown function '\(name)'")
+            }
+            guard arguments.count == function.parameters.count else {
+                throw SourceError(line: expression.line,
+                                  message: "'\(name)' takes \(function.parameters.count) argument(s), not \(arguments.count)")
+            }
+            let expanded = try expand(function.body, parameters: function.parameters, arguments: arguments,
+                                      depth: 0, line: expression.line)
+            guard expandNodeCount(expanded) <= 50_000 else {
+                throw SourceError(line: expression.line, message: "this function call expands to too large an expression")
+            }
+            let value = try lower(expanded, scan: &scan)
+            switch (function.returnType, value) {
+            case (.bool, .bool):
+                return value
+            case (.bool, _):
+                throw SourceError(line: expression.line, message: "'\(name)' returns BOOL; its expression is a number")
+            case (.int, .number(_, .int)):
+                return value
+            case (.int, .number(_, let from)):
+                throw SourceError(line: expression.line, message: "'\(name)' returns INT; its expression is \(from.name)")
+            case (.long, .number(_, .int)), (.long, .number(_, .long)):
+                return value
+            case (.long, .number(_, .real)):
+                throw SourceError(line: expression.line, message: "'\(name)' returns LONG; its expression is REAL")
+            case (.real, .number):
+                return value
+            case (.int, .bool), (.long, .bool), (.real, .bool):
+                throw SourceError(line: expression.line,
+                                  message: "'\(name)' returns \(function.returnType.name); its expression is BOOL")
             }
         case .element(let base, let indexExpression):
             guard case .name(let arrayName) = base.kind, let array = arrayInfo(arrayName) else {

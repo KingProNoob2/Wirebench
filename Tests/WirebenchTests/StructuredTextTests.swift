@@ -622,6 +622,116 @@ struct StructuredTextTests {
         }
     }
 
+    @Test("A FUNCTION is inlined and simulates")
+    func functionCall() throws {
+        let compiled = try SourceCompiler().compile("""
+        FUNCTION Add : INT
+        VAR_INPUT
+            a : INT;
+            b : INT;
+        END_VAR
+            Add := a + b;
+        END_FUNCTION
+
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            n := Add(1, 2);
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 3)
+    }
+
+    @Test("Functions nest, reuse a parameter, and work inside FOR")
+    func functionComposition() throws {
+        let compiled = try SourceCompiler().compile("""
+        FUNCTION Double : INT
+        VAR_INPUT x : INT; END_VAR
+            Double := x * 2;
+        END_FUNCTION
+        FUNCTION AddOne : INT
+        VAR_INPUT x : INT; END_VAR
+            AddOne := Double(x) + 1;
+        END_FUNCTION
+        FUNCTION Square : INT
+        VAR_INPUT x : INT; END_VAR
+            Square := x * x;
+        END_FUNCTION
+
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            n := Square(AddOne(3));
+            FOR i := 1 TO 3 DO
+                n := n + Double(i);
+            END_FOR;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 61, "7^2 + 2 + 4 + 6")
+    }
+
+    @Test("Function refusals: recursion, a caller name, the wrong argument count, a return type")
+    func functionRefusals() {
+        let cases: [(String, String)] = [
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+                 F := F(x);
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1);
+             END_PROGRAM
+             """, "recursive"),
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+                 F := x + caller;
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1);
+             END_PROGRAM
+             """, "can only use its parameters"),
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+                 F := x;
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1, 2);
+             END_PROGRAM
+             """, "takes 1 argument"),
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+                 F := 1.5;
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1);
+             END_PROGRAM
+             """, "returns INT"),
+        ]
+        for (source, fragment) in cases {
+            let message = Self.error(source)
+            #expect(message?.contains(fragment) == true, "\(fragment): \(message ?? "compiled")")
+        }
+    }
+
     @Test("Completion offers keywords, block types, instance names and an instance's outputs")
     func completion() {
         let source = """
