@@ -75,7 +75,45 @@ public struct MaraflowImporter {
             project.pages.append(ProjectPage(caption: caption))
 
             if page.language == "ST" {
-                project.modules.append(stPageModule(page, caption: caption, id: nextModuleId))
+                var inputModule: Int?
+                var outputModule: Int?
+                var inputNames: [String] = []
+                var outputNames: [String] = []
+                if page.isMacro {
+                    let inputs = page.stVariables.filter { $0.scope == "VAR_INPUT" }
+                    let outputs = page.stVariables.filter { $0.scope == "VAR_OUTPUT" }
+                    inputNames = ["En"] + inputs.map(\.name)
+                    outputNames = outputs.map(\.name)
+                    // Maraflow registers En before the VAR_INPUT pins on every macro.
+                    var inputPins = [Pin(id: 0, value: .bool(true), rights: 2, name: "En")]
+                    for variable in inputs {
+                        inputPins.append(Pin(id: inputPins.count, value: stVariableValue(variable),
+                                             rights: 2, name: variable.name))
+                    }
+                    let input = PCCModule(id: nextModuleId, guid: InputsBlock.guid, name: "Inputs",
+                                          x: 32, y: 32, order: 0, threadId: page.stThreadID,
+                                          page: caption, inPins: [], paramPins: [], outPins: inputPins,
+                                          rawAttributes: AttributeBag([("MACRO_NAME", "Inputs"), ("KIND", "0")]))
+                    nextModuleId += 1
+                    project.modules.append(input)
+                    inputModule = input.id
+                    if !outputs.isEmpty {
+                        let outputPins = outputs.enumerated().map {
+                            Pin(id: $0.offset, value: stVariableValue($0.element), rights: 0,
+                                name: $0.element.name)
+                        }
+                        let output = PCCModule(id: nextModuleId, guid: InputsBlock.guid, name: "Outputs",
+                                               x: 128, y: 32, order: 0, threadId: page.stThreadID,
+                                               page: caption, inPins: outputPins, paramPins: [], outPins: [],
+                                               rawAttributes: AttributeBag([("MACRO_NAME", "Outputs"), ("KIND", "1")]))
+                        nextModuleId += 1
+                        project.modules.append(output)
+                        outputModule = output.id
+                    }
+                }
+                project.modules.append(stPageModule(page, caption: caption, id: nextModuleId,
+                                                    inputModule: inputModule, outputModule: outputModule,
+                                                    inputNames: inputNames, outputNames: outputNames))
                 nextModuleId += 1
                 notes.append("Page '\(caption)' is Structured Text; it runs through the native ST interpreter.")
             }
@@ -382,7 +420,18 @@ public struct MaraflowImporter {
     }
 
     /// One Structured Text page becomes one native block with no pins; the core compiles and runs its code each scan.
-    private static func stPageModule(_ page: MaraflowPage, caption: String, id: Int) -> PCCModule {
+    private static func stVariableValue(_ variable: MaraflowStVariable) -> PinValue {
+        switch variable.type {
+        case "BOOL", "BOOLEAN", "BIT": return .bool(variable.initial == "1" || variable.initial.lowercased() == "true")
+        case "LONG", "LINT", "INT64": return .int64(Int64(variable.initial) ?? 0)
+        case "FLOAT", "REAL": return .float(Float(variable.initial) ?? 0)
+        default: return .int32(Int32(clamping: Int64(variable.initial) ?? 0))
+        }
+    }
+
+    private static func stPageModule(_ page: MaraflowPage, caption: String, id: Int,
+                                     inputModule: Int? = nil, outputModule: Int? = nil,
+                                     inputNames: [String] = [], outputNames: [String] = []) -> PCCModule {
         var code = page.stCode
         if !page.stVariables.isEmpty, !code.uppercased().contains("VAR") {
             let declarations = page.stVariables.map { variable in
@@ -390,10 +439,14 @@ public struct MaraflowImporter {
             }.joined(separator: "\n")
             code = "VAR\n\(declarations)\nEND_VAR\n" + code
         }
+        var attributes = AttributeBag([("MARAFLOW_ST_CODE", code)])
+        if let inputModule { attributes["MARAFLOW_ST_INPUT_MODULE"] = "\(inputModule)" }
+        if let outputModule { attributes["MARAFLOW_ST_OUTPUT_MODULE"] = "\(outputModule)" }
+        if !inputNames.isEmpty { attributes["MARAFLOW_ST_INPUTS"] = inputNames.joined(separator: "|") }
+        if !outputNames.isEmpty { attributes["MARAFLOW_ST_OUTPUTS"] = outputNames.joined(separator: "|") }
         return PCCModule(id: id, guid: MaraflowStPage.guid, name: "ST \(caption)",
                          x: 32, y: 32, order: page.stOrder, threadId: page.stThreadID, page: caption,
-                         inPins: [], paramPins: [], outPins: [],
-                         rawAttributes: AttributeBag([("MARAFLOW_ST_CODE", code)]))
+                         inPins: [], paramPins: [], outPins: [], rawAttributes: attributes)
     }
 
     // MARK: - Ladder pages

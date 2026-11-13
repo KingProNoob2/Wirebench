@@ -380,6 +380,30 @@ public final class CxxSimulationCore {
                     }
                 }
             }
+            if let input = mod.rawAttributes["MARAFLOW_ST_INPUT_MODULE"] {
+                "STInputModule".withCString { keyCString in
+                    input.withCString { valueCString in
+                        wirebench_sim_set_string(created, Int32(position), keyCString, valueCString)
+                    }
+                }
+            }
+            if let output = mod.rawAttributes["MARAFLOW_ST_OUTPUT_MODULE"] {
+                "STOutputModule".withCString { keyCString in
+                    output.withCString { valueCString in
+                        wirebench_sim_set_string(created, Int32(position), keyCString, valueCString)
+                    }
+                }
+            }
+            for (key, attribute) in [("STInputs", "MARAFLOW_ST_INPUTS"),
+                                     ("STOutputs", "MARAFLOW_ST_OUTPUTS")] {
+                if let names = mod.rawAttributes[attribute] {
+                    key.withCString { keyCString in
+                        names.withCString { valueCString in
+                            wirebench_sim_set_string(created, Int32(position), keyCString, valueCString)
+                        }
+                    }
+                }
+            }
             if let code = mod.rawAttributes["MARAFLOW_ST_CODE"] {
                 "STCode".withCString { keyCString in
                     code.withCString { codeCString in

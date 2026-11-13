@@ -91,6 +91,7 @@ struct MaraflowWire {
 }
 
 struct MaraflowStVariable {
+    var scope: String
     var name: String
     var type: String
     var initial: String
@@ -194,6 +195,7 @@ struct MaraflowProject {
             for variableIndex in 0..<variableCount {
                 let variablePrefix = prefix + "stVar.\(variableIndex)."
                 variables.append(MaraflowStVariable(
+                    scope: document.string(variablePrefix + "scope", "VAR").uppercased(),
                     name: document.string(variablePrefix + "name", "Var\(variableIndex + 1)"),
                     type: document.string(variablePrefix + "type", "INT").uppercased(),
                     initial: document.string(variablePrefix + "init", "0")

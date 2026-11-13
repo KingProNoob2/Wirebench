@@ -593,7 +593,37 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
         if (!m.stCompiled) return;
         auto read = [sim](const std::string &name) -> double { return ldOperand(sim, name); };
         auto write = [sim](const std::string &name, double value) { sim->operands[name] = value; };
+        // ST macro: seed VAR_INPUT operands from the Inputs interface, then publish VAR_OUTPUT to Outputs.
+        auto names = [](const std::string &text) {
+            std::vector<std::string> result;
+            std::string current;
+            for (char c : text) {
+                if (c == '|') { result.push_back(current); current.clear(); }
+                else current.push_back(c);
+            }
+            if (!current.empty() || !text.empty()) result.push_back(current);
+            return result;
+        };
+        auto moduleById = [sim](const std::string &raw) -> Module * {
+            if (raw.empty()) return nullptr;
+            auto found = sim->indexById.find(std::atoi(raw.c_str()));
+            return found == sim->indexById.end() ? nullptr : &sim->modules[found->second];
+        };
+        if (m.strings.count("STInputModule") && m.strings.count("STInputs")) {
+            if (Module *input = moduleById(m.strings["STInputModule"])) {
+                const auto variables = names(m.strings["STInputs"]);
+                for (size_t i = 0; i < variables.size() && i < input->outPins.size(); ++i)
+                    sim->operands[variables[i]] = asFloat(input->outPins[i]);
+            }
+        }
         m.stInterpreter->execute(read, write, m.stVariables);
+        if (m.strings.count("STOutputModule") && m.strings.count("STOutputs")) {
+            if (Module *output = moduleById(m.strings["STOutputModule"])) {
+                const auto variables = names(m.strings["STOutputs"]);
+                for (size_t i = 0; i < variables.size() && i < output->inPins.size(); ++i)
+                    output->inPins[i] = maraflowNumber(ldOperand(sim, variables[i]), output->inPins[i]);
+            }
+        }
         return;
     }
     /* Every kind below writes outputs and nothing else a reader can see (`Set` works in the step loop, not

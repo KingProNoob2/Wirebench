@@ -923,6 +923,48 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: readDO.id)[0].asInt == 1, "an Int FB's power continues through the rung")
     }
 
+    @Test("An ST macro page is bridged to its call pins")
+    func stMacro() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "STMacro"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "1"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "*Inc"),
+            ("page.1.language", "ST"),
+            ("page.1.stCode", "VAR_INPUT x : INT; END_VAR VAR_OUTPUT y : INT; END_VAR y := x + 1;"),
+            ("page.1.stVarCount", "2"),
+            ("page.1.stVar.0.scope", "VAR_INPUT"),
+            ("page.1.stVar.0.name", "x"),
+            ("page.1.stVar.0.type", "INT"),
+            ("page.1.stVar.0.init", "0"),
+            ("page.1.stVar.1.scope", "VAR_OUTPUT"),
+            ("page.1.stVar.1.name", "y"),
+            ("page.1.stVar.1.type", "INT"),
+            ("page.1.stVar.1.init", "0"),
+            ("page.1.blockCount", "0"),
+            ("page.1.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "call", definition: "Macro.User.Inc", type: "Inc",
+                              name: "IncCall", gridX: 2, gridY: 2, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("x", "Input", "INT", "5")],
+                              outputs: [("y", "Output", "INT", "0")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stmacro")
+        #expect(outcome.project.pages.map(\.caption).sorted() == ["*Inc", "Main"])
+        let call = try #require(outcome.project.modules.first { $0.name == "IncCall" })
+        #expect(call.guid == MacroBlock.guid)
+        #expect(call.rawAttributes["MACRO_NAME"] == "Inc")
+        let interfaces = outcome.project.modules.filter {
+            $0.page == "*Inc" && ["Inputs", "Outputs"].contains($0.rawAttributes["MACRO_NAME"] ?? "")
+        }
+        #expect(interfaces.count == 2)
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: call.id)[0].asInt == 6, "ST macro input reaches the page and its output returns")
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [
