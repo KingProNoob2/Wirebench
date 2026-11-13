@@ -139,7 +139,7 @@ struct MaraflowImportTests {
         #expect(loaded.notes.first?.contains("Imported 1 page") == true)
 
         let and = try #require(project.modules.first { $0.name == "And1" })
-        #expect(and.guid == BlockTypeCatalog.info(forBlockName: "And")?.guid)
+        #expect(and.guid == MaraflowCatalog.byId["Bool.And"]?.guid)
         #expect(and.x == 64 && and.y == 96)
         #expect(and.inPins[0].value == .bool(true))
         #expect(and.inPins[1].value == .bool(true))
@@ -155,8 +155,10 @@ struct MaraflowImportTests {
         #expect(project.connection(inModuleId: output.id, inPinId: 1)?.outModuleId == not.id)
         #expect(project.connection(inModuleId: output.id, inPinId: 2)?.outModuleId != nil)
 
-        // Nand is mapped to And with its output inverted at the consumer.
-        #expect(output.inPins[3].inverted)
+        // Nand is a native Maraflow block now; it inverts its own output.
+        let nand = try #require(project.modules.first { $0.name == "Nand1" })
+        #expect(nand.guid == MaraflowCatalog.byId["Bool.Nand"]?.guid)
+        #expect(!output.inPins[3].inverted)
 
         let placeholder = try #require(project.modules.first { $0.name == "PID1" })
         #expect(placeholder.guid == BlockTypeCatalog.info(forBlockName: "Unresolved")?.guid)
@@ -168,6 +170,12 @@ struct MaraflowImportTests {
         // Everything that was imported survives the native format.
         let encoded = try WirebenchDocument.encode(project)
         #expect(try WirebenchDocument.decode(encoded) == project)
+
+        let core = CxxSimulationCore(project: project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: and.id)[0].asBool == false, "And(1, 0) is false")
+        #expect(core.outPins(moduleId: not.id)[0].asBool == true, "Not(false) is true")
+        #expect(core.outPins(moduleId: nand.id)[0].asBool == false, "Nand(1, 1) is false")
     }
 
     @Test("Fields the importer does not interpret survive in the Maraflow extras")

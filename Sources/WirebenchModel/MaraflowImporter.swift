@@ -102,6 +102,7 @@ public struct MaraflowImporter {
                 let id = nextModuleId
                 nextModuleId += 1
                 let mapping = mappings[block.definitionId]
+                var placementMapping = mapping
                 let module: PCCModule
                 if block.definitionId == "Macro.MacroIn" {
                     module = macroInterface(block, kind: .inputs, id: id, page: caption)
@@ -109,6 +110,10 @@ public struct MaraflowImporter {
                     module = macroInterface(block, kind: .outputs, id: id, page: caption)
                 } else if block.definitionId.hasPrefix("Macro.User.") {
                     module = macroCall(block, id: id, page: caption)
+                } else if let definition = MaraflowCatalog.byId[block.definitionId],
+                          MaraflowCatalog.ported.contains(definition.id) {
+                    module = nativeModule(block, definition: definition, id: id, page: caption)
+                    placementMapping = nil
                 } else if let mapping, BlockTypeCatalog.info(forBlockName: mapping.target) != nil {
                     module = mappedModule(block, mapping: mapping, id: id, page: caption,
                                           approximated: &approximated)
@@ -117,7 +122,7 @@ public struct MaraflowImporter {
                                                unsupported: &unsupported)
                 }
                 project.modules.append(module)
-                placed[block.id] = Placed(moduleId: id, mapping: mapping)
+                placed[block.id] = Placed(moduleId: id, mapping: placementMapping)
                 importedBlocks += 1
             }
 
@@ -232,6 +237,26 @@ public struct MaraflowImporter {
             module.inPins[index].value = value
         }
         if let note = mapping.note { approximated[note, default: 0] += 1 }
+        return module
+    }
+
+    /// A native Maraflow block: exact definition pins, no approximation through a Dirigo type.
+    private static func nativeModule(_ block: MaraflowBlock, definition: MaraflowDefinition,
+                                     id: Int, page: String) -> PCCModule {
+        var module = BlockFactory.makeModule(guid: definition.guid, id: id, name: block.name,
+                                             x: Double(block.gridX * 32), y: Double(block.gridY * 32),
+                                             order: block.order, threadId: block.threadId, page: page)
+        module.rawAttributes["MARAFLOW_DEF"] = definition.id
+        module.rawAttributes["MARAFLOW_TYPE"] = block.typeName
+        module.rawAttributes["MARAFLOW_ID"] = block.id
+        for (index, pin) in block.inputs.enumerated() where index < module.inPins.count {
+            module.inPins[index].value = value(for: pin)
+            if !pin.short.isEmpty { module.inPins[index].name = pin.short }
+        }
+        for (index, pin) in block.outputs.enumerated() where index < module.outPins.count {
+            module.outPins[index].value = value(for: pin)
+            if !pin.short.isEmpty { module.outPins[index].name = pin.short }
+        }
         return module
     }
 

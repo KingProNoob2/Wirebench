@@ -14,6 +14,7 @@
 //
 
 #include "WirebenchSimCxx.h"
+#include "MaraflowVariants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1004,6 +1005,51 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
             m.outPins[0] = int32Value(ordinal);
             return;
         }
+        case WIREBENCH_BLOCK_MARAFLOW: {
+            if (m.inPins.empty() || !asBool(m.inPins[0])) return;   /* En gate; outputs hold when low */
+            switch (m.variant) {
+                case MARAFLOW_Bool_And:
+                case MARAFLOW_Bool_Nand:
+                case MARAFLOW_Bool_Or:
+                case MARAFLOW_Bool_Nor:
+                case MARAFLOW_Bool_Xor:
+                case MARAFLOW_Bool_Xnor: {
+                    bool result = (m.variant == MARAFLOW_Bool_And || m.variant == MARAFLOW_Bool_Nand);
+                    for (size_t i = 1; i < m.inPins.size(); ++i) {
+                        const bool bit = asBool(m.inPins[i]);
+                        if (m.variant == MARAFLOW_Bool_And || m.variant == MARAFLOW_Bool_Nand) result = result && bit;
+                        else if (m.variant == MARAFLOW_Bool_Or || m.variant == MARAFLOW_Bool_Nor) result = result || bit;
+                        else result = result != bit;
+                    }
+                    if (m.variant == MARAFLOW_Bool_Nand || m.variant == MARAFLOW_Bool_Nor
+                        || m.variant == MARAFLOW_Bool_Xnor) result = !result;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(result);
+                    return;
+                }
+                case MARAFLOW_Bool_Not: {
+                    const bool value = m.inPins.size() > 1 ? asBool(m.inPins[1]) : false;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(!value);
+                    return;
+                }
+                case MARAFLOW_Bool_RS:
+                case MARAFLOW_Bool_SR: {
+                    const bool set = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const bool reset = m.inPins.size() > 2 && asBool(m.inPins[2]);
+                    if (m.variant == MARAFLOW_Bool_RS) {
+                        if (reset) m.flagA = false;
+                        else if (set) m.flagA = true;
+                    } else {
+                        if (set) m.flagA = true;
+                        else if (reset) m.flagA = false;
+                    }
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(m.flagA);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(!m.flagA);
+                    return;
+                }
+                default:
+                    return;   /* not ported yet: hold the outputs */
+            }
+        }
         case WIREBENCH_BLOCK_IF:
             m.outPins[0] = m.inPins.empty() ? boolean(true) : m.inPins[0];
             return;
@@ -1112,6 +1158,10 @@ void resetModule(Module &m) {
         case WIREBENCH_BLOCK_SWITCH:
             /* `ISwitchBlock.reset`: a zero of the switch's own element type. */
             if (!m.outPins.empty()) m.outPins[0] = m.variant == 1 ? floatValue(0) : int32Value(0);
+            return;
+        case WIREBENCH_BLOCK_MARAFLOW:
+            m.flagA = false;
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             return;
         case WIREBENCH_BLOCK_SYSTEMCMD:
         case WIREBENCH_BLOCK_INRANGE:

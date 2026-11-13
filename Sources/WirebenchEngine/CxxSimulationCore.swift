@@ -32,6 +32,9 @@ public final class CxxSimulationCore {
     /// one unported block stops wires it carries from moving and would make the *ported* blocks look
     /// wrong too. `isFullyPorted` is the check for that.
     public static func kind(forGUID guid: UUID) -> WirebenchBlockKind? {
+        if let definition = MaraflowCatalog.definition(forGuid: guid) {
+            return MaraflowCatalog.ported.contains(definition.id) ? WIREBENCH_BLOCK_MARAFLOW : nil
+        }
         switch BlockTypeCatalog.info(forGuid: guid)?.delphiClass {
         case "TMNot": return WIREBENCH_BLOCK_NOT
         case "TMAnd": return WIREBENCH_BLOCK_AND
@@ -151,6 +154,9 @@ public final class CxxSimulationCore {
                               inCount: Int, outCount: Int) -> (variant: Int32, config: [Int64]) {
         let blockName = BlockTypeCatalog.info(forGuid: mod.guid)?.blockName ?? ""
         switch kind {
+        case WIREBENCH_BLOCK_MARAFLOW:
+            let index = MaraflowCatalog.all.firstIndex { $0.guid == mod.guid } ?? 0
+            return (Int32(index), [])
         case WIREBENCH_BLOCK_RS:
             let setPriority = mod.rawAttributes["PRIORITY"]?.uppercased() == "S"
                 || mod.rawAttributes["RS_PRIORITY"]?.uppercased() == "S"

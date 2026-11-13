@@ -319,7 +319,7 @@ public enum PinTemplateCatalog {
     }()
 
     public static func template(forGuid guid: UUID) -> BlockPinTemplate? {
-        byGuid[guid]
+        byGuid[guid] ?? MaraflowCatalog.template(forGuid: guid)
     }
 
     public static var count: Int { byGuid.count }

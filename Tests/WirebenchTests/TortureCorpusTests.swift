@@ -113,6 +113,8 @@ struct TortureCorpusTests {
         var failures: [String] = []
         var checked = 0
         for info in BlockTypeCatalog.all {
+            // Native Maraflow blocks have no Swift twin; their semantics are covered by MaraflowImportTests.
+            if MaraflowCatalog.definition(forGuid: info.guid) != nil { continue }
             guard CxxSimulationCore.kind(forGUID: info.guid) != nil else { continue }
             var project = PCCProject(name: info.blockName)
             project.pages = [ProjectPage(caption: "main")]

@@ -94,15 +94,15 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 
 | Maraflow definition | Wirebench | Note |
 |---|---|---|
-| `Bool.And` | `And` |  |
-| `Bool.Nand` | `And` | output inverted at the consumer |
-| `Bool.Or` | `Or` |  |
-| `Bool.Nor` | `Or` | output inverted |
-| `Bool.Xor` | `Xor` |  |
-| `Bool.Xnor` | `Xor` | output inverted |
-| `Bool.Not` | `Not` |  |
-| `Bool.RS` | `RS` |  |
-| `Bool.SR` | `RS` | reset-dominant difference noted |
+| `Bool.And` | native | exact Maraflow pins |
+| `Bool.Nand` | native | exact Maraflow pins |
+| `Bool.Or` | native | exact Maraflow pins |
+| `Bool.Nor` | native | exact Maraflow pins |
+| `Bool.Xor` | native | exact Maraflow pins |
+| `Bool.Xnor` | native | exact Maraflow pins |
+| `Bool.Not` | native | exact Maraflow pins |
+| `Bool.RS` | native | exact Maraflow pins |
+| `Bool.SR` | native | exact Maraflow pins |
 | `Math.Add` | `IAdd` |  |
 | `Math.Sub` | `ISub` |  |
 | `Math.Mul` | `IMul` |  |
@@ -190,3 +190,6 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Ladder.Coil.ANALOG` | inert |  |
 
 Counts: 54 mapped, 40 inert placeholders.
+
+The **Bool** group now imports as native `MaraflowBlock` entries (deterministic UUID v5, exact pins, C++ semantics), not
+as Dirigo approximations; the remaining definitions move over stage by stage.

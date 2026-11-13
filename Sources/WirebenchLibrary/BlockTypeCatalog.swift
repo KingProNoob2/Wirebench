@@ -50,7 +50,7 @@ public enum BlockTypeCatalog {
         return map
     }()
 
-    public static let all: [BlockTypeInfo] = [
+    private static let base: [BlockTypeInfo] = [
         BlockTypeInfo(guid: UUID(uuidString: "CBD854FF-873C-46DD-81E4-249A7D5FFF43")!, blockName: "AdvCounter", delphiClass: "TMAdvCounter", category: "", summary: "Increases Y by Step on Trigger 0->1 event", isImplemented: true),
         BlockTypeInfo(guid: UUID(uuidString: "4D83C589-DE5F-4FB1-9222-F5836722340B")!, blockName: "Case", delphiClass: "TMCaseModule", category: "", summary: "", isImplemented: true),
         BlockTypeInfo(guid: UUID(uuidString: "1566429F-BDAE-4DF8-B85C-FA43B9A816A2")!, blockName: "Ext", delphiClass: "TMExt", category: "", summary: "Y = Ext(X, B, Size)", isImplemented: true),
@@ -200,6 +200,10 @@ public enum BlockTypeCatalog {
         BlockTypeInfo(guid: UUID(uuidString: "09904072-D3B3-5455-932F-B18CA530EA60")!, blockName: "Unresolved", delphiClass: "-", category: "Reimplementation", summary: "Swift-only block; no Dirigo counterpart", isImplemented: true),
     ]
 
+    /// All recovered Dirigo types, then the synthetic Maraflow types. A Maraflow name that collides with a Dirigo
+    /// one stays reachable by GUID; `byName` keeps the Dirigo entry so existing lookups do not change.
+    public static let all: [BlockTypeInfo] = base + MaraflowCatalog.infos
+
     /// Registry keyed by block-type GUID.
     public static let byGuid: [UUID: BlockTypeInfo] = {
         var map: [UUID: BlockTypeInfo] = [:]
@@ -210,7 +214,7 @@ public enum BlockTypeCatalog {
     /// Registry keyed by lowercased Dirigo block name.
     public static let byName: [String: BlockTypeInfo] = {
         var map: [String: BlockTypeInfo] = [:]
-        for info in all { map[info.blockName.lowercased()] = info }
+        for info in all where map[info.blockName.lowercased()] == nil { map[info.blockName.lowercased()] = info }
         return map
     }()
 

@@ -168,7 +168,10 @@ typedef enum {
     WIREBENCH_BLOCK_CREATEARRAY = 71,   /* CreateArrayBlock */
     WIREBENCH_BLOCK_READARRAY = 72,     /* ReadArrayBlock; variant 1 = Float elements */
     WIREBENCH_BLOCK_WRITEARRAY = 73,    /* WriteArrayBlock; variant 1 = Float elements */
-    WIREBENCH_BLOCK_SETIDX = 74         /* SetIdxBlock: like Set, but through the one P pin `Idx` names */
+    WIREBENCH_BLOCK_SETIDX = 74,        /* SetIdxBlock: like Set, but through the one P pin `Idx` names */
+    /* Synthetic blocks imported from Maraflow. `variant` is the index in Swift's `MaraflowCatalog.all`; the core
+       implements the semantics that have been ported so far, and the rest hold their pins. */
+    WIREBENCH_BLOCK_MARAFLOW = 75
 } WirebenchBlockKind;
 
 /* `variant` for `WIREBENCH_BLOCK_LONGMATH`, in `LongMathOperation` order. */

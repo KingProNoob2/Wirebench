@@ -44,6 +44,7 @@
 		2D080FF209003C40E7834A8C /* MaraflowImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C712014446B3DA5608BF7DF /* MaraflowImporter.swift */; };
 		2D0A670B5FA550BE69CEF091 /* libWirebenchCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 52EE8F91AB776FE144249CEF /* libWirebenchCore.a */; };
 		2E9E36851742E8AE7301519F /* AdvancedMathBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A109573CFED3D768E77D5C10 /* AdvancedMathBlocks.swift */; };
+		300DBC4DE79A8A5D31D67485 /* MaraflowVariants.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = BF36C83AEB1002D48BBBF8C9 /* MaraflowVariants.h */; };
 		304BC514F0C7E589A3342B10 /* libWirebenchLibrary.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 198627A3D8D9CF17A6BBEE51 /* libWirebenchLibrary.a */; };
 		311FCE3547DBCCD25FF95D7B /* SecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4CE7E9DC87C7B360E4C94A /* SecretStore.swift */; };
 		31334C82BF06A56FB0DF6BD4 /* WirebenchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5EE4E61E054E304A3B715A /* WirebenchTests.swift */; };
@@ -52,6 +53,7 @@
 		32E95F58ACF62766F32C24A2 /* libWirebenchSimCxx.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2168034C145775113407163A /* libWirebenchSimCxx.a */; };
 		36035D76DA00F4D7F899EA4C /* WireRouteCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD21528910245E52D6194E93 /* WireRouteCache.swift */; };
 		36BE1F8C9351E289033BF549 /* BlockDeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A48217DFBD2BABE8499FADE5 /* BlockDeletionTests.swift */; };
+		37629A665721EDB434989D6B /* MaraflowDefinitions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 382AAB22B1DA8D4A164BFB1B /* MaraflowDefinitions.swift */; };
 		3781B5F52E8A286CC13C9DB7 /* WirebenchSimCxx.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 18F0FC4DAE0F7C17361B30FF /* WirebenchSimCxx.h */; };
 		37D103DBA44B94C90FBB1BF4 /* MacroInterface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 360D18BB6847D60CE83BF619 /* MacroInterface.swift */; };
 		37D3F1C9D381AAEC1577E5A5 /* GridSnap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6997279DC32369691803EE6D /* GridSnap.swift */; };
@@ -507,6 +509,7 @@
 			dstPath = "include/$(PRODUCT_NAME)";
 			dstSubfolderSpec = 16;
 			files = (
+				300DBC4DE79A8A5D31D67485 /* MaraflowVariants.h in CopyFiles */,
 				3781B5F52E8A286CC13C9DB7 /* WirebenchSimCxx.h in CopyFiles */,
 				7308C0E2A431CAC514FD1016 /* module.modulemap in CopyFiles */,
 			);
@@ -577,6 +580,7 @@
 		360D18BB6847D60CE83BF619 /* MacroInterface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroInterface.swift; sourceTree = "<group>"; };
 		36C9B99E7B25B343F04EE743 /* ClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardTests.swift; sourceTree = "<group>"; };
 		37A64F97A31462D0BC95B2DA /* ModuleConfigDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleConfigDialog.swift; sourceTree = "<group>"; };
+		382AAB22B1DA8D4A164BFB1B /* MaraflowDefinitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowDefinitions.swift; sourceTree = "<group>"; };
 		384871C81AA5AF1DEE66012B /* ConstructContainerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConstructContainerTests.swift; sourceTree = "<group>"; };
 		38DA5B3CDD515265E062DBCB /* SerializerCoordinateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SerializerCoordinateTests.swift; sourceTree = "<group>"; };
 		38F7D9364C1ED5F6A7E6ACFE /* GraphicColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphicColor.swift; sourceTree = "<group>"; };
@@ -697,6 +701,7 @@
 		BD0D991A05E275C44A68FBD0 /* BoolVarBlockTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoolVarBlockTests.swift; sourceTree = "<group>"; };
 		BD2A56724BE89B00C9DE779B /* ParameterPinTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParameterPinTests.swift; sourceTree = "<group>"; };
 		BDE2CB0C5E44035C90E0B1AE /* InputCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputCountTests.swift; sourceTree = "<group>"; };
+		BF36C83AEB1002D48BBBF8C9 /* MaraflowVariants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MaraflowVariants.h; sourceTree = "<group>"; };
 		BFA311406500190793496159 /* BlockPaletteSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockPaletteSearch.swift; sourceTree = "<group>"; };
 		C095252F97C7BDA83DC9D5AD /* PinZeroGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinZeroGateTests.swift; sourceTree = "<group>"; };
 		C14CC87FBF096F88C3CF8B1D /* LogicBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogicBlocks.swift; sourceTree = "<group>"; };
@@ -1083,6 +1088,7 @@
 				B8C76ED8305581E49657006D /* FunctionBlock.swift */,
 				C14CC87FBF096F88C3CF8B1D /* LogicBlocks.swift */,
 				7553F2F8668DC45461D9D781 /* LongAndFloatBlocks.swift */,
+				382AAB22B1DA8D4A164BFB1B /* MaraflowDefinitions.swift */,
 				27146F39436C6210A99D6E3B /* MathBlocks.swift */,
 				D9F18D07A7853D93DC7E538E /* ModulePinCatalog.swift */,
 				24F07E8637A09E92A56CB0FB /* OtherBlocks.swift */,
@@ -1107,6 +1113,7 @@
 		B36F0EF7B2C70F6DCBDF4F76 /* WirebenchSimCxx */ = {
 			isa = PBXGroup;
 			children = (
+				BF36C83AEB1002D48BBBF8C9 /* MaraflowVariants.h */,
 				9F62809D6F2A54B3D0DCD7D7 /* WirebenchSimCore.cpp */,
 				6BBF0B72751D8CB45C4B53E6 /* include */,
 			);
@@ -1173,7 +1180,7 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_8C63EC68-F501-4511-BA2A-749EECE050E0" /* Wirebench */ = {
+		"TEMP_C90B10B2-8153-4FD2-A84F-3DA45A429D0F" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
 				1A521C0652DDE7C0AFB37D41 /* Release.xcconfig */,
@@ -1855,6 +1862,7 @@
 				51AC856A5AE8F68874886A6D /* FunctionBlock.swift in Sources */,
 				212D4D10F6C76F983D98BCDE /* LogicBlocks.swift in Sources */,
 				687EC536D6F772F751E43FA1 /* LongAndFloatBlocks.swift in Sources */,
+				37629A665721EDB434989D6B /* MaraflowDefinitions.swift in Sources */,
 				866F819F9F90E1E11AFB1801 /* MathBlocks.swift in Sources */,
 				65CC7B59D85F57E822B416D6 /* ModulePinCatalog.swift in Sources */,
 				D4729C7144F14861260964C3 /* OtherBlocks.swift in Sources */,
