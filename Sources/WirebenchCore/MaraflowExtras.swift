@@ -44,6 +44,29 @@ public struct MaraflowExtras: Codable, Sendable, Equatable {
         public let netNames: [String]
     }
 
+    public struct Graphic: Sendable, Equatable {
+        public let pageIndex: Int
+        public let kind: String
+        public let gridX: Int
+        public let gridY: Int
+        public let gridW: Int
+        public let gridH: Int
+        public let strokeRgb: Int
+        public let fillRgb: Int
+        public let filled: Bool
+        public let strokeWidth: Int
+        public let dashed: Bool
+        public let ngonSides: Int
+        public let text: String
+        public let fontSize: Int
+        public let boundTargetPin: String
+        public let toggleButton: Bool
+        public let indicatorEnabled: Bool
+        public let indicatorPin: String
+        public let indicatorActiveColor: Int
+        public let indicatorInactiveColor: Int
+    }
+
     public struct PageSummary: Sendable, Equatable {
         public let name: String
         public let language: String
@@ -104,7 +127,44 @@ public struct MaraflowExtras: Codable, Sendable, Equatable {
         }
     }
 
-    public var graphicCount: Int { pageSummaries.reduce(0) { $0 + $1.graphics } }
+    /// Every preserved graphic object, with its page index and all rendering fields.
+    public var graphics: [Graphic] {
+        var result: [Graphic] = []
+        for page in 0..<max(0, integer("project.pageCount")) {
+            for index in 0..<max(0, integer("page.\(page).graphicCount")) {
+                let prefix = "page.\(page).graphic.\(index)."
+                result.append(Graphic(
+                    pageIndex: page,
+                    kind: properties[prefix + "kind"] ?? "RECTANGLE",
+                    gridX: integer(prefix + "gridX", 5),
+                    gridY: integer(prefix + "gridY", 5),
+                    gridW: integer(prefix + "gridW", 6),
+                    gridH: integer(prefix + "gridH", 4),
+                    strokeRgb: integer(prefix + "strokeRgb", -13421773),
+                    fillRgb: integer(prefix + "fillRgb", -985864),
+                    filled: flag(prefix + "filled"),
+                    strokeWidth: integer(prefix + "strokeWidth", 1),
+                    dashed: flag(prefix + "dashed"),
+                    ngonSides: integer(prefix + "ngonSides", 6),
+                    text: properties[prefix + "text"] ?? "",
+                    fontSize: integer(prefix + "fontSize", 11),
+                    boundTargetPin: properties[prefix + "boundTargetPin"] ?? "",
+                    toggleButton: flag(prefix + "toggleButton"),
+                    indicatorEnabled: flag(prefix + "indicatorEnabled"),
+                    indicatorPin: properties[prefix + "indicatorPin"] ?? "",
+                    indicatorActiveColor: integer(prefix + "indicatorActiveColor", -1754827),
+                    indicatorInactiveColor: integer(prefix + "indicatorInactiveColor", -985864)
+                ))
+            }
+        }
+        return result
+    }
+
+    public func graphics(onPageIndex index: Int) -> [Graphic] {
+        graphics.filter { $0.pageIndex == index }
+    }
+
+    public var graphicCount: Int { graphics.count }
     public var wireCount: Int { pageSummaries.reduce(0) { $0 + $1.wires } }
 
     /// Distinct non-empty bus bundle ids on wires.

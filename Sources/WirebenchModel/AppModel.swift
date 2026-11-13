@@ -1572,6 +1572,55 @@ public final class AppModel: @unchecked Sendable {
         return CxxSimulationCore(project: project, profile: profile, profileScheduling: true)
     }
 
+    /// A Maraflow graphic binding target (`BlockName.PinName`), resolved to a module pin.
+    public struct MaraflowPinBinding: Sendable, Equatable {
+        public let moduleId: Int
+        public let pinIndex: Int
+        public let isOutput: Bool
+    }
+
+    /// Resolves a Maraflow `Block.Pin` reference against this page's modules. Inputs are tried first for buttons;
+    /// `output` selects the output table for indicators.
+    public func maraflowBinding(_ target: String, output: Bool) -> MaraflowPinBinding? {
+        guard let dot = target.lastIndex(of: ".") else { return nil }
+        let blockName = String(target[..<dot])
+        let pinName = String(target[target.index(after: dot)...])
+        guard let module = project?.modules.first(where: { $0.name == blockName }) else { return nil }
+        let count = output ? module.outPins.count : module.inPins.count
+        for index in 0..<count {
+            let candidates = output
+                ? [ModulePinCatalog.outputPinLabel(for: module, index: index),
+                   ModulePinCatalog.outputPinFullName(for: module, index: index),
+                   module.outPins[index].name ?? ""]
+                : [ModulePinCatalog.inputPinLabel(for: module, index: index),
+                   ModulePinCatalog.inputPinFullName(for: module, index: index),
+                   module.inPins[index].name ?? ""]
+            if candidates.contains(where: { $0.caseInsensitiveCompare(pinName) == .orderedSame }) {
+                return MaraflowPinBinding(moduleId: module.id, pinIndex: index, isOutput: output)
+            }
+        }
+        return nil
+    }
+
+    /// The live boolean of a Maraflow indicator/output binding.
+    public func maraflowBooleanValue(_ target: String) -> Bool {
+        guard let binding = maraflowBinding(target, output: true),
+              let node = getNode(id: binding.moduleId),
+              binding.pinIndex < node.block.outPins.count else { return false }
+        return node.block.outPins[binding.pinIndex].asBool
+    }
+
+    /// A Maraflow visual button writes its bound input pin. A toggle button flips it; a momentary one presses and
+    /// releases over two scans through the existing input path.
+    public func pressMaraflowBinding(_ target: String) {
+        guard let binding = maraflowBinding(target, output: false),
+              let node = getNode(id: binding.moduleId),
+              binding.pinIndex < node.block.inPins.count else { return }
+        let current = node.block.inPins[binding.pinIndex]
+        setModuleInput(moduleId: binding.moduleId, pinIndex: binding.pinIndex,
+                       value: .bool(!current.asBool))
+    }
+
     /// A module's live pins, read out of the core.
     public func getNode(id: Int) -> RuntimeNode? {
         guard let engine, engine.contains(moduleId: id),

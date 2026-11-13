@@ -84,8 +84,13 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
   (active-low/high), build the trip mask, latch when manual reset is required, and the E-Stop block reports
   `Safe`/`Trip`/`Src`. Mode 1 forces `DO0…15`, `AO0…7` and `PWM0…7` to zero and stops the thread; mode 2 runs only the
   dedicated/`!` E-Stop pages while normal pages are skipped.
-- **Canvas:** graphic objects map to native shapes/text (rectangle, ellipse, line, text), scaled from Maraflow's grid
-  to 32-point cells. Other graphic kinds are drawn as rectangles; their exact kind stays in the preserved properties.
+- **Canvas:** graphic objects are drawn by a dedicated Maraflow renderer rather than flattened to Dirigo graphics:
+  signed grid boxes (negative width/height and zero-height lines are respected), line, rectangle, rounded rectangle,
+  circle, ellipse, triangle, pentagon/hexagon/octagon, custom n-gon, arc, sector, text, and visual buttons. Colours,
+  stroke width, dashed strokes, fills and font size come from the file. Shape `text` is a name, not a caption, so only
+  TEXT and VISUAL_BUTTON objects draw it. Indicators fill with their active/inactive colours from the bound output
+  pin (live), and visual buttons toggle their bound input pin. These objects are separate from Dirigo's native
+  `ProjectGraphic` shapes, which are untouched.
 - **Inspector:** with nothing selected, the inspector shows the Maraflow target/language, symbolic tags, E-Stop mode
   and rules, per-page language/block/rung counts, graphics, bus bundles and hidden-wire counts.
 - **CLI:** `wirebench-cli info` prints the same metadata summary next to the module/page counts.

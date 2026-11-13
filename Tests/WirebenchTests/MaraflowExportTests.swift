@@ -51,7 +51,7 @@ struct MaraflowExportTests {
         #expect(again.project.maraflow?.properties["project.tag.0.name"] == "Speed")
         #expect(again.project.maraflow?.properties["project.estop.rule.0.channel"] == "DI3")
         #expect(again.project.maraflow?.properties["page.0.graphic.0.text"] == "Pump")
-        #expect(again.project.graphics.count == 1)
+        #expect(again.project.maraflow?.graphics.count == 1)
     }
 
     @Test("ST and ladder pages keep their source/rungs")

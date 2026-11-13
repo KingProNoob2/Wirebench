@@ -227,11 +227,12 @@ struct MaraflowImportTests {
         #expect(extras.buses.first?.wireCount == 1)
         #expect(extras.hiddenWireCount == 1)
         #expect(extras.pageSummaries.first?.language == "FBD")
-        #expect(outcome.project.graphics.count == 1, "the graphic is visible on the canvas")
-        #expect(outcome.project.graphics.first?.text == "Pump")
+        #expect(extras.graphics.count == 1, "the graphic is drawn natively from the extras")
+        #expect(extras.graphics.first?.kind == "RECTANGLE")
+        #expect(extras.graphics.first?.gridX == 4)
         let decoded = try WirebenchDocument.decode(WirebenchDocument.encode(outcome.project))
         #expect(decoded.maraflow == extras)
-        #expect(decoded.graphics == outcome.project.graphics)
+        #expect(decoded.maraflow?.graphics.first?.gridW == 6)
     }
 
     @Test("The app opens .mfl as an imported project and saves it as .wbp")

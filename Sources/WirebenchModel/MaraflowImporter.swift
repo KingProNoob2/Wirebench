@@ -130,8 +130,7 @@ public struct MaraflowImporter {
                 notes.append("Page '\(caption)': \(page.rungs.count) ladder rung(s) run through the native ladder evaluator.")
             }
             if !page.graphics.isEmpty {
-                let count = importGraphics(page.graphics, page: caption, project: &project)
-                notes.append("Page '\(caption)': imported \(count) graphic object(s).")
+                notes.append("Page '\(caption)': \(page.graphics.count) Maraflow graphic object(s) drawn natively.")
             }
             if page.isMacro {
                 notes.append("Macro page '\(caption)' is imported as a macro sheet.")
@@ -322,49 +321,6 @@ public struct MaraflowImporter {
                                                       ("MARAFLOW_TYPE", block.typeName),
                                                       ("MARAFLOW_ID", block.id)]),
                          rawChildren: [])
-    }
-
-    /// Map Maraflow's graphic objects onto the native shape/text model so they appear on the canvas.
-    private static func importGraphics(_ graphics: [MaraflowGraphic], page: String,
-                                       project: inout PCCProject) -> Int {
-        func colour(_ rgb: Int) -> String {
-            String(format: "#%06X", rgb & 0xFFFFFF)
-        }
-        var count = 0
-        for graphic in graphics {
-            let x = Double(graphic.gridX * 32)
-            let y = Double(graphic.gridY * 32)
-            let width = Double(max(1, graphic.gridW) * 32)
-            let height = Double(max(1, graphic.gridH) * 32)
-            let kind = graphic.kind.uppercased()
-            if kind.contains("TEXT") {
-                project.graphics.append(ProjectGraphic(type: 4, page: page, text: graphic.text,
-                                                       nodes: [RoutePoint(x: x, y: y)],
-                                                       penColor: colour(graphic.strokeRgb),
-                                                       fontName: "Arial", fontSize: graphic.fontSize,
-                                                       fontColor: colour(graphic.strokeRgb)))
-            } else if kind.contains("LINE") {
-                project.graphics.append(ProjectGraphic(type: 1, page: page,
-                                                       nodes: [RoutePoint(x: x, y: y),
-                                                               RoutePoint(x: x + width, y: y + height)],
-                                                       penColor: colour(graphic.strokeRgb),
-                                                       penStyle: graphic.dashed ? 1 : 0,
-                                                       penWidth: graphic.strokeWidth))
-            } else {
-                let ellipse = kind.contains("ELLIPSE") || kind.contains("CIRCLE")
-                project.graphics.append(ProjectGraphic(
-                    type: ellipse ? 3 : 2, page: page,
-                    text: graphic.text.isEmpty ? nil : graphic.text,
-                    nodes: [RoutePoint(x: x, y: y), RoutePoint(x: x + width, y: y + height)],
-                    penColor: colour(graphic.strokeRgb),
-                    penStyle: graphic.dashed ? 1 : 0,
-                    penWidth: graphic.strokeWidth,
-                    brushColor: graphic.filled ? colour(graphic.fillRgb) : nil,
-                    brushStyle: graphic.filled ? 1 : 0))
-            }
-            count += 1
-        }
-        return count
     }
 
     /// One ladder page's rungs for one thread become one no-pin native block. Rungs on other threads are in their

@@ -221,6 +221,17 @@ public struct CanvasView: View {
             maxX = max(maxX, module.x + Double(ModuleCardView.cardWidth(for: module)))
             maxY = max(maxY, module.y + Double(ModuleCardView.cardHeight(for: module)))
         }
+        if let extras = project.maraflow {
+            let index = project.pages.firstIndex { $0.caption == model.selectedPage } ?? 0
+            for graphic in extras.graphics(onPageIndex: index) {
+                let x1 = Double(graphic.gridX) * 32
+                let y1 = Double(graphic.gridY) * 32
+                let x2 = Double(graphic.gridX + graphic.gridW) * 32
+                let y2 = Double(graphic.gridY + graphic.gridH) * 32
+                maxX = max(maxX, max(x1, x2))
+                maxY = max(maxY, max(y1, y2))
+            }
+        }
         for graphic in project.graphics where graphic.page == model.selectedPage {
             for node in graphic.nodes {
                 maxX = max(maxX, node.x)
@@ -244,6 +255,9 @@ public struct CanvasView: View {
 
         ZStack(alignment: .topLeading) {
             containerRegions(pageModules)
+
+            MaraflowGraphicsLayer(model: model)
+                .allowsHitTesting(true)
 
             // Both layers take plain values and are `Equatable`, so on a simulation tick SwiftUI
             // only re-renders the ones whose inputs actually changed.
