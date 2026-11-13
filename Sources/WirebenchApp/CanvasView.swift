@@ -11,6 +11,10 @@ public struct CanvasView: View {
     @State private var dragOffsets: [Int: CGSize] = [:]
     /// The wire currently being dragged, if any. `nil` means no wiring in progress.
     @State private var pendingWire: PendingWire?
+    /// Where the Maraflow page-runtime card has been dragged to, per page. It is a floating explanation, not a block,
+    /// so it can be moved out of the way of the sheet.
+    @State private var pageRuntimeOffsets: [String: CGSize] = [:]
+    @State private var pageRuntimeDragOrigin: CGSize?
     /// True while the current card drag is drawing a wire rather than moving the card. Decided once,
     /// when the drag starts, so a gesture cannot change its mind halfway through.
     @State private var isDrawingWire = false
@@ -267,8 +271,20 @@ public struct CanvasView: View {
             // container buys nothing here.
             moduleLayer(pageModules)
             if let runtime = pageRuntimeInfo(project) {
+                let offset = pageRuntimeOffsets[model.selectedPage] ?? .zero
                 MaraflowPageRuntimeCard(kind: runtime.kind, detail: runtime.detail, code: runtime.code)
-                    .position(x: 300, y: 190)
+                    .position(x: 300 + offset.width, y: 190 + offset.height)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                let origin = pageRuntimeDragOrigin ?? offset
+                                if pageRuntimeDragOrigin == nil { pageRuntimeDragOrigin = offset }
+                                pageRuntimeOffsets[model.selectedPage] = CGSize(
+                                    width: origin.width + value.translation.width,
+                                    height: origin.height + value.translation.height)
+                            }
+                            .onEnded { _ in pageRuntimeDragOrigin = nil }
+                    )
             }
         }
     }

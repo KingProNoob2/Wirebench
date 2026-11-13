@@ -27,6 +27,7 @@ struct MaraflowPageRuntimeCard: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.secondary.opacity(0.2)))
         .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 14))
         .help("This page runs its \(kind.lowercased()) in the simulation; it is not a block on the sheet.")
     }
 }
