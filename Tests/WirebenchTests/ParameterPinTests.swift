@@ -51,6 +51,6 @@ struct ParameterPinTests {
         let project = try #require(try model().project)
         let counter = try #require(project.modules.first { $0.name == "AdvCounter1" })
         let rows = max(counter.inPins.count + counter.paramPins.count, counter.outPins.count)
-        #expect(CardGeometry.cardHeight(for: counter) == CardGeometry.Metrics.headerHeight + CGFloat(rows) * CardGeometry.pinPitch + 8)
+        #expect(CardGeometry.cardHeight(for: counter) == CardGeometry.gridAligned(CardGeometry.Metrics.headerHeight + CGFloat(rows) * CardGeometry.pinPitch + 8))
     }
 }

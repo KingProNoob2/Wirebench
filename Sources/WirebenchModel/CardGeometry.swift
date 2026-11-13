@@ -148,7 +148,19 @@ public enum CardGeometry {
         }
     }
 
+    /// A block's card size is a whole number of grid cells, so its edges sit on the sheet's dots whatever the content
+    /// needs. The measured size is rounded up; the extra room is padding at the right/bottom.
+    nonisolated public static func gridAligned(_ value: CGFloat) -> CGFloat {
+        let grid = CGFloat(GridSnap.step)
+        return max(grid, (value / grid).rounded(.up) * grid)
+    }
+
     nonisolated public static func cardWidth(for module: PCCModule) -> CGFloat {
+        gridAligned(measuredWidth(for: module))
+    }
+
+    /// The width the content asks for, before the grid rounds it up. Exports to Dirigo use this, not the padded width.
+    nonisolated static func measuredWidth(for module: PCCModule) -> CGFloat {
         if let window = segmentWindow(for: module) { return window.maxX + segmentMargin }
         return max(defaultWidth, widthForRows(of: module))
     }
@@ -178,7 +190,7 @@ public enum CardGeometry {
     }
 
     nonisolated public static func cardHeight(for module: PCCModule) -> CGFloat {
-        cardHeight(for: module, pitch: pinPitch, macroCallerSpace: macroCallerSpace)
+        gridAligned(cardHeight(for: module, pitch: pinPitch, macroCallerSpace: macroCallerSpace))
     }
 
     /// The size of a block in Dirigo itself, as this port assumes it: the SwiftUI card's, whatever pin pitch or width the frontend in use draws with. What

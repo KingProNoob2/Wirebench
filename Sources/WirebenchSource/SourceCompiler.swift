@@ -329,8 +329,8 @@ final class Emitter {
         let id = allocator.take()
         let module = BlockFactory.makeModule(guid: guid, id: id,
                                              name: BlockFactory.suggestedName(for: guid, existing: modules),
-                                             x: Double(40 + (placed % Self.columns) * 200),
-                                             y: Double(40 + (placed / Self.columns) * 150),
+                                             x: Double(32 + (placed % Self.columns) * 192),
+                                             y: Double(32 + (placed / Self.columns) * 256),
                                              order: order, threadId: thread, page: page)
         placed += 1
         order += 10
@@ -348,8 +348,8 @@ final class Emitter {
         module.order = ordered ? order : 0
         module.threadId = thread
         module.page = page
-        module.x = Double(40 + (placed % Self.columns) * 200)
-        module.y = Double(40 + (placed / Self.columns) * 150)
+        module.x = Double(32 + (placed % Self.columns) * 192)
+        module.y = Double(32 + (placed / Self.columns) * 256)
         if module.name.isEmpty {
             module.name = BlockFactory.suggestedName(for: module.guid, existing: modules)
         }
