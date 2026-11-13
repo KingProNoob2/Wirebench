@@ -365,6 +365,33 @@ public final class PCCSerializer: @unchecked Sendable {
             merge("FONT", ["NAME": g.fontName, "BOLD": g.fontBold.map { $0 ? "True" : "False" },
                            "ITALIC": g.fontItalic.map { $0 ? "True" : "False" }, "SIZE": g.fontSize.map(String.init),
                            "COLOR": g.fontColor])
+            let inputValues: [(String, String?)] = [
+                ("IN_MODULE_ID", g.inputModuleId.map(String.init)),
+                ("IN_PIN_ID", g.inputPinId.map(String.init)),
+                ("LOW", g.lowValue.map { String(coordinate($0)) }),
+                ("HIGH", g.highValue.map { String(coordinate($0)) }),
+                ("PEN_COLOR", g.activePenColor),
+                ("BRUSH_COLOR", g.activeBrushColor),
+            ]
+            if g.inputModuleId != nil || g.inputPinId != nil {
+                if let index = children.firstIndex(where: { $0.name == "INPUT" }) {
+                    // Update values in place so the attribute order Dirigo wrote is kept; only a key whose typed
+                    // value was cleared is removed.
+                    for (key, value) in inputValues {
+                        if let value {
+                            if children[index].attributes[key] != value { children[index].attributes[key] = value }
+                        } else {
+                            children[index].attributes.removeValue(forKey: key)
+                        }
+                    }
+                } else {
+                    var input = AttributeBag()
+                    for (key, value) in inputValues { if let value { input[key] = value } }
+                    children.append(RawXMLNode(name: "INPUT", attributes: input))
+                }
+            } else if let index = children.firstIndex(where: { $0.name == "INPUT" }) {
+                children.remove(at: index)
+            }
             return .node(name: "GRAPHICS", attrs: a.result, children: children.map { resolve($0) })
         }
 
@@ -401,7 +428,22 @@ public final class PCCSerializer: @unchecked Sendable {
             if let color = g.fontColor { fa.str("COLOR", color) }
             children.append(.leaf(name: "FONT", attrs: fa.result))
         }
+        if g.inputModuleId != nil || g.inputPinId != nil {
+            let input = inputElement(g)
+            children.append(input)
+        }
         return .node(name: "GRAPHICS", attrs: a.result, children: children)
+    }
+
+    private func inputElement(_ g: ProjectGraphic) -> XMLOut {
+        var a = Attrs()
+        if let module = g.inputModuleId { a.int("IN_MODULE_ID", module) }
+        if let pin = g.inputPinId { a.int("IN_PIN_ID", pin) }
+        if let low = g.lowValue { a.str("LOW", String(coordinate(low))) }
+        if let high = g.highValue { a.str("HIGH", String(coordinate(high))) }
+        if let pen = g.activePenColor { a.str("PEN_COLOR", pen) }
+        if let brush = g.activeBrushColor { a.str("BRUSH_COLOR", brush) }
+        return .leaf(name: "INPUT", attrs: a.result)
     }
 
     // MARK: - Rendering

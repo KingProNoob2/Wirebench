@@ -718,6 +718,55 @@ struct AnnotationInspector: View {
                     }
                 }
 
+                if graphic.objectKind != .text {
+                    InspectorCard(title: "Output binding") {
+                        Picker("Module", selection: bindingModule) {
+                            Text("None").tag(Int?.none)
+                            ForEach(pageModules, id: \.id) { module in
+                                Text(module.name).tag(Optional(module.id))
+                            }
+                        }
+                        Picker("Output pin", selection: bindingPin) {
+                            Text("None").tag(Int?.none)
+                            if let module = boundModule {
+                                ForEach(module.outPins.indices, id: \.self) { pin in
+                                    Text(ModulePinCatalog.outputPinLabel(for: module, index: pin))
+                                        .tag(Optional(pin))
+                                }
+                            }
+                        }
+                        .disabled(boundModule == nil)
+                        if boundModule != nil {
+                            Toggle("Custom threshold", isOn: customHigh)
+                            if graphic.highValue != nil {
+                                LabeledContent("Active at") {
+                                    TextField("High", value: highValue, format: .number)
+                                        .frame(width: 70)
+                                }
+                            }
+                            LabeledContent("Active pen") {
+                                ColorPicker("", selection: activePenColor, supportsOpacity: false).labelsHidden()
+                            }
+                            LabeledContent("Active brush") {
+                                ColorPicker("", selection: activeBrushColor, supportsOpacity: false).labelsHidden()
+                            }
+                            Button("Clear Connection", role: .destructive) {
+                                model.updateGraphic(at: index) {
+                                    $0.inputModuleId = nil
+                                    $0.inputPinId = nil
+                                }
+                            }
+                            Text("The object paints with the active colours while the connected output is above the threshold.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Connect an output to make this object a live indicator.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 if graphic.text != nil {
                     InspectorCard(title: "Text") {
                         InspectorRows(count: 5) { row in
@@ -754,6 +803,59 @@ struct AnnotationInspector: View {
 
     /// Writes the text field back. An empty string is refused by the model — the object would still be
     /// in the document but draw nothing — so the draft is dropped and the stored text reappears.
+    /// Modules on the object's page that could own the output it displays.
+    private var pageModules: [PCCModule] {
+        guard let project = model.project, let graphic else { return [] }
+        return project.modules.filter { $0.page == graphic.page && !BlockRole.isMaraflowPageRuntime($0) }
+    }
+
+    private var boundModule: PCCModule? {
+        guard let id = graphic?.inputModuleId else { return nil }
+        return pageModules.first { $0.id == id }
+    }
+
+    private var bindingModule: Binding<Int?> {
+        Binding(get: { graphic?.inputModuleId }, set: { newValue in
+            model.updateGraphic(at: index) { g in
+                g.inputModuleId = newValue
+                if let newValue, let module = model.project?.modules.first(where: { $0.id == newValue }),
+                   !module.outPins.isEmpty {
+                    g.inputPinId = 0
+                } else {
+                    g.inputPinId = nil
+                }
+            }
+        })
+    }
+
+    private var bindingPin: Binding<Int?> {
+        Binding(get: { graphic?.inputPinId }, set: { newValue in
+            model.updateGraphic(at: index) { $0.inputPinId = newValue }
+        })
+    }
+
+    private var customHigh: Binding<Bool> {
+        Binding(get: { graphic?.highValue != nil }, set: { on in
+            model.updateGraphic(at: index) { $0.highValue = on ? 1 : nil }
+        })
+    }
+
+    private var highValue: Binding<Double> {
+        Binding(get: { graphic?.highValue ?? 1 }, set: { value in
+            model.updateGraphic(at: index) { $0.highValue = value }
+        })
+    }
+
+    private var activePenColor: Binding<Color> {
+        Binding(get: { graphic.map { GraphicColor.activePen(of: $0) } ?? .primary },
+                set: { color in model.updateGraphic(at: index) { $0.activePenColor = GraphicColor.encode(color) } })
+    }
+
+    private var activeBrushColor: Binding<Color> {
+        Binding(get: { graphic.map { GraphicColor.activeBrush(of: $0) } ?? .red },
+                set: { color in model.updateGraphic(at: index) { $0.activeBrushColor = GraphicColor.encode(color) } })
+    }
+
     private func commitText() {
         guard let draft = textDraft else { return }
         model.updateAnnotationText(at: index, text: draft)
