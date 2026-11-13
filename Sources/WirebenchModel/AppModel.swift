@@ -41,6 +41,12 @@ public struct RuntimeNode: Sendable {
 /// What kind of block a module is, from its type GUID — the question views used to answer by casting the
 /// Swift block object (`node.block is IntVarBlock`).
 public enum BlockRole {
+    /// The hidden module that executes a Maraflow page's Structured Text or ladder. It is a runtime detail, not a block
+    /// on the sheet, so the canvas and the page's block count leave it out.
+    public static func isMaraflowPageRuntime(_ module: PCCModule) -> Bool {
+        module.guid == MaraflowStPage.guid || module.guid == MaraflowLdPage.guid
+    }
+
     /// A `BoolVar`'s mode, as the registry builds it: `SimulMode`, or a push button by default.
     public static func boolVarMode(of module: PCCModule) -> BoolVarBlock.Mode? {
         guard module.guid == BoolVarBlock.guid else { return nil }

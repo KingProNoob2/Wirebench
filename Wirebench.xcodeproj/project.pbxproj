@@ -13,6 +13,7 @@
 		047E56E75E70BB4568DF2184 /* SourceParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DD871E4532E1E7C71B4FEC /* SourceParser.swift */; };
 		048A0AF615FBBC83EBF80019 /* SerializerCoordinateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38DA5B3CDD515265E062DBCB /* SerializerCoordinateTests.swift */; };
 		04B7A007D98F61602ED1476E /* AdvancedLogicAndBitBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4C71BB4552209B636940AB /* AdvancedLogicAndBitBlocks.swift */; };
+		04C0440F17AAB6DD7AEF496B /* MaraflowPageRuntimeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF06BD119253BE7BAD17BB63 /* MaraflowPageRuntimeCard.swift */; };
 		04DB5A4EB2EA255852EB2E8D /* ClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C9B99E7B25B343F04EE743 /* ClipboardTests.swift */; };
 		05A473AAC6857868AC0E8B2D /* InspectorSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0702BB07F82795FDEF10F70B /* InspectorSnapshotTests.swift */; };
 		060979F59A10EE24C389B7DE /* PLCUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01C85640D716ACA029392E58 /* PLCUploader.swift */; };
@@ -97,6 +98,7 @@
 		602A67B4769309FBC68393CC /* AppModel+PaletteDrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7DD4FD67AE3B055290FCAEB /* AppModel+PaletteDrop.swift */; };
 		607EFF52509D2E91CD59E46F /* WirebenchDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67D05A6C8C9F0343FAF5ACE3 /* WirebenchDocumentTests.swift */; };
 		60FC81C27DECC41C4651AF9F /* PCCDecompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90D42D831FC6A566CDEE718 /* PCCDecompiler.swift */; };
+		61361AC372BF6A793F60120C /* MaraflowPageRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6253A93C1AE9C5573C3E2922 /* MaraflowPageRuntimeTests.swift */; };
 		62408B5B8971DC32A368B621 /* BlockAuditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8483D40D6CF8C4EDB9BA64 /* BlockAuditor.swift */; };
 		628947B57E227E953ABDAC53 /* MacroOutputBitsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA3EFC041F28A0A8702C2C45 /* MacroOutputBitsTests.swift */; };
 		628B16225257DB7287D49749 /* BuildExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD5E15D65A61FFF4473D05D /* BuildExportTests.swift */; };
@@ -626,6 +628,7 @@
 		5F526AD594FE3751C0713D52 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
 		601B98187AE5D94E7119B240 /* BlockInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockInteraction.swift; sourceTree = "<group>"; };
 		6159E2A12475A6630F917DDD /* ProgramImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramImageTests.swift; sourceTree = "<group>"; };
+		6253A93C1AE9C5573C3E2922 /* MaraflowPageRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowPageRuntimeTests.swift; sourceTree = "<group>"; };
 		64709325A30045971F28BD06 /* GridCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridCardTests.swift; sourceTree = "<group>"; };
 		64AC77CA1F3C7176DDFF2EA0 /* EditorTortureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTortureTests.swift; sourceTree = "<group>"; };
 		6568813B97185D5274CCC006 /* CardGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardGeometry.swift; sourceTree = "<group>"; };
@@ -714,6 +717,7 @@
 		BD0D991A05E275C44A68FBD0 /* BoolVarBlockTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoolVarBlockTests.swift; sourceTree = "<group>"; };
 		BD2A56724BE89B00C9DE779B /* ParameterPinTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParameterPinTests.swift; sourceTree = "<group>"; };
 		BDE2CB0C5E44035C90E0B1AE /* InputCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputCountTests.swift; sourceTree = "<group>"; };
+		BF06BD119253BE7BAD17BB63 /* MaraflowPageRuntimeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowPageRuntimeCard.swift; sourceTree = "<group>"; };
 		BF36C83AEB1002D48BBBF8C9 /* MaraflowVariants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MaraflowVariants.h; sourceTree = "<group>"; };
 		BFA311406500190793496159 /* BlockPaletteSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockPaletteSearch.swift; sourceTree = "<group>"; };
 		C095252F97C7BDA83DC9D5AD /* PinZeroGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinZeroGateTests.swift; sourceTree = "<group>"; };
@@ -955,6 +959,7 @@
 				17F4B69A0037F962D143AD01 /* LiveValuesLayer.swift */,
 				B53735B1631268DA0160A5FE /* MainView.swift */,
 				01AE20A7140E95FDA4EDD4FA /* MaraflowExtrasInspector.swift */,
+				BF06BD119253BE7BAD17BB63 /* MaraflowPageRuntimeCard.swift */,
 				E06822B22CFDB66E4BF7727D /* ModuleCardView.swift */,
 				37A64F97A31462D0BC95B2DA /* ModuleConfigDialog.swift */,
 				8AC95CFD4F72DAD3400EEA72 /* PaletteDragSource.swift */,
@@ -1011,6 +1016,7 @@
 				DA3EFC041F28A0A8702C2C45 /* MacroOutputBitsTests.swift */,
 				7EF3C446C417C2F901234269 /* MaraflowExportTests.swift */,
 				BAD39DA59DDD5AEF69C60F70 /* MaraflowImportTests.swift */,
+				6253A93C1AE9C5573C3E2922 /* MaraflowPageRuntimeTests.swift */,
 				43D184DB9E0227CD26EF5045 /* MaraflowPaletteTests.swift */,
 				79E0E9322B4BF9060EC069E8 /* NestedMacroTests.swift */,
 				883086A31AB42C6E537983D6 /* PageAndMacroRenameTests.swift */,
@@ -1199,7 +1205,7 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_D3FF94FB-8767-44A8-8C8F-75EDFB462242" /* Wirebench */ = {
+		"TEMP_B82E7811-E5D9-4B0F-A312-464A5A451FEE" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
 				1A521C0652DDE7C0AFB37D41 /* Release.xcconfig */,
@@ -1716,6 +1722,7 @@
 				C97931B30E0010A76FF7FE4D /* LiveValuesLayer.swift in Sources */,
 				0AB0602DDBE122247C6785F6 /* MainView.swift in Sources */,
 				C40DF47741F8FAD342ED226F /* MaraflowExtrasInspector.swift in Sources */,
+				04C0440F17AAB6DD7AEF496B /* MaraflowPageRuntimeCard.swift in Sources */,
 				8424E461476569B95D5B1D1D /* ModuleCardView.swift in Sources */,
 				76AF06A1916833AA6EC2000C /* ModuleConfigDialog.swift in Sources */,
 				01642D257273433E82D194D3 /* PLCConfigurationView.swift in Sources */,
@@ -1810,6 +1817,7 @@
 				628947B57E227E953ABDAC53 /* MacroOutputBitsTests.swift in Sources */,
 				A6CD94966E5EC775638818B6 /* MaraflowExportTests.swift in Sources */,
 				90810377641C30D6DC55FED7 /* MaraflowImportTests.swift in Sources */,
+				61361AC372BF6A793F60120C /* MaraflowPageRuntimeTests.swift in Sources */,
 				203B212B82F30A5623D460FE /* MaraflowPaletteTests.swift in Sources */,
 				426FE0BE74986E1E5353FE08 /* NestedMacroTests.swift in Sources */,
 				F7B9C29FEF2D08211D4D1432 /* PCCFidelityTests.swift in Sources */,

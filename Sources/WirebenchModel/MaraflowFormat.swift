@@ -260,7 +260,7 @@ struct MaraflowProject {
                 wires: wires,
                 stCode: document.string(prefix + "stCode"),
                 stVariables: variables,
-                stThreadID: document.int(prefix + "stThreadId", 2),
+                stThreadID: min(5, max(1, document.int(prefix + "stThreadId", 2))),
                 stOrder: document.int(prefix + "stOrder", 10),
                 rungs: rungs,
                 graphics: graphics

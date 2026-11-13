@@ -740,7 +740,7 @@ public struct MainView: View {
     }
 
     private func moduleCount(for pageCaption: String) -> Int {
-        model.project?.modules.filter { $0.page == pageCaption }.count ?? 0
+        model.project?.modules.filter { $0.page == pageCaption && !BlockRole.isMaraflowPageRuntime($0) }.count ?? 0
     }
 }
 

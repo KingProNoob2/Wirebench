@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 import WirebenchCore
+import WirebenchLibrary
 
 public struct CanvasView: View {
     @Bindable var model: AppModel
@@ -212,7 +213,7 @@ public struct CanvasView: View {
     func contentSize(for project: PCCProject) -> CGSize {
         var maxX: Double = 0
         var maxY: Double = 0
-        for module in project.modules where module.page == model.selectedPage {
+        for module in project.modules where module.page == model.selectedPage && !BlockRole.isMaraflowPageRuntime(module) {
             maxX = max(maxX, module.x + Double(ModuleCardView.cardWidth(for: module)))
             maxY = max(maxY, module.y + Double(ModuleCardView.cardHeight(for: module)))
         }
@@ -233,7 +234,7 @@ public struct CanvasView: View {
 
     private func schematic(for project: PCCProject) -> some View {
 
-        let pageModules = project.modules.filter { $0.page == model.selectedPage }
+        let pageModules = project.modules.filter { $0.page == model.selectedPage && !BlockRole.isMaraflowPageRuntime($0) }
         let pageModuleIds = Set(pageModules.map { $0.id })
         let byId = Dictionary(project.modules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -265,12 +266,43 @@ public struct CanvasView: View {
             // off-screen). The cards are independent panes rather than a merging cluster, so the
             // container buys nothing here.
             moduleLayer(pageModules)
+            if let runtime = pageRuntimeInfo(project) {
+                MaraflowPageRuntimeCard(kind: runtime.kind, detail: runtime.detail, code: runtime.code)
+                    .position(x: 300, y: 190)
+            }
         }
+    }
+
+    private struct PageRuntimeInfo {
+        let kind: String
+        let detail: String
+        let code: String
+    }
+
+    /// A Maraflow ST/LD page has no ordinary blocks; it carries one hidden runtime module. Explain the empty sheet
+    /// instead of drawing that module as a card.
+    private func pageRuntimeInfo(_ project: PCCProject) -> PageRuntimeInfo? {
+        let modules = project.modules.filter { $0.page == model.selectedPage }
+        if let st = modules.first(where: { $0.guid == MaraflowStPage.guid }) {
+            let code = st.rawAttributes["MARAFLOW_ST_CODE"] ?? ""
+            let lines = code.split(separator: "\n", omittingEmptySubsequences: false).count
+            return PageRuntimeInfo(kind: "Structured Text page",
+                                   detail: "Executed by the native ST interpreter · \(lines) line\(lines == 1 ? "" : "s")",
+                                   code: code)
+        }
+        if let ld = modules.first(where: { $0.guid == MaraflowLdPage.guid }) {
+            let rungs = (ld.rawAttributes["MARAFLOW_LD_RUNGS"] ?? "")
+                .split(separator: "\n").filter { $0.hasPrefix("R") }.count
+            return PageRuntimeInfo(kind: "Ladder page",
+                                   detail: "Executed by the native ladder evaluator · \(rungs) rung\(rungs == 1 ? "" : "s")",
+                                   code: "")
+        }
+        return nil
     }
 
     /// The live pin values drawn over the cards. A function of its own, to keep `body` within the type-checker's budget.
     private func liveValues(for project: PCCProject) -> some View {
-        LiveValuesLayer(model: model, modules: project.modules.filter { $0.page == model.selectedPage }, dragOffsets: dragOffsets)
+        LiveValuesLayer(model: model, modules: project.modules.filter { $0.page == model.selectedPage && !BlockRole.isMaraflowPageRuntime($0) }, dragOffsets: dragOffsets)
     }
 
     /// Converts a gesture location into canvas content coordinates.
@@ -285,6 +317,7 @@ public struct CanvasView: View {
         model.selectedWire = nil
         let hit = (model.project?.modules ?? []).filter {
             $0.page == model.selectedPage
+                && !BlockRole.isMaraflowPageRuntime($0)
                 && rect.intersects(CGRect(x: $0.x, y: $0.y,
                                           width: ModuleCardView.cardWidth(for: $0),
                                           height: ModuleCardView.cardHeight(for: $0)))
