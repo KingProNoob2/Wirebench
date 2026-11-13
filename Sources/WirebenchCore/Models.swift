@@ -414,6 +414,16 @@ public struct ProjectGraphic: Sendable, Codable, Equatable {
     public var fontItalic: Bool?
     public var fontColor: String?
     public var rawAttributes: AttributeBag
+    /// The graphic's `<INPUT>`: an output pin whose live value drives the object's active colours.
+    public var inputModuleId: Int?
+    public var inputPinId: Int?
+    /// Dirigo's active-state thresholds. `nil` means the attribute was absent.
+    public var lowValue: Double?
+    public var highValue: Double?
+    /// Active colours as written on `<INPUT>` (`PEN_COLOR`/`BRUSH_COLOR`).
+    public var activePenColor: String?
+    public var activeBrushColor: String?
+
     /// Every child of `<GRAPHICS>`, verbatim (NODES, PEN, BRUSH, FONT, and anything else).
     /// When non-empty the serializer writes these back unchanged, which is what makes graphic
     /// objects lossless. Build a `PCCGraphicBuilder` to construct one from the typed fields.
@@ -435,6 +445,12 @@ public struct ProjectGraphic: Sendable, Codable, Equatable {
         fontBold: Bool? = nil,
         fontItalic: Bool? = nil,
         fontColor: String? = nil,
+        inputModuleId: Int? = nil,
+        inputPinId: Int? = nil,
+        lowValue: Double? = nil,
+        highValue: Double? = nil,
+        activePenColor: String? = nil,
+        activeBrushColor: String? = nil,
         rawAttributes: AttributeBag = [:],
         rawChildren: [RawXMLNode] = []
     ) {
@@ -453,6 +469,12 @@ public struct ProjectGraphic: Sendable, Codable, Equatable {
         self.fontBold = fontBold
         self.fontItalic = fontItalic
         self.fontColor = fontColor
+        self.inputModuleId = inputModuleId
+        self.inputPinId = inputPinId
+        self.lowValue = lowValue
+        self.highValue = highValue
+        self.activePenColor = activePenColor
+        self.activeBrushColor = activeBrushColor
         self.rawAttributes = rawAttributes
         self.rawChildren = rawChildren
     }

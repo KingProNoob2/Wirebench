@@ -441,6 +441,21 @@ public final class PCCParser: @unchecked Sendable {
                 fontColor = fontElem.attribute(forName: "COLOR")?.stringValue
             }
 
+            var inputModuleId: Int?
+            var inputPinId: Int?
+            var lowValue: Double?
+            var highValue: Double?
+            var activePenColor: String?
+            var activeBrushColor: String?
+            if let inputElem = gElem.elements(forName: "INPUT").first {
+                inputModuleId = inputElem.attribute(forName: "IN_MODULE_ID")?.stringValue.flatMap { Int($0) }
+                inputPinId = inputElem.attribute(forName: "IN_PIN_ID")?.stringValue.flatMap { Int($0) }
+                lowValue = inputElem.attribute(forName: "LOW")?.stringValue.flatMap { Double($0) }
+                highValue = inputElem.attribute(forName: "HIGH")?.stringValue.flatMap { Double($0) }
+                activePenColor = inputElem.attribute(forName: "PEN_COLOR")?.stringValue
+                activeBrushColor = inputElem.attribute(forName: "BRUSH_COLOR")?.stringValue
+            }
+
             let verbatimChildren = (gElem.children ?? []).compactMap { $0 as? XMLElement }.map(RawXMLNode.init)
 
             graphics.append(ProjectGraphic(
@@ -459,6 +474,12 @@ public final class PCCParser: @unchecked Sendable {
                 fontBold: fontBold,
                 fontItalic: fontItalic,
                 fontColor: fontColor,
+                inputModuleId: inputModuleId,
+                inputPinId: inputPinId,
+                lowValue: lowValue,
+                highValue: highValue,
+                activePenColor: activePenColor,
+                activeBrushColor: activeBrushColor,
                 rawAttributes: attrs,
                 rawChildren: verbatimChildren
             ))

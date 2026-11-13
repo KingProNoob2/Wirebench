@@ -21,6 +21,8 @@ struct GraphicShapeView: View {
     /// rebuilding the shape each time, for a number only used to turn a drag back into sheet units.
     var zoomScale: () -> CGFloat = { 1 }
     var isSelected = false
+    /// The object's connected output is above its active threshold; its active pen/brush are drawn instead.
+    var isActive = false
     /// True when nothing else is picked, which is when the resize handle appears: resizing a group
     /// would have to scale every member about a shared anchor, which is a different decision than
     /// moving one.
@@ -38,8 +40,10 @@ struct GraphicShapeView: View {
         let box = shownBox
 
         outline
-            .fill(GraphicColor.brush(of: graphic))
-            .overlay { outline.stroke(GraphicColor.pen(of: graphic), lineWidth: lineWidth) }
+            .fill(isActive ? GraphicColor.activeBrush(of: graphic) : GraphicColor.brush(of: graphic))
+            .overlay { outline.stroke(isActive ? GraphicColor.activePen(of: graphic)
+                                              : GraphicColor.pen(of: graphic),
+                                      lineWidth: lineWidth) }
             .frame(width: max(1, CGFloat(box.width)), height: max(1, CGFloat(box.height)))
             .overlay { selectionDecorations(outline: outline, box: box) }
             // The whole box is the hit area, filled or not: a shape whose middle could not be clicked

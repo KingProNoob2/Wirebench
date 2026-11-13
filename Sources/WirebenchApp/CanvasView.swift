@@ -512,6 +512,7 @@ public struct CanvasView: View {
             grow: shapeResizeOffsets[index] ?? .zero,
             zoomScale: { [model] in model.zoomScale },
             isSelected: model.selectedAnnotationIndex == index || model.selectedAnnotationIndices.contains(index),
+            isActive: model.graphicIsActive(graphic) ?? false,
             isSoleSelection: group == [index],
             onSelect: {
                 model.selectedModuleId = nil

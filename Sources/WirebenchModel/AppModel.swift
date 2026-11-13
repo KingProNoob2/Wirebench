@@ -1625,6 +1625,32 @@ public final class AppModel: @unchecked Sendable {
                        value: .bool(!current.asBool))
     }
 
+    /// Whether a Dirigo graphic's connected output pin is above its active threshold. `nil` means the graphic has
+    /// no `<INPUT>` binding. Snapshots are read first so a redraw follows the value.
+    public func graphicIsActive(_ graphic: ProjectGraphic) -> Bool? {
+        guard let moduleId = graphic.inputModuleId,
+              let pin = graphic.inputPinId, pin >= 0 else { return nil }
+        let value: PinValue
+        if let snapshot = snapshots[moduleId], pin < snapshot.outValues.count {
+            value = snapshot.outValues[pin]
+        } else if let node = getNode(id: moduleId), pin < node.block.outPins.count {
+            value = node.block.outPins[pin]
+        } else {
+            return false
+        }
+        let threshold: Double
+        if let high = graphic.highValue {
+            threshold = high
+        } else if case .bool = value {
+            // A digital output connected without an explicit HIGH is a lamp: on when the pin is on.
+            threshold = 1
+        } else {
+            // Dirigo's own default for a fresh analogue binding.
+            threshold = 100
+        }
+        return Double(value.asFloat) >= threshold
+    }
+
     /// A module's live pins, read out of the core.
     public func getNode(id: Int) -> RuntimeNode? {
         guard let engine, engine.contains(moduleId: id),

@@ -44,6 +44,20 @@ enum GraphicColor {
         return rgb.isNearWhite ? Color.primary.opacity(0.06) : rgb.color
     }
 
+    /// The outline of an active, output-connected graphic. Dirigo's default active pen is its button-face colour;
+    /// a file that wrote `PEN_COLOR` on `<INPUT>` wins.
+    static func activePen(of graphic: ProjectGraphic) -> Color {
+        guard let rgb = decode(graphic.activePenColor ?? "$20000000") else { return .primary }
+        return rgb.isNearBlack ? .primary : rgb.color
+    }
+
+    /// The inside of an active graphic. Dirigo defaults this to red (`$FF`), which is what makes a connected
+    /// rectangle or ellipse read as a lamp.
+    static func activeBrush(of graphic: ProjectGraphic) -> Color {
+        guard let rgb = decode(graphic.activeBrushColor ?? "$FF") else { return .red }
+        return rgb.color
+    }
+
     /// `$BBGGRR`, or `$AABBGGRR` with the leading byte dropped — this app draws on an opaque sheet, so
     /// there is nothing for it to mean. Unreadable markup leaves the caller to pick a fallback.
     static func decode(_ text: String?) -> RGB? {

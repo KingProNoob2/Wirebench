@@ -32,6 +32,9 @@ that does.
 - pages, modules (ids, GUIDs, positions, orders, threads, pin values and per-pin attributes), input and parameter
   connections;
 - the PLC configuration, graphics, application options and simulation options;
+- a graphic's `<INPUT>` binding: `IN_MODULE_ID`/`IN_PIN_ID` name a module output, and the object paints with its
+  active pen/brush when that output reaches `HIGH` (a missing threshold means 1 for a BOOL pin and Dirigo's own 100 for
+  an analogue one); `PEN_COLOR`/`BRUSH_COLOR` override the active colours;
 - the raw root attributes, unknown sections, unknown section children, root comments and the legacy writer's
   self-closing-space style;
 - an optional `maraflow` object: the verbatim `.mfl` property table (tags, E-Stop rules, graphics, bus ids, wire
