@@ -1180,7 +1180,7 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_26D4C81E-40AE-4DCE-913B-A955D971144C" /* Wirebench */ = {
+		"TEMP_DF358971-26B9-4400-BC14-379D16F1204A" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
 				1A521C0652DDE7C0AFB37D41 /* Release.xcconfig */,

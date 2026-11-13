@@ -191,8 +191,10 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 
 Counts: 54 mapped, 40 inert placeholders.
 
-The **Bool**, **Math**, **Main.Comparators**, **Main.Conversion** and **Main.Switches** groups now import as native
-`MaraflowBlock` entries (deterministic UUID v5, exact pins, C++ semantics), not as Dirigo approximations. This includes
-Maraflow's own silent no-ops (`Math.Pow`, `Math.PID`, `InRange`, `Hysteresis`, `Demux`), which remain no-ops exactly as
-in its `SimulationEngine`. The table's per-row Wirebench target still describes the Stage-1 fallback for the groups not
+The **Bool**, **Math**, **Main.Comparators**, **Main.Conversion**, **Main.Switches**, **I/O**, **Main.Timers**,
+**Main.Filters**, **Main.Arrays**, **Main.Safety**, **Visual**, **Communication** and **Ladder** groups now import as
+native `MaraflowBlock` entries (deterministic UUID v5, exact pins, C++ semantics), not as Dirigo approximations. This includes
+Maraflow's own silent no-ops (`Math.Pow`, `Math.PID`, `InRange`, `Hysteresis`, `Demux`, every communication/filter/array
+block, `EncodeDate`) remain no-ops exactly as in its `SimulationEngine`; the implemented I/O, timer, counter, date, visual
+variable and E-Stop paths are ported. Only `Main.Execution` and the two macro boundary types are still on the old path. The table's per-row Wirebench target still describes the Stage-1 fallback for the groups not
 yet native; the remaining definitions move over stage by stage.

@@ -32,6 +32,12 @@ public final class BlockRegistry: @unchecked Sendable {
         if let factory = registry[module.guid] {
             return factory(module)
         }
+        // A native Maraflow type is simulated by the C++ core. Do not let an instance name (`PulseGen1`) resolve to a
+        // same-named Dirigo class with a different pin set.
+        if let definition = MaraflowCatalog.definition(forGuid: module.guid) {
+            return UnresolvedBlock(resolvedName: definition.typeName, delphiClass: nil,
+                                   inCount: module.inPins.count, outCount: module.outPins.count)
+        }
 
         for key in Self.lookupKeys(for: module.name) {
             if let factory = nameRegistry[key] {

@@ -255,6 +255,9 @@ struct WirebenchSim {
     /// The PLC's array data area, addressed by `Id` (`IntArrayStore`). Doubles, so one array can be read as
     /// Int, Long or Float, as in the original's single data area.
     std::map<int64_t, std::vector<double>> arrays;
+    /// The Maraflow operand namespace: DI/DO/AI/AO/PWM channel registers and named registers.
+    std::map<std::string, double> operands;
+    bool maraflowEStopActive = false;
 
     /* Construct state (the Swift `condStack` and friends), reset at the start of every step. */
     int64_t condStack = 0;
@@ -275,7 +278,6 @@ double intervalMs(const WirebenchSim *sim, int32_t threadId) {
 /// One module, mirroring its Swift block's `process(sample:)` exactly — including the `En = 0` rule,
 /// which holds the output rather than clearing it (docs/spec/blocks-datapath.md §0.5).
 void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const WirebenchWallClock &clock) {
-    (void)sample;
     /* Every kind below writes outputs and nothing else a reader can see (`Set` works in the step loop, not
        here), so a module without out pins has nothing to do — and the cases may then index `outPins[0]`. */
     if (m.outPins.empty()) return;
@@ -1069,6 +1071,144 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     }
                     if (!m.outPins.empty()) m.outPins[0] = boolean(m.flagA);
                     if (m.outPins.size() > 1) m.outPins[1] = boolean(!m.flagA);
+                    return;
+                }
+                case MARAFLOW_IO_DI: {
+                    const std::string channel = "DI" + std::to_string(m.config[0]);
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(sim->operands.count(channel) ? sim->operands[channel] != 0.0 : false);
+                    return;
+                }
+                case MARAFLOW_IO_DO: {
+                    const bool value = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    if (sim) sim->operands["DO" + std::to_string(m.config[0])] = value ? 1.0 : 0.0;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(value);
+                    return;
+                }
+                case MARAFLOW_IO_AI: {
+                    const std::string channel = "AI" + std::to_string(m.config[0]);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(sim->operands.count(channel) ? sim->operands[channel] : 0.0, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_IO_AO: {
+                    const double value = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    if (sim) sim->operands["AO" + std::to_string(m.config[0])] = value;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(true);
+                    return;
+                }
+                case MARAFLOW_IO_PWM: {
+                    const double duty = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    if (sim) sim->operands["PWM" + std::to_string(m.config[0])] = duty;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(duty > 0.0);
+                    return;
+                }
+                case MARAFLOW_IO_8xDI: {
+                    for (size_t i = 0; i < m.outPins.size(); ++i) {
+                        const std::string channel = "DI" + std::to_string(i);
+                        if (sim->operands.count(channel)) m.outPins[i] = boolean(sim->operands[channel] != 0.0);
+                    }
+                    return;
+                }
+                case MARAFLOW_IO_8xDO: {
+                    for (size_t i = 1; i < m.inPins.size(); ++i) {
+                        if (sim) sim->operands["DO" + std::to_string(i - 1)] = asBool(m.inPins[i]) ? 1.0 : 0.0;
+                    }
+                    return;
+                }
+                case MARAFLOW_Main_Timers_Timer: {
+                    const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const double preset = std::max(0.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0);
+                    double elapsed = m.s[0];
+                    elapsed = input ? std::min(preset, elapsed + sample.deltaMs) : 0.0;
+                    m.s[0] = elapsed;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(input && elapsed >= preset);
+                    if (m.outPins.size() > 1) m.outPins[1] = maraflowNumber(static_cast<double>(static_cast<int64_t>(elapsed)), m.outPins[1]);
+                    return;
+                }
+                case MARAFLOW_Main_Timers_PulseGen: {
+                    const double high = std::max(1.0, m.inPins.size() > 1 ? static_cast<double>(asFloat(m.inPins[1])) : 500.0);
+                    const double low = std::max(1.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 500.0);
+                    const double cycle = high + low;
+                    m.s[0] = std::fmod(m.s[0] + sample.deltaMs, cycle);
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(m.s[0] < high);
+                    return;
+                }
+                case MARAFLOW_Main_Timers_PulseLen: {
+                    const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const double length = std::max(0.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0);
+                    const bool previous = m.flagA;
+                    m.flagA = input;
+                    bool active = m.s[1] != 0.0;
+                    if (!active && input && !previous) { active = true; m.s[0] = 0.0; }
+                    if (active) {
+                        m.s[0] += sample.deltaMs;
+                        if (m.s[0] >= length) { active = false; m.s[0] = length; }
+                    }
+                    m.s[1] = active ? 1.0 : 0.0;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(active);
+                    return;
+                }
+                case MARAFLOW_Main_Timers_SinglePulse: {
+                    const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const bool previous = m.flagA;
+                    m.flagA = input;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(input && !previous);
+                    return;
+                }
+                case MARAFLOW_Main_Timers_Counter: {
+                    const bool up = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const bool down = m.inPins.size() > 2 && asBool(m.inPins[2]);
+                    const bool reset = m.inPins.size() > 3 && asBool(m.inPins[3]);
+                    const double preset = m.inPins.size() > 4 ? static_cast<double>(asFloat(m.inPins[4])) : 0.0;
+                    const bool previousUp = (static_cast<int>(m.s[1]) & 1) != 0;
+                    const bool previousDown = (static_cast<int>(m.s[1]) & 2) != 0;
+                    double value = m.s[0];
+                    if (reset) value = 0.0;
+                    else {
+                        if (up && !previousUp) value += 1.0;
+                        if (down && !previousDown && value > 0.0) value -= 1.0;
+                    }
+                    m.s[0] = value;
+                    m.s[1] = (up ? 1 : 0) | (down ? 2 : 0);
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(value >= preset);
+                    if (m.outPins.size() > 1) m.outPins[1] = maraflowNumber(value, m.outPins[1]);
+                    return;
+                }
+                case MARAFLOW_Main_Timers_DateTime: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(clock.unixSeconds, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Main_Timers_DecodeDate: {
+                    const int64_t seconds = static_cast<int64_t>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
+                    const int64_t days = static_cast<int64_t>(std::floor(static_cast<double>(seconds) / 86400.0));
+                    const int64_t secondOfDay = seconds - days * 86400;
+                    int64_t year = 1970, month = 1, day = 1;
+                    civilFrom1980(days, year, month, day);
+                    if (m.outPins.size() > 0) m.outPins[0] = maraflowNumber(static_cast<double>(year), m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = maraflowNumber(static_cast<double>(month), m.outPins[1]);
+                    if (m.outPins.size() > 2) m.outPins[2] = maraflowNumber(static_cast<double>(day), m.outPins[2]);
+                    if (m.outPins.size() > 3) m.outPins[3] = maraflowNumber(static_cast<double>(secondOfDay / 3600), m.outPins[3]);
+                    if (m.outPins.size() > 4) m.outPins[4] = maraflowNumber(static_cast<double>((secondOfDay / 60) % 60), m.outPins[4]);
+                    if (m.outPins.size() > 5) m.outPins[5] = maraflowNumber(static_cast<double>(secondOfDay % 60), m.outPins[5]);
+                    return;
+                }
+                case MARAFLOW_Visual_Vars_BoolVar:
+                case MARAFLOW_Visual_Vars_IntVar:
+                case MARAFLOW_Visual_Vars_LongVar: {
+                    int64_t bits = m.config[0];
+                    double value = 0.0;
+                    std::memcpy(&value, &bits, sizeof(double));
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(value, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Main_Safety_EStop: {
+                    const bool reset = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const bool previous = m.flagA;
+                    m.flagA = reset;
+                    if (reset && !previous && sim) sim->maraflowEStopActive = false;
+                    if (sim == nullptr) return;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(!sim->maraflowEStopActive);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(sim->maraflowEStopActive);
+                    if (m.outPins.size() > 2) m.outPins[2] = int32Value(0);
                     return;
                 }
                 case MARAFLOW_Math_Add: {

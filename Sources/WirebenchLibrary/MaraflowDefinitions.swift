@@ -234,6 +234,22 @@ public enum MaraflowCatalog {
         "Main.Comparators.Hysteresis",
         "Main.Conversion.PackBits", "Main.Conversion.UnpackBits",
         "Main.Switches.Sel", "Main.Switches.Mux", "Main.Switches.Demux",
+        "IO.DI", "IO.DO", "IO.8xDI", "IO.8xDO", "IO.AI", "IO.AO", "IO.PWM", "IO.Encoder",
+        "Main.Timers.DateTime", "Main.Timers.DecodeDate", "Main.Timers.EncodeDate",
+        "Main.Timers.PulseGen", "Main.Timers.PulseLen", "Main.Timers.SinglePulse",
+        "Main.Timers.Timer", "Main.Timers.Counter",
+        "Main.Filters.MovingAvg", "Main.Filters.LowPass", "Main.Filters.Debounce",
+        "Main.Arrays.ArrayRead", "Main.Arrays.ArrayWrite",
+        "Main.Safety.EStop",
+        "Visual.Segment", "Visual.Value", "Visual.Vars.BoolVar", "Visual.Vars.IntVar",
+        "Visual.Vars.LongVar",
+        "Comm.ModbusRTU.MbRtuRead", "Comm.ModbusRTU.MbRtuWrite", "Comm.ModbusTCP.MbTcpRead",
+        "Comm.ModbusTCP.MbTcpWrite", "Comm.REST.RestGet", "Comm.REST.RestPost",
+        "Comm.DS18B20.DS18B20Read", "Comm.I2C.I2CRead", "Comm.I2C.I2CWrite",
+        "Comm.SPI.SPITransfer",
+        "Ladder.Contact.NO", "Ladder.Contact.NC", "Ladder.Contact.POS", "Ladder.Contact.NEG",
+        "Ladder.Coil.NORMAL", "Ladder.Coil.NEGATED", "Ladder.Coil.SET", "Ladder.Coil.RESET",
+        "Ladder.Coil.POS", "Ladder.Coil.NEG", "Ladder.Coil.WRITE_REG", "Ladder.Coil.ANALOG",
     ]
 
     /// All definitions keyed by definition id (e.g. `Bool.And`).

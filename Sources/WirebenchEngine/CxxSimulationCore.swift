@@ -156,7 +156,23 @@ public final class CxxSimulationCore {
         switch kind {
         case WIREBENCH_BLOCK_MARAFLOW:
             let index = MaraflowCatalog.all.firstIndex { $0.guid == mod.guid } ?? 0
-            return (Int32(index), [])
+            guard MaraflowCatalog.all.indices.contains(index) else { return (0, []) }
+            let definition = MaraflowCatalog.all[index]
+            func channel() -> Int64 {
+                let raw = mod.rawAttributes["MARAFLOW_PROP_Channel"] ?? "0"
+                let digits = raw.drop(while: { !$0.isNumber })
+                return Int64(digits.prefix(while: { $0.isNumber })) ?? 0
+            }
+            switch definition.id {
+            case "IO.DI", "IO.DO", "IO.AI", "IO.AO", "IO.PWM":
+                return (Int32(index), [channel()])
+            case "Visual.Vars.BoolVar", "Visual.Vars.IntVar", "Visual.Vars.LongVar":
+                let raw = mod.rawAttributes["MARAFLOW_PROP_CurrentValue"] ?? "0"
+                let value = raw.lowercased() == "true" ? 1.0 : (Double(raw) ?? 0)
+                return (Int32(index), [Int64(bitPattern: value.bitPattern)])
+            default:
+                return (Int32(index), [])
+            }
         case WIREBENCH_BLOCK_RS:
             let setPriority = mod.rawAttributes["PRIORITY"]?.uppercased() == "S"
                 || mod.rawAttributes["RS_PRIORITY"]?.uppercased() == "S"
@@ -234,7 +250,15 @@ public final class CxxSimulationCore {
         blocks.reserveCapacity(project.modules.count)
 
         for (position, mod) in project.modules.enumerated() {
-            let block = BlockRegistry.shared.create(for: mod)
+            // Native Maraflow types have no Swift class; a name lookup would otherwise resolve e.g. `PulseGen1` to
+            // Dirigo's two-pin PulseGen and hand the core the wrong pin counts. Use the module's own pins.
+            let block: FunctionBlock
+            if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
+                block = UnresolvedBlock(resolvedName: definition.typeName, inCount: mod.inPins.count,
+                                        outCount: mod.outPins.count)
+            } else {
+                block = BlockRegistry.shared.create(for: mod)
+            }
             blocks.append(block)
             for (idx, pin) in mod.inPins.enumerated() where idx < block.inPins.count {
                 block.inPins[idx] = pin.value
