@@ -943,8 +943,31 @@ ApplicationWindow {
         modal: true
         anchors.centerIn: Overlay.overlay
         padding: 20
+        closePolicy: Popup.CloseOnEscape
         background: Rectangle { radius: 14; color: AppTheme.card; border.color: AppTheme.panelStroke }
-        Text { text: controller.alert; color: AppTheme.text; font.pixelSize: 13; wrapMode: Text.WordWrap; width: 360 }
-        Connections { target: controller; function onSceneChanged() { if (controller.alert !== "") alertPopup.open() } }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Text {
+                text: controller.alert
+                color: AppTheme.text
+                font.pixelSize: 13
+                wrapMode: Text.WordWrap
+                Layout.preferredWidth: 360
+            }
+            Button {
+                text: "OK"
+                Layout.alignment: Qt.AlignRight
+                onClicked: alertPopup.close()
+            }
+        }
+        onClosed: controller.command({cmd: "dismissAlert"})
+        Connections {
+            target: controller
+            function onSceneChanged() {
+                // The model keeps the alert until the frontend dismisses it; without the guard every simulation tick
+                // reopened it. `dismissAlert` clears it in the same refresh.
+                if (controller.alert !== "" && !alertPopup.opened) alertPopup.open()
+            }
+        }
     }
 }

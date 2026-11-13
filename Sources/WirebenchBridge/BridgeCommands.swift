@@ -320,6 +320,8 @@ enum BridgeCommands {
         case "applyMaraflowSTCode":
             guard let code = arguments["code"] as? String else { return ["ok": false, "error": "no code"] }
             model.applyMaraflowSTCode(code)
+        case "dismissAlert":
+            model.pendingAlert = nil
         case "refreshPorts": model.refreshPorts()
         case "selectPort": model.selectedPortPath = arguments["path"] as? String ?? ""
         case "upload": model.uploadCompiledProgram()
