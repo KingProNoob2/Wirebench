@@ -42,6 +42,31 @@ struct DataFidelityTests {
         #expect(again.contains("K=\"1\""))
     }
 
+    @Test("Comments and SIM_OPTIONS extras survive a save")
+    func commentsAndSimOptions() throws {
+        var project = PCCProject(name: "P", profile: "Sybas Duino-E")
+        project.pages = [ProjectPage(caption: "main")]
+        project.modules = [BlockFactory.makeModule(guid: AndBlock.guid, id: 1, name: "And1", x: 0, y: 0,
+                                                 order: 10, threadId: 1, page: "main")]
+        var xml = PCCSerializer().serialize(project: project)
+        xml = xml.replacingOccurrences(of: "<MODULES>", with: "<!-- a note -->\n      <MODULES><NOTE K=\"1\"/>")
+        // A serializer writes an empty SIM_OPTIONS as a leaf, so build one with a child by hand.
+        let withSim = """
+        <PCC_PROJECT NAME="P" PROFILE="Sybas Duino-E" PAGESIZE="60">
+          <SIM_OPTIONS ENABLED="False"><EXTRA Z="2"/></SIM_OPTIONS>
+          <PAGES/>
+          <MODULES/>
+        </PCC_PROJECT>
+        """
+        let read = try PCCParser().parse(xmlString: xml)
+        let again = PCCSerializer().serialize(project: read)
+        #expect(again.contains("<!-- a note -->"), "a top-level comment was dropped")
+        #expect(again.contains("NOTE"))
+        let sim = try PCCParser().parse(xmlString: withSim)
+        let simOut = PCCSerializer().serialize(project: sim)
+        #expect(simOut.contains("EXTRA"), "an unknown SIM_OPTIONS child was dropped")
+    }
+
     @Test("A moved graphic node and a pen change reach the verbatim subtree")
     func graphicEditsReachTheFile() throws {
         let url = TestCorpus.directories[0].appendingPathComponent("rulkoshaddirigo.pcc")

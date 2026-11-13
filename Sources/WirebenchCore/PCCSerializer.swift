@@ -34,6 +34,7 @@ public final class PCCSerializer: @unchecked Sendable {
     private indirect enum XMLOut {
         case leaf(name: String, attrs: AttributeBag)
         case node(name: String, attrs: AttributeBag, children: [XMLOut])
+        case comment(String)
     }
 
     // MARK: - Root
@@ -66,7 +67,7 @@ public final class PCCSerializer: @unchecked Sendable {
             return .node(name: section, attrs: attrs, children: kids + extras.map { resolve($0) })
         }
 
-        var children: [XMLOut] = []
+        var children: [XMLOut] = project.rootComments.map { resolve($0) }
         for name in emissionOrder(for: project) {
             switch name {
             case PCCElement.communication:
@@ -74,7 +75,7 @@ public final class PCCSerializer: @unchecked Sendable {
             case PCCElement.appOptions:
                 children.append(appOptionsElement(project.appOptions))
             case PCCElement.simOptions:
-                children.append(simOptionsElement(project.simOptions))
+                children.append(withSectionChildren(simOptionsElement(project.simOptions), name))
             case PCCElement.pages:
                 children.append(withSectionChildren(pagesElement(project.pages), name))
             case PCCElement.modules:
@@ -131,6 +132,8 @@ public final class PCCSerializer: @unchecked Sendable {
     }
 
     private func resolve(_ raw: RawXMLNode) -> XMLOut {
+        // A comment travels in a `RawXMLNode` named `#comment`, with its text in `TEXT`.
+        if raw.name == "#comment" { return .comment(raw.attributes["TEXT"] ?? "") }
         let children = raw.children.map { resolve($0) }
         return .node(name: raw.name, attrs: raw.attributes, children: children)
     }
@@ -408,6 +411,8 @@ public final class PCCSerializer: @unchecked Sendable {
         switch node {
         case .leaf(let name, let attrs):
             out += indent + "<" + name + attributeText(attrs) + selfCloseSpace
+        case .comment(let text):
+            out += indent + "<!--" + text + "-->"
         case .node(let name, let attrs, let children):
             if children.isEmpty {
                 out += indent + "<" + name + attributeText(attrs) + selfCloseSpace

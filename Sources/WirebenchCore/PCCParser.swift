@@ -60,7 +60,12 @@ public final class PCCParser: @unchecked Sendable {
 
         var sectionOrder: [String] = []
         var rawSections: [RawXMLNode] = []
+        var rootComments: [RawXMLNode] = []
         for child in root.children ?? [] {
+            if child.kind == .comment, let raw = rawNode(child) {
+                rootComments.append(raw)
+                continue
+            }
             guard let elem = child as? XMLElement, let elemName = elem.name else { continue }
             sectionOrder.append(elemName)
 
@@ -78,6 +83,8 @@ public final class PCCParser: @unchecked Sendable {
                 project.appOptions = parseAppOptions(elem)
             case PCCElement.simOptions:
                 project.simOptions = parseSimOptions(elem)
+                project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: [],
+                                                                       knownPrefixes: ["PEER_"])
             case PCCElement.pages:
                 project.pages = parsePages(elem)
                 project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: ["PAGE"])
@@ -101,6 +108,7 @@ public final class PCCParser: @unchecked Sendable {
         }
         project.sectionOrder = sectionOrder
         project.rawSections = rawSections
+        project.rootComments = rootComments
         project.selfClosingSpace = Self.detectSelfClosingStyle(in: data)
 
         return project
@@ -125,11 +133,20 @@ public final class PCCParser: @unchecked Sendable {
         return spaced > tight
     }
 
+    /// A child as a verbatim node: an element, or a comment carried as `#comment` with its text in `TEXT`.
+    private func rawNode(_ child: XMLNode) -> RawXMLNode? {
+        if let element = child as? XMLElement, let name = element.name { return RawXMLNode(element) }
+        if child.kind == .comment { return RawXMLNode(name: "#comment", attributes: AttributeBag(["TEXT": child.stringValue ?? ""])) }
+        return nil
+    }
+
     /// Children of a modelled section the model does not understand, kept verbatim.
-    private func unknownChildren(of elem: XMLElement, known: Set<String>) -> [RawXMLNode] {
+    private func unknownChildren(of elem: XMLElement, known: Set<String>,
+                                 knownPrefixes: [String] = []) -> [RawXMLNode] {
         (elem.children ?? []).compactMap { child in
-            guard let element = child as? XMLElement, let name = element.name, !known.contains(name) else { return nil }
-            return RawXMLNode(element)
+            if let element = child as? XMLElement, let name = element.name,
+               known.contains(name) || knownPrefixes.contains(where: { name.hasPrefix($0) }) { return nil }
+            return rawNode(child)
         }
     }
 
