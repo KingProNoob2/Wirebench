@@ -12,6 +12,8 @@ public struct MaraflowImporter {
     public struct Outcome {
         public let project: PCCProject
         public let notes: [String]
+        /// The raw `.mfl` properties, preserved on the project as `maraflow` extras.
+        public let properties: [String: String]
     }
 
     private struct Mapping {
@@ -176,7 +178,12 @@ public struct MaraflowImporter {
             let types = approximated.keys.sorted().joined(separator: ", ")
             notes.append("Approximated: \(types).")
         }
-        return Outcome(project: project, notes: notes)
+        if let version = maraflow.version.isEmpty ? nil : maraflow.version {
+            project.maraflow = MaraflowExtras(formatVersion: version, properties: document.values)
+        } else {
+            project.maraflow = MaraflowExtras(properties: document.values)
+        }
+        return Outcome(project: project, notes: notes, properties: document.values)
     }
 
     /// A mapping is by position unless the table names an index; an index the table does not name is not connected,

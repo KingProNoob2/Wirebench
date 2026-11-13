@@ -28,7 +28,7 @@ struct WirebenchDocumentTests {
         let data = try WirebenchDocument.encode(project)
         let text = try #require(String(data: data, encoding: .utf8))
         #expect(text.contains("\"format\" : \"wirebench-project\""))
-        #expect(text.contains("\"formatVersion\" : 1"))
+        #expect(text.contains("\"formatVersion\" : 2"))
         #expect(text.hasSuffix("\n"))
         let decoded = try WirebenchDocument.decode(data)
         #expect(decoded == project)
@@ -46,13 +46,24 @@ struct WirebenchDocumentTests {
         #expect(try WirebenchDocument.decode(data) == Self.richProject())
     }
 
+    @Test("A version 1 document still opens and gains no Maraflow extras")
+    func versionOneMigration() throws {
+        var object = try #require(try JSONSerialization.jsonObject(with: WirebenchDocument.encode(Self.richProject()))
+                                  as? [String: Any])
+        object["formatVersion"] = 1
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try WirebenchDocument.decode(data)
+        #expect(decoded == Self.richProject())
+        #expect(decoded.maraflow == nil)
+    }
+
     @Test("A newer format version is refused with its number")
     func newerVersionIsRefused() throws {
         var object = try #require(try JSONSerialization.jsonObject(with: WirebenchDocument.encode(Self.richProject()))
                                   as? [String: Any])
-        object["formatVersion"] = 2
+        object["formatVersion"] = 3
         let data = try JSONSerialization.data(withJSONObject: object)
-        #expect(throws: WirebenchDocumentError.unsupportedVersion(2)) {
+        #expect(throws: WirebenchDocumentError.unsupportedVersion(3)) {
             try WirebenchDocument.decode(data)
         }
     }

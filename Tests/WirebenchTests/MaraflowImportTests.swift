@@ -170,6 +170,39 @@ struct MaraflowImportTests {
         #expect(try WirebenchDocument.decode(encoded) == project)
     }
 
+    @Test("Fields the importer does not interpret survive in the Maraflow extras")
+    func extrasPreserved() throws {
+        var entries: [(String, String)] = [
+            ("maraflow.version", "1.0.0"),
+            ("project.name", "Extras"),
+            ("project.pageCount", "1"),
+            ("project.targetPlatform", "STM32F407-Maraflow-Std"),
+            ("project.tagCount", "1"),
+            ("project.tag.0.name", "Speed"),
+            ("project.tag.0.type", "FLOAT"),
+            ("project.estop.enabled", "true"),
+            ("project.estop.mode", "DISABLE_OUTPUTS_AND_STOP"),
+            ("project.estop.ruleCount", "1"),
+            ("project.estop.rule.0.channel", "DI3"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.0.graphicCount", "1"),
+            ("page.0.graphic.0.kind", "RECTANGLE"),
+            ("page.0.graphic.0.gridX", "4"),
+            ("page.0.graphic.0.text", "Pump"),
+        ]
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "extras")
+        let extras = try #require(outcome.project.maraflow)
+        #expect(extras.formatVersion == "1.0.0")
+        #expect(extras.properties["project.tag.0.name"] == "Speed")
+        #expect(extras.properties["project.estop.enabled"] == "true")
+        #expect(extras.properties["page.0.graphic.0.text"] == "Pump")
+        let decoded = try WirebenchDocument.decode(WirebenchDocument.encode(outcome.project))
+        #expect(decoded.maraflow == extras)
+    }
+
     @Test("The app opens .mfl as an imported project and saves it as .wbp")
     @MainActor
     func appImport() throws {

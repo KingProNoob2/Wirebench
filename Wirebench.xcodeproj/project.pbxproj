@@ -66,6 +66,7 @@
 		4AC3B7187DE5D7532148A36A /* DataAndArrayBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB5133ABA7613474CC5FFC7 /* DataAndArrayBlocks.swift */; };
 		4B3EEBDB852CFCE3A5D158E2 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F526AD594FE3751C0713D52 /* HelpView.swift */; };
 		4D722BC69380E1914ACBC465 /* ParameterPinTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD2A56724BE89B00C9DE779B /* ParameterPinTests.swift */; };
+		4DA53C67484057E4D4170F48 /* MaraflowExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26730718C8D9F0F4D6293628 /* MaraflowExtras.swift */; };
 		4E020688AA363C753D5E3E87 /* SystemCmdEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FFCAA2574CFC015E8CE0AA /* SystemCmdEditingTests.swift */; };
 		4E28EC67FD21F88929AE7556 /* Completion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E14AFEDA07B6C7A06F2E77 /* Completion.swift */; };
 		4E33093F8B4850527CEEDB9F /* BlockInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 601B98187AE5D94E7119B240 /* BlockInteraction.swift */; };
@@ -558,6 +559,7 @@
 		23595538FA2AE264695BCD4A /* BlockFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockFactoryTests.swift; sourceTree = "<group>"; };
 		24F07E8637A09E92A56CB0FB /* OtherBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtherBlocks.swift; sourceTree = "<group>"; };
 		25D4941EDC68ED2AF636ABA2 /* BlockLabels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockLabels.swift; sourceTree = "<group>"; };
+		26730718C8D9F0F4D6293628 /* MaraflowExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowExtras.swift; sourceTree = "<group>"; };
 		27146F39436C6210A99D6E3B /* MathBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathBlocks.swift; sourceTree = "<group>"; };
 		2819FD5BD9198F1A8770AEDB /* StructuredTextRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredTextRegressionTests.swift; sourceTree = "<group>"; };
 		2BBD5130FBB440F60775DF0A /* TextAnnotationEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextAnnotationEditor.swift; sourceTree = "<group>"; };
@@ -1140,6 +1142,7 @@
 				7C516C6C36DF899C8FAE3685 /* MacroCalls.swift */,
 				E4AB8FFBAC5C37948916DC93 /* MacroInstancing.swift */,
 				360D18BB6847D60CE83BF619 /* MacroInterface.swift */,
+				26730718C8D9F0F4D6293628 /* MaraflowExtras.swift */,
 				B0F4A3536C23C27EBE9363C6 /* Models.swift */,
 				9A8213CE996731A223997D01 /* PaperSize.swift */,
 				93144C50CA9C72FEDB6D1374 /* PCCGraphicBuilder.swift */,
@@ -1170,7 +1173,7 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_92220020-31D9-46F2-8F2C-EA171A9E2045" /* Wirebench */ = {
+		"TEMP_8C63EC68-F501-4511-BA2A-749EECE050E0" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
 				1A521C0652DDE7C0AFB37D41 /* Release.xcconfig */,
@@ -1723,6 +1726,7 @@
 				D2C345BE124743C337030F72 /* MacroCalls.swift in Sources */,
 				646D2F0B63941336BD6A3337 /* MacroInstancing.swift in Sources */,
 				37D103DBA44B94C90FBB1BF4 /* MacroInterface.swift in Sources */,
+				4DA53C67484057E4D4170F48 /* MaraflowExtras.swift in Sources */,
 				930CBB34D1A67AB72B00ABCB /* Models.swift in Sources */,
 				DD5A620CCF7B0523857008F6 /* PCCGraphicBuilder.swift in Sources */,
 				6FC405800C247CB83B2539FA /* PCCParser.swift in Sources */,

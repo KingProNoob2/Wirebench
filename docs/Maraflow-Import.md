@@ -24,6 +24,11 @@ wires flattened into numbered keys:
 </properties>
 ```
 
+Every key read from the `.mfl` is also kept verbatim in `project.maraflow.properties` in the native `.wbp`, including
+tags, E-Stop configuration, graphic objects, bus ids, wire route points and ST/rung data that the importer does not yet
+interpret. This is the lossless fallback for the compatibility stages; it is preserved by save and by the JSON format's
+version 2.
+
 The reader is content-based: a `<properties>` document is Maraflow, a `PCC_PROJECT` document is Dirigo, and a JSON
 object is a native `.wbp`. The extension only guides the file panels.
 

@@ -16,14 +16,14 @@ that does.
 ```json
 {
   "format" : "wirebench-project",
-  "formatVersion" : 1,
+  "formatVersion" : 2,
   "project" : { ... }
 }
 ```
 
 - `format` must be `wirebench-project`; a different JSON document is refused with a clear error.
-- `formatVersion` is the schema version of `project`. This build reads version **1** and refuses other versions rather
-  than guessing.
+- `formatVersion` is the schema version of `project`. This build reads versions **1 and 2** and refuses other versions
+  rather than guessing. Version 2 adds the optional `project.maraflow` object; version 1 files open unchanged.
 - The file is pretty-printed with sorted keys and ends with a newline. Sorted keys do not reorder XML attributes:
   attributes are stored as an ordered array of `[name, value]` pairs, so the legacy export reproduces their order.
 
@@ -33,7 +33,9 @@ that does.
   connections;
 - the PLC configuration, graphics, application options and simulation options;
 - the raw root attributes, unknown sections, unknown section children, root comments and the legacy writer's
-  self-closing-space style.
+  self-closing-space style;
+- an optional `maraflow` object: the verbatim `.mfl` property table (tags, E-Stop rules, graphics, bus ids, wire
+  routes, ST code and anything else a future reader learns to interpret). It is absent for native and Dirigo projects.
 
 ## Versioning and compatibility
 

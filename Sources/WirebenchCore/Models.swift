@@ -499,6 +499,9 @@ public struct PCCProject: Sendable, Codable, Equatable {
     /// The project's PLC configuration: `SystemCmd` blocks held as configuration entries instead of blocks on a sheet (`PLCConfiguration`). Each is
     /// the block itself, so that writing it back as a block reproduces the original exactly; one an editor made has no page yet (`page == ""`).
     public var plcConfiguration: [PCCModule]
+    /// Maraflow-only data (tags, E-Stop, graphics, bus ids, wire routes) preserved verbatim for a `.mfl` import.
+    /// Absent for every native and Dirigo project.
+    public var maraflow: MaraflowExtras?
 
     public init(
         application: String = "Dirigo",
@@ -528,7 +531,8 @@ public struct PCCProject: Sendable, Codable, Equatable {
         inConnections: [Connection] = [],
         paramConnections: [Connection] = [],
         graphics: [ProjectGraphic] = [],
-        plcConfiguration: [PCCModule] = []
+        plcConfiguration: [PCCModule] = [],
+        maraflow: MaraflowExtras? = nil
     ) {
         self.application = application
         self.applicationVersion = applicationVersion
@@ -558,6 +562,7 @@ public struct PCCProject: Sendable, Codable, Equatable {
         self.paramConnections = paramConnections
         self.graphics = graphics
         self.plcConfiguration = plcConfiguration
+        self.maraflow = maraflow
     }
 }
 

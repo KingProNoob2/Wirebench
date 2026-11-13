@@ -12,7 +12,7 @@ import Foundation
 /// forward-compatible for readers that know the same version.
 public struct WirebenchDocument: Codable, Sendable, Equatable {
     public static let formatName = "wirebench-project"
-    public static let currentVersion = 1
+    public static let currentVersion = 2
     public static let fileExtension = "wbp"
 
     /// Identifies the format itself, so a random JSON file is rejected with a clear error.
@@ -46,9 +46,11 @@ public struct WirebenchDocument: Codable, Sendable, Equatable {
         guard document.format == formatName else {
             throw WirebenchDocumentError.foreignFormat(document.format)
         }
-        guard document.formatVersion == currentVersion else {
+        guard document.formatVersion >= 1, document.formatVersion <= currentVersion else {
             throw WirebenchDocumentError.unsupportedVersion(document.formatVersion)
         }
+        // Version 2 added `maraflow` extras; a version 1 file simply has none. The model's synthesized decoding already
+        // treats the missing key as nil, so the migration is the version check itself.
         return document.project
     }
 
