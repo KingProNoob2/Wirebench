@@ -244,7 +244,13 @@ private final class PageReader {
                 continue
             }
             for connection in project.inConnections where connection.inModuleId == module.id && connection.inPinId >= 2 {
-                guard let variable = variableNames[connection.outModuleId] else { continue }
+                guard let variable = variableNames[connection.outModuleId] else {
+                    if let producer = modules.first(where: { $0.id == connection.outModuleId }),
+                       ["IntVar", "LongVar", "FloatVar"].contains(BlockTypeCatalog.info(forGuid: producer.guid)?.blockName ?? "") {
+                        unsupported.append("\(producer.name) (typed variable write)")
+                    }
+                    continue
+                }
                 let assignment = "        \(variable) := \(value);"
                 if let branch = branchOf[module.id],
                    let group = conditionalGroups.first(where: { $0.thenIds.contains(module.id) || $0.elseIds.contains(module.id) }) {

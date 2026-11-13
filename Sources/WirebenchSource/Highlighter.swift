@@ -43,7 +43,7 @@ public enum SourceHighlighter {
         "INTERFACE", "END_INTERFACE", "METHOD", "END_METHOD",
     ]
     private static let types: Set<String> = [
-        "BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT", "ULINT",
+        "BOOL", "SINT", "INT", "LONG", "DINT", "LINT", "USINT", "UINT", "UDINT", "ULINT",
         "REAL", "LREAL", "BYTE", "WORD", "DWORD", "LWORD", "TIME", "DATE", "TOD", "DT",
         "STRING", "WSTRING", "CHAR", "WCHAR",
     ]

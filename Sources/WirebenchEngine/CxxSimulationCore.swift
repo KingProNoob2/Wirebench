@@ -236,6 +236,9 @@ public final class CxxSimulationCore {
             for (idx, pin) in mod.paramPins.enumerated() where idx < block.paramPins.count {
                 block.paramPins[idx] = pin.value
             }
+            // A stored out-pin value is not a starting state here: Dirigo writes last-run values, and the recordings
+            // this engine is checked against were made without applying them. A variable's configured value comes
+            // from `INIT_VALUE` (IntVar/LongVar/FloatVar) or its block default.
             (block as? SystemCmdBlock)?.applyDefinition()
             let kind = Self.kind(forGUID: mod.guid) ?? WIREBENCH_BLOCK_UNRESOLVED
             if kind != WIREBENCH_BLOCK_UNRESOLVED { ported += 1 }

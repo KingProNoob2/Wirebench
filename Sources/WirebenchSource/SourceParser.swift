@@ -24,6 +24,7 @@ public struct SourceExpr: Equatable, Sendable {
     public indirect enum Kind: Equatable, Sendable {
         case boolean(Bool)
         case integer(Int)
+        case real(Double)
         case name(String)
         /// `t.result`: one of a function-block instance's outputs.
         case member(SourceExpr, String)
@@ -84,14 +85,38 @@ public struct SourcePin: Equatable, Sendable {
     }
 }
 
-/// A stored `BOOL`: the program's state, one `BoolVar` and one `Set` per name.
+/// The scalar types the subset understands. `INT`/`LONG`/`REAL` are internal variables for now: the hardware pins
+/// (`AT %IXn` / `AT %QXn`, `VAR_INPUT`/`VAR_OUTPUT`) are still BOOL.
+public enum SourceType: Equatable, Sendable {
+    case bool, int, long, real
+
+    public var name: String {
+        switch self {
+        case .bool: return "BOOL"
+        case .int: return "INT"
+        case .long: return "LONG"
+        case .real: return "REAL"
+        }
+    }
+}
+
+/// A declaration's initial value, typed by the declared type.
+public enum SourceLiteral: Equatable, Sendable {
+    case boolean(Bool)
+    case integer(Int)
+    case real(Double)
+}
+
+/// A stored value: the program's state, one `BoolVar`/`IntVar`/`LongVar`/`FloatVar` and one `Set` per name.
 public struct SourceVariable: Equatable, Sendable {
     public var name: String
-    public var initial: Bool
+    public var type: SourceType
+    public var initial: SourceLiteral?
     public var line: Int
 
-    public init(name: String, initial: Bool = false, line: Int) {
+    public init(name: String, type: SourceType = .bool, initial: SourceLiteral? = nil, line: Int) {
         self.name = name
+        self.type = type
         self.initial = initial
         self.line = line
     }
@@ -219,7 +244,7 @@ public struct SourceParser {
     private func describe(_ token: STToken) -> String {
         switch token.kind {
         case .endOfFile: return "the end of the file"
-        case .integer: return "the number \(token.text)"
+        case .integer, .real: return "the number \(token.text)"
         default: return "'\(token.text)'"
         }
     }
@@ -283,12 +308,9 @@ public struct SourceParser {
                 address = try addressPin()
             }
             try expectSymbol(":")
-            let type = try typeName()
-            var initial = false
-            if isSymbol(":=") {
-                advance()
-                initial = try booleanLiteral(required: true)
-            }
+            let declared = try typeName()
+            var initial: SourceLiteral?
+            if case .scalar(let scalar) = declared { initial = try initialValue(for: scalar) }
             try expectSymbol(";")
 
             if region == "VAR_INPUT" || region == "VAR_OUTPUT" {
@@ -296,8 +318,10 @@ public struct SourceParser {
                     throw error("a PROGRAM's pins are declared AT %IXn / AT %QXn")
                 }
                 guard address == nil else { throw error("a FUNCTION_BLOCK pin takes no address") }
-                guard !initial else { throw error("a pin takes no initial value") }
-                guard type == "BOOL" else { throw error("only BOOL pins are supported, not \(type)") }
+                guard case .scalar(.bool) = declared else {
+                    throw error("a pin is BOOL, not \(declared)")
+                }
+                guard initial == nil else { throw error("a pin takes no initial value") }
                 let direction: SourcePin.Direction = region == "VAR_INPUT" ? .input : .output
                 if isNameTaken(name, in: unit) { throw error("'\(name)' is declared twice") }
                 let index = unit.pins.filter { $0.direction == direction }.count
@@ -306,21 +330,21 @@ public struct SourceParser {
                 guard region == "VAR" else {
                     throw error("AT %… belongs in a plain VAR block")
                 }
-                guard !initial else { throw error("a pin takes no initial value") }
-                guard type == "BOOL" else { throw error("a pin is BOOL, not \(type)") }
+                guard initial == nil else { throw error("a pin takes no initial value") }
+                guard case .scalar(.bool) = declared else { throw error("a pin is BOOL, not \(declared)") }
                 if unit.pins.contains(where: { $0.direction == direction && $0.index == index }) {
                     throw error("\(direction == .input ? "I" : "Q")\(index) is declared twice")
                 }
                 if isNameTaken(name, in: unit) { throw error("'\(name)' is declared twice") }
                 unit.pins.append(SourcePin(direction: direction, index: index, name: name, line: nameToken.line))
-            } else if type == "BOOL" {
-                guard initial == false || region == "VAR" else {
+            } else if case .scalar(let scalar) = declared {
+                guard region == "VAR" || initial == nil else {
                     throw error("only an internal variable takes an initial value")
                 }
                 if isNameTaken(name, in: unit) { throw error("'\(name)' is declared twice") }
-                unit.variables.append(SourceVariable(name: name, initial: initial, line: nameToken.line))
-            } else {
-                if initial { throw error("an instance takes no initial value") }
+                unit.variables.append(SourceVariable(name: name, type: scalar, initial: initial, line: nameToken.line))
+            } else if case .instance(let type) = declared {
+                if initial != nil { throw error("an instance takes no initial value") }
                 guard !isNameTaken(name, in: unit) else { throw error("'\(name)' is declared twice") }
                 unit.instances.append(SourceInstance(name: name, typeName: type, line: nameToken.line))
             }
@@ -361,18 +385,51 @@ public struct SourceParser {
     }
 
     /// A declared type: `BOOL`, `INT`, `REAL`, or the name of a function block / catalogued block.
-    private mutating func typeName() throws -> String {
-        if current.kind == .keyword, current.text.uppercased() == "BOOL" {
-            let token = advance()
-            return token.text.uppercased()
-        }
-        if current.kind == .keyword, ["INT", "REAL", "LREAL", "WORD"].contains(current.text.uppercased()) {
-            throw error("only BOOL is supported; this subset is Boolean")
+    private enum DeclaredType {
+        case scalar(SourceType)
+        case instance(String)
+    }
+
+    private mutating func typeName() throws -> DeclaredType {
+        if current.kind == .keyword {
+            switch current.text.uppercased() {
+            case "BOOL": advance(); return .scalar(.bool)
+            case "INT", "WORD": advance(); return .scalar(.int)
+            case "LONG": advance(); return .scalar(.long)
+            case "REAL", "LREAL": advance(); return .scalar(.real)
+            default: break
+            }
         }
         guard current.kind == .identifier else {
             throw error("expected a type but found \(describe(current))")
         }
-        return advance().text
+        return .instance(advance().text)
+    }
+
+    /// `:= 5`, `:= -2.5`, `:= TRUE`: the literal a declaration is initialised with, if any.
+    private mutating func initialValue(for type: SourceType) throws -> SourceLiteral? {
+        guard isSymbol(":=") else { return nil }
+        advance()
+        if type == .bool {
+            return .boolean(try booleanLiteral(required: true))
+        }
+        var negative = false
+        if isSymbol("-") { advance(); negative = true }
+        if current.kind == .integer {
+            let token = advance()
+            guard let value = Int(token.text) else { throw error("the number \(token.text) is too large", at: token) }
+            let signed = negative ? -value : value
+            if type == .real { return .real(Double(signed)) }
+            return .integer(signed)
+        }
+        if current.kind == .real {
+            let token = advance()
+            guard type == .real, let value = Double(token.text) else {
+                throw error("a \(type.name) starts with a whole number", at: token)
+            }
+            return .real(negative ? -value : value)
+        }
+        throw error("expected a literal after ':='")
     }
 
     private mutating func booleanLiteral(required: Bool) throws -> Bool {
@@ -557,6 +614,13 @@ public struct SourceParser {
             }
             return SourceExpr(.integer(value), line: token.line)
         }
+        if token.kind == .real {
+            advance()
+            guard let value = Double(token.text) else {
+                throw error("the number \(token.text) is not a real", at: token)
+            }
+            return SourceExpr(.real(value), line: token.line)
+        }
         if isKeyword("TRUE") || isKeyword("FALSE") {
             advance()
             return SourceExpr(.boolean(token.text.uppercased() == "TRUE"), line: token.line)
@@ -587,7 +651,7 @@ public struct SourceParser {
 // MARK: - Tokens
 
 struct STToken: Equatable {
-    enum Kind: Equatable { case identifier, integer, keyword, symbol, endOfFile }
+    enum Kind: Equatable { case identifier, integer, real, keyword, symbol, endOfFile }
     var kind: Kind
     var text: String
     var line: Int
@@ -608,7 +672,7 @@ struct STLexer {
         "IF", "THEN", "ELSIF", "ELSE", "END_IF",
         "AND", "OR", "XOR", "NOT", "MOD", "AT",
         "TRUE", "FALSE",
-        "BOOL", "INT", "REAL", "LREAL", "WORD",
+        "BOOL", "INT", "LONG", "REAL", "LREAL", "WORD",
     ]
 
     static let symbols = [":=", "<=", ">=", "<>", ";", ":", ",", "(", ")", ".", "%",
@@ -650,7 +714,13 @@ struct STLexer {
             } else if c.isNumber {
                 var text = ""
                 while let d = current, d.isNumber { text.append(advance()!) }
-                tokens.append(STToken(kind: .integer, text: text, line: startLine, column: startColumn))
+                var kind = STToken.Kind.integer
+                if current == ".", let next = peek(1), next.isNumber {
+                    text.append(advance()!)
+                    while let d = current, d.isNumber { text.append(advance()!) }
+                    kind = .real
+                }
+                tokens.append(STToken(kind: kind, text: text, line: startLine, column: startColumn))
             } else if let symbol = Self.symbols.first(where: { symbol in
                 var i = index
                 for ch in symbol {

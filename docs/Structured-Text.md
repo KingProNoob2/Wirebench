@@ -29,9 +29,14 @@ END_PROGRAM
 - **Programs.** `PROGRAM Name … END_PROGRAM`; the first one is the page the document opens on. Every program is a page.
 - **Pins.** `name AT %IXn : BOOL` is digital input *n*, `name AT %QXn : BOOL` output *n*, 0–7. A program gets one `8xDI`
   and one `8xDO`; a variable is read at the scan's start.
-- **State.** A `BOOL` declared in `VAR` without an address is a stored variable — a `BoolVar` plus the `Set` that writes
-  it. It becomes visible from the next scan, exactly like Dirigo's own clocked behaviour. `:= TRUE` gives it an initial
-  value.
+- **State.** A value declared in `VAR` without an address is a stored variable — a `BoolVar`/`IntVar`/`LongVar`/
+  `FloatVar` plus the `Set` that writes it. It becomes visible from the next scan, exactly like Dirigo's own clocked
+  behaviour. An initialiser (`:= 5`) is the variable's configured value (`INIT_VALUE`).
+- **Types.** `BOOL`, `INT`, `LONG` and `REAL` are supported for internal variables. A number widens `INT -> LONG ->
+  REAL`; narrowing is refused. `+ - * /` on `INT`, `+ -` on `LONG`, and `+ - * / MOD` on `REAL` are lowered to
+  `IAdd`/`ISub`/`IMul`/`Div`, `LAdd`/`LSub` and `FAdd`/`FSub`/`FMul`/`FDiv`/`FMod`. Comparisons `= <> < > <= >=`
+  lower to `Comparator` (INT) or `LComparator` (LONG) — the catalogue has no float comparator, so a `REAL` comparison
+  is refused; so are `LONG` multiply/divide and `INT` modulo, which have no block. Pins are still BOOL.
 - **Expressions.** `AND`, `OR`, `XOR`, `NOT`, `=`, `<>`, parentheses. `TRUE`/`FALSE` and integer literals. Numeric
   arithmetic is refused with a message; this subset is Boolean.
 - **Statements.** `name := expression;`, `instance(arguments);`, and `IF … THEN … ELSIF … ELSE … END_IF;`.
@@ -52,6 +57,9 @@ END_PROGRAM
 | a program | a page |
 | `AT %IXn` / `AT %QXn` | one `8xDI` / one `8xDO`, pins in order |
 | stored `BOOL` | `BoolVar` + `Set` |
+| stored `INT`/`LONG`/`REAL` | `IntVar`/`LongVar`/`FloatVar` + `Set`; value in `INIT_VALUE` |
+| arithmetic/comparison | `IAdd`/`ISub`/`IMul`/`Div`, `LAdd`/`LSub`, `FAdd`/`FSub`/`FMul`/`FDiv`/`FMod`, `Comparator`/`LComparator` |
+| numeric `IF` merge | `ISwitch`/`LSwitch`/`FSwitch` |
 | `IF` | a selection of wires (`select`), folded where the condition is constant |
 | `AND`/`OR`/`XOR`/`NOT` | `And`/`Or`/`Xor`/`Not` |
 | a function block | a `*` macro page: `Inputs`/`Outputs` interface, body in between |
@@ -76,6 +84,12 @@ back as `di0`, `do0`, `state`. Digital I/O is recovered by **hardware channel**:
 counted/hidden `8xDO` (`PIN_COUNT`, `HIDDEN_PIN_MASK`) declares the channels it exposes (`AT %IX4`, `AT %QX1`). A channel
 above 7 has no spelling in the subset and is listed instead of moved to another pin.
 
+## Recovery and typed values
+
+A typed variable is **not** recovered as a typed `VAR` yet: the `Set` that writes it is listed under
+`(* Not recovered: … (typed variable write) *)`. An `IntVar`/`LongVar`/`FloatVar` instance still comes back as a
+catalogued block instance, so its output reads as a BOOL wire rather than a number.
+
 ## Command line
 
 ```sh
@@ -87,8 +101,9 @@ same compiler.
 
 ## Limits
 
-- `BOOL` only: `INT`, `REAL`, arrays, structures, `CASE`, `FOR`, `WHILE`, `REPEAT`, `VAR_GLOBAL` and direct addresses other
-  than `%IX`/`%QX` are refused.
+- `BOOL` pins only: `AT %IXn`/`%QXn` and `VAR_INPUT`/`VAR_OUTPUT` are BOOL; typed values are internal variables.
+- `REAL` comparisons, `LONG` multiply/divide and `INT` modulo have no block and are refused. Arrays, structures,
+  `CASE`, `FOR`, `WHILE`, `REPEAT`, `VAR_GLOBAL` and direct addresses other than `%IX`/`%QX` are refused.
 - A block call cannot sit inside `IF` (its wiring has no condition); create the block before the branch.
 - A `%QX` output must be assigned before it is read, and an output written only inside `IF` must also be written before the
   `IF` or in both branches — otherwise the compiler refuses it rather than silently driving the pin.

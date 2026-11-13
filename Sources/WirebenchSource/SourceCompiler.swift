@@ -130,6 +130,71 @@ public struct SourceCompiler {
     }
 }
 
+/// The catalogue block that computes `op` on `type`, if one exists. `Div` is the integer division; the catalogue has
+/// no Long multiply/divide or Int modulo, so those are refused rather than approximated.
+private func numericBlock(_ op: String, _ type: NumType) -> UUID? {
+    let name: String?
+    switch (type, op) {
+    case (.int, "+"): name = "IAdd"
+    case (.int, "-"): name = "ISub"
+    case (.int, "*"): name = "IMul"
+    case (.int, "/"): name = "Div"
+    case (.long, "+"): name = "LAdd"
+    case (.long, "-"): name = "LSub"
+    case (.real, "+"): name = "FAdd"
+    case (.real, "-"): name = "FSub"
+    case (.real, "*"): name = "FMul"
+    case (.real, "/"): name = "FDiv"
+    case (.real, "%"): name = "FMod"
+    default: name = nil
+    }
+    guard let name else { return nil }
+    return BlockTypeCatalog.info(forBlockName: name)?.guid
+}
+
+private func comparisonBlock(_ type: NumType) -> UUID? {
+    switch type {
+    case .int: return BlockTypeCatalog.info(forBlockName: "Comparator")?.guid
+    case .long: return BlockTypeCatalog.info(forBlockName: "LComparator")?.guid
+    case .real: return nil
+    }
+}
+
+private func switchBlock(_ type: NumType) -> UUID? {
+    let name = type == .int ? "ISwitch" : type == .long ? "LSwitch" : "FSwitch"
+    return BlockTypeCatalog.info(forBlockName: name)?.guid
+}
+
+// MARK: - Values
+
+enum NumType: Equatable {
+    case int, long, real
+
+    var name: String {
+        switch self {
+        case .int: return "INT"
+        case .long: return "LONG"
+        case .real: return "REAL"
+        }
+    }
+}
+
+/// A numeric expression, with the type each node produces.
+indirect enum NumExpr: Equatable {
+    case constant(PinValue)
+    case variable(String)
+    case negate(NumExpr, NumType)
+    case binary(String, NumExpr, NumExpr, NumType)
+    /// `condition ? a : b`, lowered to `ISwitch`/`LSwitch`/`FSwitch`.
+    case select(BoolExpr, NumExpr, NumExpr, NumType)
+}
+
+/// A lowered value: a Boolean signal, or a number with its type.
+indirect enum Value: Equatable {
+    case bool(BoolExpr)
+    case number(NumExpr, NumType)
+}
+
 // MARK: - The Boolean expression tree
 
 /// A Boolean signal as a pure expression. `IF` becomes `select`, so a whole scan is one expression per output.
@@ -143,6 +208,8 @@ indirect enum BoolExpr: Equatable {
     case macroCall(Int, Int)
     /// The output of a library block call site (index) by pin position.
     case blockOutput(Int, Int)
+    /// A numeric comparison, materialised as a comparator block's output when the Boolean is used.
+    case comparison(String, NumExpr, NumExpr, NumType)
     case not(BoolExpr)
     case and(BoolExpr, BoolExpr)
     case or(BoolExpr, BoolExpr)
@@ -151,7 +218,7 @@ indirect enum BoolExpr: Equatable {
     func walk(_ visit: (BoolExpr) -> Void) {
         visit(self)
         switch self {
-        case .constant, .input, .variable, .macroInput, .macroCall, .blockOutput:
+        case .constant, .input, .variable, .macroInput, .macroCall, .blockOutput, .comparison:
             break
         case .not(let a):
             a.walk(visit)
@@ -205,6 +272,7 @@ indirect enum BoolExpr: Equatable {
 /// Where a consumer's input pin gets its value: a constant written into the pin, or a wire from a producer's output.
 enum PinSource {
     case constant(Bool)
+    case number(PinValue)
     case pin(module: Int, outPin: Int)
 }
 
@@ -292,6 +360,8 @@ final class Emitter {
         switch source {
         case .constant(let value):
             setIn(consumer, pin, .bool(value))
+        case .number(let value):
+            setIn(consumer, pin, value)
         case .pin(let module, let outPin):
             connections.append(Connection(inModuleId: consumer, inPinId: pin, outModuleId: module, outPinId: outPin))
         }
@@ -334,14 +404,45 @@ final class Emitter {
         // Variables exist before anything reads them: a read is the block's output, the value at the start of the scan.
         // The writes go in last, so everything that reads a variable reads it before the scan updates it.
         for variable in unit.variables {
-            let block = addBlock(BoolVarBlock.guid)
-            setOut(block, pin: 0, .bool(variable.initial))
+            let blockGuid: UUID
+            switch variable.type {
+            case .bool: blockGuid = BoolVarBlock.guid
+            case .int: blockGuid = try guid("IntVar")
+            case .long: blockGuid = try guid("LongVar")
+            case .real: blockGuid = try guid("FloatVar")
+            }
+            let initial: PinValue
+            switch (variable.type, variable.initial) {
+            case (.bool, .boolean(let value)?): initial = .bool(value)
+            case (.int, .integer(let value)?): initial = .int32(Int32(clamping: value))
+            case (.long, .integer(let value)?): initial = .int32(Int32(clamping: value))
+            case (.real, .real(let value)?): initial = .float(Float(value))
+            case (.real, .integer(let value)?): initial = .float(Float(value))
+            default:
+                switch variable.type {
+                case .bool: initial = .bool(false)
+                case .int: initial = .int32(0)
+                case .long: initial = .int32(0)
+                case .real: initial = .float(0)
+                }
+            }
+            let block = addBlock(blockGuid)
+            setOut(block, pin: 0, initial)
+            if variable.type != .bool {
+                // A variable's configured value is `INIT_VALUE`; the simulator/registry reads it from there.
+                if let index = modules.firstIndex(where: { $0.id == block }) {
+                    modules[index].rawAttributes["INIT_VALUE"] = "\(initial)"
+                }
+            }
             variableBlocks[variable.name.lowercased()] = block
         }
 
         var sources: [(pin: Int, source: PinSource)] = []
-        for (pin, expression) in lowered.outputs.sorted(by: { $0.key < $1.key }) {
-            sources.append((pin, try materialise(expression)))
+        for (pin, value) in lowered.outputs.sorted(by: { $0.key < $1.key }) {
+            guard case .bool(let expression) = value else {
+                throw SourceError(line: unit.line, message: "a numeric value cannot drive a BOOL output pin")
+            }
+            sources.append((pin, try materialiseBool(expression)))
         }
         if unit.kind == .program && !sources.isEmpty {
             let doBlock = addBlock(EightDOBlock.guid)
@@ -396,10 +497,36 @@ final class Emitter {
 
     // MARK: - Expressions
 
-    func materialise(_ expression: BoolExpr) throws -> PinSource {
+    /// The catalogue block with this name, or a clear error.
+    private func guid(_ name: String) throws -> UUID {
+        guard let guid = BlockTypeCatalog.info(forBlockName: name)?.guid else {
+            throw SourceError(line: 0, message: "the catalogue has no block named '\(name)'")
+        }
+        return guid
+    }
+
+    func materialise(_ value: Value) throws -> PinSource {
+        switch value {
+        case .bool(let expression): return try materialiseBool(expression)
+        case .number(let expression, _): return try materialiseNumber(expression)
+        }
+    }
+
+    func materialiseBool(_ expression: BoolExpr) throws -> PinSource {
         switch expression {
         case .constant(let value):
             return .constant(value)
+        case .comparison(let op, let a, let b, let type):
+            guard let blockGuid = comparisonBlock(type) else {
+                throw SourceError(line: 0, message: "no comparator for \(type.name)")
+            }
+            let left = try materialiseNumber(a), right = try materialiseNumber(b)
+            let block = addBlock(blockGuid)
+            connect(block, 0, .constant(true))
+            connect(block, 1, left)
+            connect(block, 2, right)
+            let output = op == ">" ? 0 : op == "==" ? 1 : 2
+            return .pin(module: block, outPin: output)
         case .input(let pin):
             if digitalInput == nil { digitalInput = addBlock(EightDIBlock.guid) }
             return .pin(module: digitalInput!, outPin: pin)
@@ -420,27 +547,72 @@ final class Emitter {
             }
             return .pin(module: block, outPin: pin)
         case .not(let operand):
-            let value = try materialise(operand)
+            let value = try materialiseBool(operand)
             let block = addBlock(NotBlock.guid)
             connect(block, 1, value)
             return .pin(module: block, outPin: 0)
         case .and(let a, let b):
-            let left = try materialise(a), right = try materialise(b)
+            let left = try materialiseBool(a), right = try materialiseBool(b)
             let block = addBlock(AndBlock.guid)
             connect(block, 1, left)
             connect(block, 2, right)
             return .pin(module: block, outPin: 0)
         case .or(let a, let b):
-            let left = try materialise(a), right = try materialise(b)
+            let left = try materialiseBool(a), right = try materialiseBool(b)
             let block = addBlock(OrBlock.guid)
             connect(block, 1, left)
             connect(block, 2, right)
             return .pin(module: block, outPin: 0)
         case .xor(let a, let b):
-            let left = try materialise(a), right = try materialise(b)
+            let left = try materialiseBool(a), right = try materialiseBool(b)
             let block = addBlock(XorBlock.guid)
             connect(block, 1, left)
             connect(block, 2, right)
+            return .pin(module: block, outPin: 0)
+        }
+    }
+
+    /// Lower a numeric expression to a pin: constants into the consumer's pin, or a wire from a block's output.
+    private func materialiseNumber(_ expression: NumExpr) throws -> PinSource {
+        switch expression {
+        case .constant(let value):
+            return .number(value)
+        case .variable(let name):
+            guard let block = variableBlocks[name.lowercased()] else {
+                throw SourceError(line: 0, message: "unknown variable '\(name)'")
+            }
+            return .pin(module: block, outPin: 0)
+        case .negate(let inner, let type):
+            guard let blockGuid = numericBlock("-", type) else {
+                throw SourceError(line: 0, message: "no block computes '-' on \(type.name)")
+            }
+            let operand = try materialiseNumber(inner)
+            let block = addBlock(blockGuid)
+            connect(block, 0, .constant(true))
+            connect(block, 1, .number(type == .real ? .float(0) : .int32(0)))
+            connect(block, 2, operand)
+            return .pin(module: block, outPin: 0)
+        case .binary(let op, let a, let b, let type):
+            guard let blockGuid = numericBlock(op, type) else {
+                throw SourceError(line: 0, message: "no block computes '\(op)' on \(type.name)")
+            }
+            let left = try materialiseNumber(a), right = try materialiseNumber(b)
+            let block = addBlock(blockGuid)
+            connect(block, 0, .constant(true))
+            connect(block, 1, left)
+            connect(block, 2, right)
+            return .pin(module: block, outPin: 0)
+        case .select(let condition, let whenTrue, let whenFalse, let type):
+            guard let blockGuid = switchBlock(type) else {
+                throw SourceError(line: 0, message: "no selector for \(type.name)")
+            }
+            let test = try materialiseBool(condition)
+            let yes = try materialiseNumber(whenTrue), no = try materialiseNumber(whenFalse)
+            let block = addBlock(blockGuid)
+            connect(block, 0, .constant(true))
+            connect(block, 1, test)
+            connect(block, 2, no)       // X0, the value when Sw = 0
+            connect(block, 3, yes)      // X1, the value when Sw = 1
             return .pin(module: block, outPin: 0)
         }
     }
@@ -467,7 +639,7 @@ final class Emitter {
         for (pin, argument) in call.inputs {
             switch argument {
             case .constant(let value): setIn(block, pin, value)
-            case .signal(let expression): connect(block, pin, try materialise(expression))
+            case .signal(let expression): connect(block, pin, try materialiseBool(expression))
             }
         }
         for (parameter, value) in call.params { setParam(block, parameter, value) }
@@ -503,7 +675,7 @@ final class Emitter {
         callBlocks[index] = block
         for (position, name) in names.enumerated() {
             guard let argument = call.arguments[name.lowercased()] else { continue }
-            connect(block, position, try materialise(argument))
+            connect(block, position, try materialiseBool(argument))
         }
         assignOrder(block)
         return block
@@ -536,8 +708,8 @@ struct CallSite {
 
 /// What a unit's body lowered to.
 struct LoweredScan {
-    var outputs: [Int: BoolExpr] = [:]
-    var variableWrites: [String: BoolExpr] = [:]
+    var outputs: [Int: Value] = [:]
+    var variableWrites: [String: Value] = [:]
     var calls: [CallSite] = []
     var blockCalls: [BlockCall] = []
     /// Which instances the body actually calls; an uncalled one is not emitted at all.
@@ -599,6 +771,88 @@ struct Lowering {
     private func variableName(_ name: String) -> String? {
         unit.variables.first { $0.name.lowercased() == name.lowercased() }?.name
     }
+
+    private func variableType(_ name: String) -> SourceType? {
+        unit.variables.first { $0.name.lowercased() == name.lowercased() }?.type
+    }
+
+    private func numType(_ type: SourceType) -> NumType? {
+        switch type {
+        case .bool: return nil
+        case .int: return .int
+        case .long: return .long
+        case .real: return .real
+        }
+    }
+
+    private func widened(_ a: NumType, _ b: NumType) -> NumType {
+        if a == b { return a }
+        if a == .real || b == .real { return .real }
+        return .long
+    }
+
+    private func boolValue(_ value: Value, line: Int, what: String = "this expression") throws -> BoolExpr {
+        guard case .bool(let expr) = value else {
+            throw SourceError(line: line, message: "\(what) is BOOL; a number cannot be used there")
+        }
+        return expr
+    }
+
+    private func numberValue(_ value: Value, line: Int) throws -> (NumExpr, NumType) {
+        guard case .number(let expr, let type) = value else {
+            throw SourceError(line: line, message: "a number is expected here, not a BOOL")
+        }
+        return (expr, type)
+    }
+
+    /// A value stored in a variable of `type`: BOOL only in BOOL, a number only where it widens.
+    private func stored(_ value: Value, in type: SourceType, line: Int, name: String) throws -> Value {
+        switch (type, value) {
+        case (.bool, .bool):
+            return value
+        case (.bool, .number):
+            throw SourceError(line: line, message: "'\(name)' is BOOL; a number cannot be stored in it")
+        case (.int, .number(let expr, let from)):
+            guard from == .int else {
+                throw SourceError(line: line, message: "'\(name)' is INT; a \(from.name) cannot be narrowed into it")
+            }
+            return .number(expr, .int)
+        case (.long, .number(let expr, let from)):
+            guard from != .real else {
+                throw SourceError(line: line, message: "'\(name)' is LONG; a REAL cannot be narrowed into it")
+            }
+            return .number(expr, .long)
+        case (.real, .number(let expr, _)):
+            return .number(expr, .real)
+        case (_, .bool):
+            throw SourceError(line: line, message: "'\(name)' is \(type.name); a BOOL cannot be stored in it")
+        }
+    }
+
+    private func defaultValue(for name: String) -> Value {
+        guard let type = variableType(name) else { return .bool(.variable(name)) }
+        switch type {
+        case .bool: return .bool(.variable(name))
+        case .int: return .number(.variable(name), .int)
+        case .long: return .number(.variable(name), .long)
+        case .real: return .number(.variable(name), .real)
+        }
+    }
+
+    private func merge(_ test: BoolExpr, _ whenTrue: Value, _ whenFalse: Value, line: Int) throws -> Value {
+        switch (whenTrue, whenFalse) {
+        case (.bool(let a), .bool(let b)):
+            return .bool(.select(test, a, b))
+        case (.number(let a, let ta), .number(let b, let tb)):
+            let type = widened(ta, tb)
+            guard switchBlock(type) != nil else {
+                throw SourceError(line: line, message: "a \(type.name) selection has no block")
+            }
+            return .number(.select(test, a, b, type), type)
+        default:
+            throw SourceError(line: line, message: "both branches of an IF must have the same type")
+        }
+    }
     private func instance(_ name: String) -> Instance? { instances[name.lowercased()] }
 
     private mutating func lower(_ statements: [SourceStmt], into scan: inout LoweredScan) throws {
@@ -607,9 +861,12 @@ struct Lowering {
             case .assign(let name, let expression):
                 let value = try lower(expression, scan: &scan)
                 if let index = outputIndex(name) {
+                    guard case .bool = value else {
+                        throw SourceError(line: statement.line, message: "'\(name)' is a BOOL output pin; a number cannot drive it")
+                    }
                     scan.outputs[index] = value
-                } else if let variable = variableName(name) {
-                    scan.variableWrites[variable.lowercased()] = value
+                } else if let variable = variableName(name), let type = variableType(variable) {
+                    scan.variableWrites[variable.lowercased()] = try stored(value, in: type, line: statement.line, name: name)
                 } else if inputPin(name) != nil {
                     throw SourceError(line: statement.line, message: "'\(name)' is an input; it is read, not written")
                 } else if instance(name) != nil {
@@ -632,15 +889,14 @@ struct Lowering {
                                           message: "'\(name)' is called twice; one block is wired once per scan")
                     }
                     for argument in arguments {
-                        guard let position = block.inputs.firstIndex(where: {
-                            $0.name.lowercased() == argument.label.lowercased()
-                        }) else {
+                        guard block.inputs.contains(where: { $0.name.lowercased() == argument.label.lowercased() }) else {
                             throw SourceError(line: argument.value.line,
                                               message: "'\(block.name)' has no input '\(argument.label)'; it has "
                                                   + block.inputs.map(\.name).joined(separator: ", "))
                         }
-                        _ = position
-                        scan.calls[index].arguments[argument.label.lowercased()] = try lower(argument.value, scan: &scan)
+                        scan.calls[index].arguments[argument.label.lowercased()] =
+                            try boolValue(lower(argument.value, scan: &scan), line: argument.value.line,
+                                          what: "an input of '\(block.name)'")
                     }
                 case .block(let index):
                     guard scan.calledBlocks.insert(index).inserted else {
@@ -662,7 +918,7 @@ struct Lowering {
                     }
                 }
             case .ifThen(let condition, let thenBody, let elseBody):
-                let test = try lower(condition, scan: &scan)
+                let test = try boolValue(lower(condition, scan: &scan), line: statement.line, what: "an IF condition")
                 let wasInBranch = inBranch
                 inBranch = true
                 var thenScan = scan
@@ -679,14 +935,19 @@ struct Lowering {
                                           message: "an output written only inside IF is cleared when the condition is false; "
                                               + "assign it before the IF or add an ELSE")
                     }
-                    let whenTrue = thenScan.outputs[pin] ?? scan.outputs[pin] ?? .constant(false)
-                    let whenFalse = elseScan.outputs[pin] ?? scan.outputs[pin] ?? .constant(false)
-                    scan.outputs[pin] = .select(test, whenTrue, whenFalse)
+                    func bool(_ value: Value?) -> BoolExpr? {
+                        if case .bool(let expr)? = value { return expr }
+                        return nil
+                    }
+                    let whenTrue = bool(thenScan.outputs[pin]) ?? bool(scan.outputs[pin]) ?? .constant(false)
+                    let whenFalse = bool(elseScan.outputs[pin]) ?? bool(scan.outputs[pin]) ?? .constant(false)
+                    scan.outputs[pin] = .bool(.select(test, whenTrue, whenFalse))
                 }
                 for name in Set(thenScan.variableWrites.keys).union(elseScan.variableWrites.keys) {
-                    let whenTrue = thenScan.variableWrites[name] ?? .variable(name)
-                    let whenFalse = elseScan.variableWrites[name] ?? .variable(name)
-                    scan.variableWrites[name] = .select(test, whenTrue, whenFalse)
+                    let fallback = defaultValue(for: name)
+                    let whenTrue = thenScan.variableWrites[name] ?? fallback
+                    let whenFalse = elseScan.variableWrites[name] ?? fallback
+                    scan.variableWrites[name] = try merge(test, whenTrue, whenFalse, line: statement.line)
                 }
             }
         }
@@ -701,10 +962,12 @@ struct Lowering {
         switch expression.kind {
         case .boolean(let value): return .constant(.bool(value))
         case .integer(let value): return .constant(integerValue(value))
+        case .real(let value): return .constant(.float(Float(value)))
         case .unary("-", let operand):
             if case .integer(let value) = operand.kind { return .constant(integerValue(-value)) }
-            return .signal(try lower(expression, scan: &scan))
-        default: return .signal(try lower(expression, scan: &scan))
+            if case .real(let value) = operand.kind { return .constant(.float(Float(-value))) }
+            return .signal(try boolValue(try lower(expression, scan: &scan), line: expression.line))
+        default: return .signal(try boolValue(try lower(expression, scan: &scan), line: expression.line))
         }
     }
 
@@ -712,7 +975,9 @@ struct Lowering {
         switch expression.kind {
         case .boolean(let value): return .bool(value)
         case .integer(let value): return integerValue(value)
+        case .real(let value): return .float(Float(value))
         case .unary("-", let operand):
+            if case .real(let value) = operand.kind { return .float(Float(-value)) }
             guard case .integer(let value) = operand.kind else {
                 throw SourceError(line: expression.line, message: "expected a number")
             }
@@ -722,18 +987,26 @@ struct Lowering {
         }
     }
 
-    private func lower(_ expression: SourceExpr, scan: inout LoweredScan) throws -> BoolExpr {
+    private func lower(_ expression: SourceExpr, scan: inout LoweredScan) throws -> Value {
         switch expression.kind {
         case .boolean(let value):
-            return .constant(value)
+            return .bool(.constant(value))
         case .integer(let value):
-            throw SourceError(line: expression.line,
-                              message: "the number \(value) is not a signal; an expression here is Boolean")
+            return .number(.constant(integerValue(value)), Int32(exactly: value) != nil ? .int : .long)
+        case .real(let value):
+            return .number(.constant(.float(Float(value))), .real)
         case .name(let name):
             if let pin = inputPin(name) {
-                return unit.kind == .functionBlock ? .macroInput(inputPosition(name) ?? 0) : .input(pin.index)
+                return .bool(unit.kind == .functionBlock ? .macroInput(inputPosition(name) ?? 0) : .input(pin.index))
             }
-            if let variable = variableName(name) { return .variable(variable) }
+            if let variable = variableName(name), let type = variableType(variable) {
+                switch type {
+                case .bool: return .bool(.variable(variable))
+                case .int: return .number(.variable(variable), .int)
+                case .long: return .number(.variable(variable), .long)
+                case .real: return .number(.variable(variable), .real)
+                }
+            }
             if instance(name) != nil {
                 throw SourceError(line: expression.line,
                                   message: "'\(name)' is an instance; read one of its outputs, as in '\(name).Y'")
@@ -760,7 +1033,7 @@ struct Lowering {
                                       message: "'\(block.name)' has no output '\(name)'; it has "
                                           + block.outputs.map(\.name).joined(separator: ", "))
                 }
-                return .macroCall(index, position)
+                return .bool(.macroCall(index, position))
             case .block(let index):
                 guard scan.calledBlocks.contains(index) else {
                     throw SourceError(line: expression.line, message: "'\(instanceName)' is read before it is called")
@@ -772,28 +1045,72 @@ struct Lowering {
                                       message: "'\(call.name)' has no output '\(name)'; it has "
                                           + labels.joined(separator: ", "))
                 }
-                return .blockOutput(index, position)
+                return .bool(.blockOutput(index, position))
             case nil:
                 throw SourceError(line: expression.line, message: "unknown instance '\(instanceName)'")
             }
         case .unary(let op, let operand):
             switch op {
-            case "!": return .negated(try lower(operand, scan: &scan))
-            case "-": throw SourceError(line: expression.line, message: "negation needs numbers, which are not supported yet")
-            default: throw SourceError(line: expression.line, message: "unknown operator '\(op)'")
+            case "!":
+                let value = try boolValue(try lower(operand, scan: &scan), line: expression.line)
+                return .bool(.negated(value))
+            case "-":
+                let (value, type) = try numberValue(try lower(operand, scan: &scan), line: expression.line)
+                return .number(.negate(value, type), type)
+            default:
+                throw SourceError(line: expression.line, message: "unknown operator '\(op)'")
             }
         case .binary(let op, let left, let right):
-            let a = try lower(left, scan: &scan)
-            let b = try lower(right, scan: &scan)
+            let leftValue = try lower(left, scan: &scan)
+            let rightValue = try lower(right, scan: &scan)
             switch op {
-            case "&&": return .conjunction(a, b)
-            case "||": return .disjunction(a, b)
-            case "xor": return .exclusiveOr(a, b)
-            case "==": return .negated(.exclusiveOr(a, b))
-            case "!=": return .exclusiveOr(a, b)
+            case "&&", "||", "xor":
+                let a = try boolValue(leftValue, line: left.line)
+                let b = try boolValue(rightValue, line: right.line)
+                switch op {
+                case "&&": return .bool(.conjunction(a, b))
+                case "||": return .bool(.disjunction(a, b))
+                default: return .bool(.exclusiveOr(a, b))
+                }
+            case "==", "!=":
+                if case .bool(let a) = leftValue, case .bool(let b) = rightValue {
+                    let unequal = BoolExpr.exclusiveOr(a, b)
+                    return .bool(op == "==" ? .negated(unequal) : unequal)
+                }
+                let (a, ta) = try numberValue(leftValue, line: left.line)
+                let (b, tb) = try numberValue(rightValue, line: right.line)
+                let type = widened(ta, tb)
+                guard type != .real else {
+                    throw SourceError(line: expression.line,
+                                      message: "REAL comparison is not supported yet (no float comparator block)")
+                }
+                let equal = BoolExpr.comparison("==", a, b, type)
+                return .bool(op == "==" ? equal : .negated(equal))
+            case "<", ">", "<=", ">=":
+                let (a, ta) = try numberValue(leftValue, line: left.line)
+                let (b, tb) = try numberValue(rightValue, line: right.line)
+                let type = widened(ta, tb)
+                guard type != .real else {
+                    throw SourceError(line: expression.line,
+                                      message: "REAL comparison is not supported yet (no float comparator block)")
+                }
+                switch op {
+                case "<": return .bool(.comparison("<", a, b, type))
+                case ">": return .bool(.comparison(">", a, b, type))
+                case "<=": return .bool(.disjunction(.comparison("<", a, b, type), .comparison("==", a, b, type)))
+                default: return .bool(.disjunction(.comparison(">", a, b, type), .comparison("==", a, b, type)))
+                }
+            case "+", "-", "*", "/", "%":
+                let (a, ta) = try numberValue(leftValue, line: left.line)
+                let (b, tb) = try numberValue(rightValue, line: right.line)
+                let type = widened(ta, tb)
+                guard numericBlock(op, type) != nil else {
+                    throw SourceError(line: expression.line,
+                                      message: "no block computes '\(op)' on \(type.name)")
+                }
+                return .number(.binary(op, a, b, type), type)
             default:
-                throw SourceError(line: expression.line,
-                                  message: "'\(op)' needs numbers, which are not supported yet; this subset is Boolean")
+                throw SourceError(line: expression.line, message: "unknown operator '\(op)'")
             }
         }
     }

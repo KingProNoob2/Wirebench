@@ -172,6 +172,158 @@ struct StructuredTextTests {
         #expect(!core.inPins(moduleId: out.id)[1].asBool, "the macro inverts")
     }
 
+    @Test("Typed declarations parse: INT, LONG and REAL with typed initialisers")
+    func typedDeclarations() throws {
+        let program = try SourceParser.parse("""
+        PROGRAM P
+        VAR
+            n : INT := 5;
+            l : LONG := -2;
+            r : REAL := 1.5;
+            b : BOOL := TRUE;
+        END_VAR
+        END_PROGRAM
+        """)
+        let unit = try #require(program.main)
+        #expect(unit.variables.map(\.type) == [.int, .long, .real, .bool])
+        #expect(unit.variables[0].initial == .integer(5))
+        #expect(unit.variables[1].initial == .integer(-2))
+        #expect(unit.variables[2].initial == .real(1.5))
+        #expect(unit.variables[3].initial == .boolean(true))
+    }
+
+    @Test("An INT variable counts with IAdd, and a comparison drives a BOOL output")
+    func typedArithmetic() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            lamp AT %QX0 : BOOL;
+            n : INT := 0;
+        END_VAR
+            n := n + 1;
+            lamp := n > 3;
+        END_PROGRAM
+        """)
+        let guid: (String) -> UUID? = { BlockTypeCatalog.info(forBlockName: $0)?.guid }
+        #expect(compiled.project.modules.contains { $0.guid == guid("IntVar") })
+        #expect(compiled.project.modules.contains { $0.guid == guid("IAdd") })
+        #expect(compiled.project.modules.contains { $0.guid == guid("Comparator") })
+
+        let out = try #require(compiled.project.modules.first { $0.guid == EightDOBlock.guid })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        var values: [Bool] = []
+        for _ in 0..<5 {
+            core.step(deltaMs: 10, now: Self.now)
+            values.append(core.inPins(moduleId: out.id)[1].asBool)
+        }
+        #expect(values == [false, false, false, false, true], "n > 3 is true on the fifth scan: \(values)")
+    }
+
+    @Test("A REAL variable uses FloatVar and FAdd")
+    func realArithmetic() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            r : REAL := 1.5;
+        END_VAR
+            r := r + 0.5;
+        END_PROGRAM
+        """)
+        let guid: (String) -> UUID? = { BlockTypeCatalog.info(forBlockName: $0)?.guid }
+        #expect(compiled.project.modules.contains { $0.guid == guid("FloatVar") })
+        #expect(compiled.project.modules.contains { $0.guid == guid("FAdd") })
+        #expect(compiled.project.modules.contains { $0.guid == SetBlock.guid })
+    }
+
+    @Test("An if/else on a numeric variable becomes a typed selection and simulates")
+    func numericIf() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            button AT %IX0 : BOOL;
+            n : INT := 0;
+        END_VAR
+            IF button THEN
+                n := n + 1;
+            ELSE
+                n := n + 2;
+            END_IF;
+        END_PROGRAM
+        """)
+        let guid: (String) -> UUID? = { BlockTypeCatalog.info(forBlockName: $0)?.guid }
+        #expect(compiled.project.modules.contains { $0.guid == guid("ISwitch") })
+        let variable = try #require(compiled.project.modules.first { $0.guid == guid("IntVar") })
+        let di = try #require(compiled.project.modules.first { $0.guid == EightDIBlock.guid })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.setOut(moduleId: di.id, pin: 0, value: .bool(false))
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 2, "the ELSE branch runs when button is 0")
+    }
+
+    @Test("A LONG variable adds through LAdd and the value reaches its output")
+    func longArithmetic() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            l : LONG := 1;
+        END_VAR
+            l := l + 2;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "LongVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 3)
+    }
+
+    @Test("A REAL variable adds through FAdd and the value reaches its output")
+    func realSimulation() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            r : REAL := 1.5;
+        END_VAR
+            r := r + 0.5;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "FloatVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(abs(core.outPins(moduleId: variable.id)[0].asFloat - 2.0) < 0.001)
+    }
+
+    @Test("Typed refusals: narrowing, REAL comparison and a missing arithmetic block")
+    func typedRefusals() {
+        let cases: [(String, String)] = [
+            ("""
+             PROGRAM P
+             VAR n : INT := 1; END_VAR
+                 n := 1.5;
+             END_PROGRAM
+             """, "narrowed"),
+            ("""
+             PROGRAM P
+             VAR r : REAL := 1.5; b AT %QX0 : BOOL; END_VAR
+                 b := r > 1.0;
+             END_PROGRAM
+             """, "REAL comparison"),
+            ("""
+             PROGRAM P
+             VAR l : LONG := 1; END_VAR
+                 l := l * 2;
+             END_PROGRAM
+             """, "no block computes"),
+        ]
+        for (source, fragment) in cases {
+            let message = Self.error(source)
+            #expect(message?.contains(fragment) == true, "\(fragment): \(message ?? "compiled")")
+        }
+    }
+
     @Test("Completion offers keywords, block types, instance names and an instance's outputs")
     func completion() {
         let source = """
@@ -264,7 +416,7 @@ struct StructuredTextTests {
             VAR a AT %IX0 : BOOL; END_VAR
                 a := a AND 5;
             END_PROGRAM
-            """, "not a signal"),
+            """, "BOOL"),
             ("""
             PROGRAM P
             VAR a AT %IX0 : BOOL; END_VAR
