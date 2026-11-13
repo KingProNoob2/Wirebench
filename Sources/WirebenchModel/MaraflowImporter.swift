@@ -75,13 +75,9 @@ public struct MaraflowImporter {
             project.pages.append(ProjectPage(caption: caption))
 
             if page.language == "ST" {
-                let before = project.modules.count
-                importStPage(page, caption: caption, project: &project, nextId: &nextModuleId,
-                             notes: &notes, approximated: &approximated)
-                let added = project.modules.count - before
-                notes.append(added == 0
-                    ? "Page '\(caption)' is Structured Text; no block-call statements could be converted."
-                    : "Page '\(caption)' is Structured Text; converted \(added) block(s) from its declarations and calls.")
+                project.modules.append(stPageModule(page, caption: caption, id: nextModuleId))
+                nextModuleId += 1
+                notes.append("Page '\(caption)' is Structured Text; it runs through the native ST interpreter.")
             }
             if !page.rungs.isEmpty {
                 let before = project.modules.count
@@ -282,6 +278,21 @@ public struct MaraflowImporter {
                                                       ("MARAFLOW_TYPE", block.typeName),
                                                       ("MARAFLOW_ID", block.id)]),
                          rawChildren: [])
+    }
+
+    /// One Structured Text page becomes one native block with no pins; the core compiles and runs its code each scan.
+    private static func stPageModule(_ page: MaraflowPage, caption: String, id: Int) -> PCCModule {
+        var code = page.stCode
+        if !page.stVariables.isEmpty, !code.uppercased().contains("VAR") {
+            let declarations = page.stVariables.map { variable in
+                "\(variable.name) : \(variable.type) := \(variable.initial);"
+            }.joined(separator: "\n")
+            code = "VAR\n\(declarations)\nEND_VAR\n" + code
+        }
+        return PCCModule(id: id, guid: MaraflowStPage.guid, name: "ST \(caption)",
+                         x: 32, y: 32, order: page.stOrder, threadId: page.stThreadID, page: caption,
+                         inPins: [], paramPins: [], outPins: [],
+                         rawAttributes: AttributeBag([("MARAFLOW_ST_CODE", code)]))
     }
 
     // MARK: - Ladder pages

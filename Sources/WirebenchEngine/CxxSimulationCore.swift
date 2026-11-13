@@ -32,6 +32,7 @@ public final class CxxSimulationCore {
     /// one unported block stops wires it carries from moving and would make the *ported* blocks look
     /// wrong too. `isFullyPorted` is the check for that.
     public static func kind(forGUID guid: UUID) -> WirebenchBlockKind? {
+        if guid == MaraflowStPage.guid { return WIREBENCH_BLOCK_MARAFLOW_ST }
         if let definition = MaraflowCatalog.definition(forGuid: guid) {
             return MaraflowCatalog.ported.contains(definition.id) ? WIREBENCH_BLOCK_MARAFLOW : nil
         }
@@ -370,7 +371,14 @@ public final class CxxSimulationCore {
             }
         }
         // Native Maraflow string configuration (register names, interrupt sources). The C ABI takes C strings.
-        for (position, mod) in project.modules.enumerated() where MaraflowCatalog.definition(forGuid: mod.guid) != nil {
+        for (position, mod) in project.modules.enumerated() where MaraflowCatalog.definition(forGuid: mod.guid) != nil || mod.guid == MaraflowStPage.guid {
+            if let code = mod.rawAttributes["MARAFLOW_ST_CODE"] {
+                "STCode".withCString { keyCString in
+                    code.withCString { codeCString in
+                        wirebench_sim_set_string(created, Int32(position), keyCString, codeCString)
+                    }
+                }
+            }
             for key in ["RegisterName", "TriggerMode", "InterruptSource", "TriggerEdge",
                         "CaptureMode", "LatchPolicy", "SimPulseValue"] {
                 guard let value = mod.rawAttributes["MARAFLOW_PROP_\(key)"] else { continue }
@@ -422,6 +430,14 @@ public final class CxxSimulationCore {
 
     public func paramPins(moduleId: Int) -> [PinValue] {
         (0..<(pinCounts[moduleId]?.params ?? 0)).map { paramValue(moduleId: moduleId, pin: $0) ?? .undefined }
+    }
+
+    /// A Maraflow ST page's compile diagnostic, if its code did not compile. The core compiles lazily on its first
+    /// scheduled scan, so this is populated after a step.
+    public func maraflowStError(moduleId: Int) -> String? {
+        guard let position = indexByModuleId[moduleId],
+              let message = wirebench_sim_maraflow_st_error(sim, position) else { return nil }
+        return String(cString: message)
     }
 
     public func outPins(moduleId: Int) -> [PinValue] {

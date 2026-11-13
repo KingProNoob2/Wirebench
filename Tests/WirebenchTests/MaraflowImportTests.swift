@@ -502,96 +502,179 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: call.id)[0].asInt == 5, "the macro input reaches Add and comes back")
     }
 
-    @Test("ST pages convert their declarations and generated block calls")
+    @Test("ST pages run through the native interpreter")
     func stPage() throws {
         let code = """
         VAR
-            And_Out : BOOL;
-            Sum_Out : INT;
+            n : INT := 0;
+            i : INT := 0;
         END_VAR
-
-        // Block: Bool.And
-        And_Out := And(
-            X1 := 1,
-            X2 := 1
-        );
-
-        // Block: Math.Add
-        Sum_Out := Add(
-            X1 := 5,
-            X2 := 2
-        );
+        n := n + 1;
+        FOR i := 1 TO 2 DO
+            REG_1 := REG_1 + 1;
+        END_FOR;
+        REG_0 := n;
         """
-        let entries: [(String, String)] = [
+        var entries: [(String, String)] = [
             ("project.name", "STDemo"),
-            ("project.pageCount", "1"),
+            ("project.pageCount", "2"),
             ("page.0.name", "Logic"),
             ("page.0.language", "ST"),
             ("page.0.stCode", code),
             ("page.0.stVarCount", "0"),
             ("page.0.blockCount", "0"),
             ("page.0.wireCount", "0"),
+            ("page.0.stThreadId", "2"),
+            ("page.0.stOrder", "10"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "2"),
+            ("page.1.wireCount", "0"),
         ]
+        entries += Self.block("page.1.block.0.", id: "read0", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read0", gridX: 2, gridY: 2, order: 100,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_0")])
+        entries += Self.block("page.1.block.1.", id: "read1", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read1", gridX: 10, gridY: 2, order: 110,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_1")])
         let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stdemo")
-        #expect(outcome.project.pages.map(\.caption) == ["Logic"])
-        let andOut = try #require(outcome.project.modules.first { $0.name == "And_Out" })
-        let sumOut = try #require(outcome.project.modules.first { $0.name == "Sum_Out" })
-        #expect(andOut.guid == BlockTypeCatalog.info(forBlockName: "BoolVar")?.guid)
-        #expect(sumOut.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid)
-        #expect(outcome.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "And")?.guid })
-        #expect(outcome.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "IAdd")?.guid })
-
+        #expect(outcome.project.pages.map(\.caption) == ["Logic", "Read"])
+        let st = try #require(outcome.project.modules.first { $0.guid == MaraflowStPage.guid })
+        #expect(st.outPins.isEmpty)
+        #expect(st.rawAttributes["MARAFLOW_ST_CODE"]?.contains("FOR i := 1 TO 2") == true)
+        let read0 = try #require(outcome.project.modules.first { $0.name == "Read0" })
+        let read1 = try #require(outcome.project.modules.first { $0.name == "Read1" })
         let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
         core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
-        #expect(core.outPins(moduleId: andOut.id)[0].asBool)
-        #expect(core.outPins(moduleId: sumOut.id)[0].asInt == 7)
-        #expect(outcome.notes.contains { $0.contains("Structured Text") && $0.contains("converted") })
+        #expect(core.outPins(moduleId: read0.id)[0].asInt == 1)
+        #expect(core.outPins(moduleId: read1.id)[0].asInt == 2, "the FOR loop ran twice in one scan")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: read0.id)[0].asInt == 2, "page variables persist between scans")
+        #expect(core.outPins(moduleId: read1.id)[0].asInt == 4)
+        #expect(outcome.notes.contains { $0.contains("native ST interpreter") })
     }
 
-    static func ladderProject() -> Data {
+    @Test("ST interpreter runs control flow, calls and expressions")
+    func stControlFlow() throws {
+        let code = """
+        VAR
+            n : INT := 0;
+            And_Out : BOOL := 0;
+        END_VAR
+        n := n + 1;
+        IF n = 1 THEN
+            REG_0 := 10;
+        ELSIF n = 2 THEN
+            REG_0 := 20;
+        ELSE
+            REG_0 := 30;
+        END_IF;
+        CASE n OF
+            1: REG_1 := 111;
+            2: REG_1 := 222;
+            ELSE REG_1 := 333;
+        END_CASE;
+        WHILE REG_2 < 3 DO
+            REG_2 := REG_2 + 1;
+        END_WHILE;
+        And_Out := And(En := 1, X1 := 1, X2 := 1);
+        REG_3 := And_Out;
+        """
         var entries: [(String, String)] = [
-            ("project.name", "LadderDemo"),
-            ("project.pageCount", "1"),
-            ("page.0.name", "Ladder"),
-            ("page.0.language", "LD"),
+            ("project.name", "STFlow"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", code),
             ("page.0.blockCount", "0"),
             ("page.0.wireCount", "0"),
-            ("page.0.rungCount", "2"),
-            ("page.0.rung.0.threadId", "2"),
-            ("page.0.rung.0.order", "10"),
-            ("page.0.rung.0.mainCount", "1"),
-            ("page.0.rung.0.main.0.kind", "NO_CONTACT"),
-            ("page.0.rung.0.main.0.operand", "DI0"),
-            ("page.0.rung.0.coilCount", "1"),
-            ("page.0.rung.0.coil.0.kind", "NORMAL_COIL"),
-            ("page.0.rung.0.coil.0.operand", "DO0"),
-            ("page.0.rung.1.threadId", "2"),
-            ("page.0.rung.1.order", "20"),
-            ("page.0.rung.1.mainCount", "1"),
-            ("page.0.rung.1.main.0.kind", "NC_CONTACT"),
-            ("page.0.rung.1.main.0.operand", "DI1"),
-            ("page.0.rung.1.coilCount", "1"),
-            ("page.0.rung.1.coil.0.kind", "NEGATED_COIL"),
-            ("page.0.rung.1.coil.0.operand", "DO1"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "4"),
+            ("page.1.wireCount", "0"),
         ]
-        return Self.propertiesXML(entries)
+        for index in 0..<4 {
+            entries += Self.block("page.1.block.\(index).", id: "r\(index)", definition: "Main.Execution.ReadReg",
+                                  type: "ReadReg", name: "Read\(index)", gridX: index * 8, gridY: 2,
+                                  order: 100 + index * 10,
+                                  inputs: [("En", "Enable", "BOOL", "1")],
+                                  outputs: [("Out", "Value", "INT", "0")],
+                                  properties: [("RegisterName", "REG_\(index)")])
+        }
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stflow")
+        let reads = outcome.project.modules.filter { $0.name.hasPrefix("Read") }
+        #expect(reads.count == 4)
+        let byName = Dictionary(uniqueKeysWithValues: reads.map { ($0.name, $0.id) })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: byName["Read0"]!)[0].asInt == 10)
+        #expect(core.outPins(moduleId: byName["Read1"]!)[0].asInt == 111)
+        #expect(core.outPins(moduleId: byName["Read2"]!)[0].asInt == 3, "WHILE ran to completion in one scan")
+        #expect(core.outPins(moduleId: byName["Read3"]!)[0].asInt == 1, "And() call evaluated")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: byName["Read0"]!)[0].asInt == 20)
+        #expect(core.outPins(moduleId: byName["Read1"]!)[0].asInt == 222)
+        #expect(core.outPins(moduleId: byName["Read2"]!)[0].asInt == 3, "the operand keeps its value")
     }
 
-    @Test("Simple ladder rungs become DI, logic and DO blocks")
-    func ladderPages() throws {
-        let outcome = try MaraflowImporter.importProject(data: Self.ladderProject(), filename: "ladder")
-        let di = try #require(outcome.project.modules.first { $0.guid == BlockTypeCatalog.info(forBlockName: "8xDI")?.guid })
-        let output = try #require(outcome.project.modules.first { $0.guid == BlockTypeCatalog.info(forBlockName: "8xDO")?.guid })
-        #expect(outcome.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "Not")?.guid })
-        #expect(outcome.notes.contains { $0.contains("ladder block") })
-        #expect(outcome.project.connection(inModuleId: output.id, inPinId: 1)?.outModuleId == di.id)
-
+    @Test("ST standard function-block instances keep state")
+    func stFunctionBlocks() throws {
+        let code = """
+        VAR
+            held : BOOL := 0;
+        END_VAR
+        Inst_RS(S := TRUE, R := FALSE);
+        held := Inst_RS.Q;
+        REG_4 := held;
+        """
+        var entries: [(String, String)] = [
+            ("project.name", "STFB"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", code),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "1"),
+            ("page.1.wireCount", "0"),
+        ]
+        entries += Self.block("page.1.block.0.", id: "r4", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read4", gridX: 2, gridY: 2, order: 100,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_4")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stfb")
+        let read = try #require(outcome.project.modules.first { $0.name == "Read4" })
         let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
-        core.setOut(moduleId: di.id, pin: 0, value: .bool(true))
-        core.setOut(moduleId: di.id, pin: 1, value: .bool(false))
         core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
-        #expect(core.inPins(moduleId: output.id)[1].asBool, "NO DI0 energises DO0")
-        #expect(!core.inPins(moduleId: output.id)[2].asBool, "NC DI1 is true, then the negated coil makes DO1 false")
+        #expect(core.outPins(moduleId: read.id)[0].asInt == 1)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: read.id)[0].asInt == 1, "RS keeps its latch")
+    }
+
+    @Test("An ST page that does not compile reports its line")
+    func stCompileError() throws {
+        let entries: [(String, String)] = [
+            ("project.name", "BadST"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", "VAR n : INT := 0; END_VAR\nn := ;"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+        ]
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "badst")
+        let st = try #require(outcome.project.modules.first { $0.guid == MaraflowStPage.guid })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        let message = try #require(core.maraflowStError(moduleId: st.id))
+        #expect(message.contains("line 2"))
     }
 
     @Test("ST, ladder and macro pages are kept with their limits reported")

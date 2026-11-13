@@ -66,17 +66,14 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
   `And`/`Not` logic, and normal/negated coils on `DO0…DO7` drive an `8xDO`. Parallel branches, function-block
   elements, edge contacts, latching coils and analog coils are reported and skipped, since partially converting a
   rung would change its meaning.
-- **Structured Text pages** are converted when they use the editor's generated block-call form: the `VAR…END_VAR`
-  declarations become variable blocks, `<var> := Type(args)` and `Instance(args, Out => var)` become blocks plus
-  `Set` writes, and literal or declared-variable arguments are wired. General expressions (for example `a + 1`),
-  `IF`/loops and undeclared variables are reported and skipped, not guessed. The report gives the number of blocks
-  converted.
-- **Macros** are converted: a macro page keeps its `*Name` caption, `MacroIn`/`MacroOut` become the `Inputs`/`Outputs`
-  interface blocks, and `Macro.User.*` blocks become Wirebench macro calls with the same pins. A call whose page is
-  missing stays inert.
-- Maraflow's target (`STM32F407-…`) has no Wirebench hardware profile; the project uses the default profile, noted
-  in the import report.
-- The original `.mfl` is never overwritten: Save asks for a `.wbp` destination, as with a legacy `.pcc`.
+- **Structured Text pages** run through a native C++ port of Maraflow's `StInterpreter`: declarations and scopes,
+  expressions with Maraflow's precedence, assignments, `IF`/`ELSIF`/`ELSE`, `CASE`, `FOR`/`WHILE`/`REPEAT`,
+  `EXIT`/`RETURN`, positional and named calls with `=>` outputs, the built-in function library, and the standard
+  function blocks (`RS`, `SR`, `TON`, `TOF`, `TP`, `CTU`, `CTD`, `CTUD`, edge triggers, `SINGLEPULSE`, `RANDOM`).
+  Page variables persist between scans; `VAR_TEMP` resets each scan; writes use the shared operand namespace, so
+  registers and I/O channels are visible to FBD blocks. Compile errors are line-numbered and exposed through the
+  engine (`maraflowStError`). **Not yet:** ST *macro* pages (their `VAR_INPUT`/`VAR_OUTPUT` interface is not bridged
+  to macro call pins) and dotted reads of arbitrary FBD block pins (only the interpreter's own FB instances).
 
 ## Where it lives
 

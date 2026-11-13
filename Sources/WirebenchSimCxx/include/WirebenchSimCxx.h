@@ -171,7 +171,9 @@ typedef enum {
     WIREBENCH_BLOCK_SETIDX = 74,        /* SetIdxBlock: like Set, but through the one P pin `Idx` names */
     /* Synthetic blocks imported from Maraflow. `variant` is the index in Swift's `MaraflowCatalog.all`; the core
        implements the semantics that have been ported so far, and the rest hold their pins. */
-    WIREBENCH_BLOCK_MARAFLOW = 75
+    WIREBENCH_BLOCK_MARAFLOW = 75,
+    /// One Maraflow Structured Text page; the core compiles and runs it against the operand namespace.
+    WIREBENCH_BLOCK_MARAFLOW_ST = 76
 } WirebenchBlockKind;
 
 /* `variant` for `WIREBENCH_BLOCK_LONGMATH`, in `LongMathOperation` order. */
@@ -329,6 +331,9 @@ void wirebench_sim_set_variant(WirebenchSim *sim, int32_t index, int32_t variant
 
 /// Per-module string configuration the C++ core cannot read from a project (a register name, an interrupt source).
 void wirebench_sim_set_string(WirebenchSim *sim, int32_t index, const char *key, const char *value);
+
+/// A Maraflow ST page's compile error, or NULL. Valid after the page has first run.
+const char *wirebench_sim_maraflow_st_error(WirebenchSim *sim, int32_t index);
 
 /// The whole-project wire and macro sweep, outside a step: an edit made by hand reaches its consumers now.
 void wirebench_sim_propagate(WirebenchSim *sim);

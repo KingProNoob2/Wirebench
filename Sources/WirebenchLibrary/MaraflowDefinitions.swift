@@ -122,6 +122,15 @@ private let commWriteOutputs: [MaraflowPinSpec] = [pin("Ok", "Transaction OK", "
     pin("Err", "Modbus Error Code", "Int", "0")]
 private let longTimestampOutputs: [MaraflowPinSpec] = [pin("Ts", "Unix Timestamp (s)", "Long", "0")]
 
+/// The synthetic block that represents one Maraflow Structured Text page. It has no pins; the C++ core runs the
+/// page's compiled ST each scan against the operand namespace.
+public enum MaraflowStPage {
+    public static let guid = UUID(uuidString: "DC5EE837-1FC3-5B44-B7A0-738FF999C929")!
+    public static let info = BlockTypeInfo(guid: guid, blockName: "Maraflow ST page",
+                                           delphiClass: "TMMaraflowST", category: "Reusable",
+                                           summary: "Maraflow Structured Text page", isImplemented: false)
+}
+
 /// Every statically registered Maraflow definition, keyed by its definition id.
 public enum MaraflowCatalog {
     /// All statically registered definitions, in `BlockCatalog` registration order.

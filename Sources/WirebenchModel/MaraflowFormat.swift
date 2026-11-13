@@ -119,6 +119,7 @@ struct MaraflowPage {
     var stCode: String
     var stVariables: [MaraflowStVariable]
     var stThreadID: Int
+    var stOrder: Int
     var rungs: [MaraflowRung]
     var graphicCount: Int
 
@@ -206,12 +207,13 @@ struct MaraflowProject {
                 stCode: document.string(prefix + "stCode"),
                 stVariables: variables,
                 stThreadID: document.int(prefix + "stThreadId", 2),
+                stOrder: document.int(prefix + "stOrder", 10),
                 rungs: rungs,
                 graphicCount: document.int(prefix + "graphicCount", 0)
             ))
         }
         if pages.isEmpty { pages = [MaraflowPage(name: "Page 1", language: "FBD", blocks: [], wires: [],
-                                                 stCode: "", stVariables: [], stThreadID: 2,
+                                                 stCode: "", stVariables: [], stThreadID: 2, stOrder: 10,
                                                  rungs: [], graphicCount: 0)] }
         return MaraflowProject(
             name: document.string("project.name", filename),

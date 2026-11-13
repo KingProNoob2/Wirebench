@@ -15,6 +15,7 @@
 
 #include "WirebenchSimCxx.h"
 #include "MaraflowVariants.h"
+#include "MaraflowStInterpreter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -204,6 +205,11 @@ struct Module {
     double floatVar = 0;           /* FloatVar: the variable itself, not a pin */
     std::vector<std::pair<int64_t, int64_t>> caseRanges;   /* Case */
     std::map<std::string, std::string> strings;             /* native Maraflow string configuration */
+    std::shared_ptr<wirebench::StInterpreter> stInterpreter;
+    std::map<std::string, double> stVariables;
+    bool stCompileTried = false;
+    bool stCompiled = false;
+    std::string stError;
     /* Connection indices into `WirebenchSim::connections`, in file order. Resolved once when the
        simulation is created: the per-wire id lookups these replace were most of a step's cost. */
     std::vector<size_t> incoming;
@@ -279,6 +285,30 @@ double intervalMs(const WirebenchSim *sim, int32_t threadId) {
 /// One module, mirroring its Swift block's `process(sample:)` exactly — including the `En = 0` rule,
 /// which holds the output rather than clearing it (docs/spec/blocks-datapath.md §0.5).
 void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const WirebenchWallClock &clock) {
+    if (m.kind == WIREBENCH_BLOCK_MARAFLOW_ST) {
+        if (!sim) return;
+        if (!m.stCompileTried) {
+            m.stCompileTried = true;
+            m.stInterpreter = std::make_shared<wirebench::StInterpreter>();
+            std::string error;
+            int line = 0;
+            m.stCompiled = m.stInterpreter->compile(m.strings.count("STCode") ? m.strings["STCode"] : "",
+                                                    {}, error, line);
+            if (!m.stCompiled) m.stError = (line > 0 ? "line " + std::to_string(line) + ": " : "") + error;
+        }
+        if (!m.stCompiled) return;
+        auto read = [sim](const std::string &name) -> double {
+            auto exact = sim->operands.find(name);
+            if (exact != sim->operands.end()) return exact->second;
+            std::string upper = name;
+            for (auto &c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            auto found = sim->operands.find(upper);
+            return found == sim->operands.end() ? 0.0 : found->second;
+        };
+        auto write = [sim](const std::string &name, double value) { sim->operands[name] = value; };
+        m.stInterpreter->execute(read, write, m.stVariables);
+        return;
+    }
     /* Every kind below writes outputs and nothing else a reader can see (`Set` works in the step loop, not
        here), so a module without out pins has nothing to do — and the cases may then index `outPins[0]`. */
     if (m.outPins.empty()) return;
@@ -1549,6 +1579,10 @@ void resetModule(Module &m) {
             /* `ISwitchBlock.reset`: a zero of the switch's own element type. */
             if (!m.outPins.empty()) m.outPins[0] = m.variant == 1 ? floatValue(0) : int32Value(0);
             return;
+        case WIREBENCH_BLOCK_MARAFLOW_ST:
+            if (m.stInterpreter) m.stInterpreter->reset();
+            m.stVariables.clear();
+            return;
         case WIREBENCH_BLOCK_MARAFLOW:
             m.flagA = false;
             m.s[0] = m.s[1] = m.s[2] = 0;
@@ -2147,6 +2181,12 @@ void wirebench_sim_reset_module(WirebenchSim *sim, int32_t index) {
 void wirebench_sim_set_variant(WirebenchSim *sim, int32_t index, int32_t variant) {
     if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
     sim->modules[index].variant = variant;
+}
+
+const char *wirebench_sim_maraflow_st_error(WirebenchSim *sim, int32_t index) {
+    if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return nullptr;
+    const Module &module = sim->modules[static_cast<size_t>(index)];
+    return module.stError.empty() ? nullptr : module.stError.c_str();
 }
 
 void wirebench_sim_set_string(WirebenchSim *sim, int32_t index, const char *key, const char *value) {
