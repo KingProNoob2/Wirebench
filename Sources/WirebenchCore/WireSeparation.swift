@@ -209,7 +209,7 @@ public enum WireSeparation {
         ordered = remaining
 
         var trial = paths
-        for (rank, net) in ordered.enumerated() {
+        for net in ordered {
             let target = positions[net]!
             for run in byNet[net]! {
                 setAcross(&trial[run.item][run.index], target, axis)

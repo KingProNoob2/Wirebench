@@ -135,7 +135,7 @@ public final class PCCParser: @unchecked Sendable {
 
     /// A child as a verbatim node: an element, or a comment carried as `#comment` with its text in `TEXT`.
     private func rawNode(_ child: XMLNode) -> RawXMLNode? {
-        if let element = child as? XMLElement, let name = element.name { return RawXMLNode(element) }
+        if let element = child as? XMLElement, element.name != nil { return RawXMLNode(element) }
         if child.kind == .comment { return RawXMLNode(name: "#comment", attributes: AttributeBag(["TEXT": child.stringValue ?? ""])) }
         return nil
     }

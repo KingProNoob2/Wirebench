@@ -356,7 +356,7 @@ public struct SourceParser {
         let returnType = try scalarType("a FUNCTION return type")
         var parameters: [SourceParameter] = []
         if isKeyword("VAR_INPUT") {
-            advance()
+            _ = advance()
             while !isKeyword("END_VAR") {
                 if isAtEnd { throw error("the VAR_INPUT block is not closed with END_VAR") }
                 let parameterToken = try expectIdentifier("a parameter name")
@@ -368,11 +368,11 @@ public struct SourceParser {
                 }
                 parameters.append(SourceParameter(name: parameterToken.text, type: type, line: parameterToken.line))
             }
-            advance()   // END_VAR
+            _ = advance()   // END_VAR
         }
         var locals: [SourceVariable] = []
         if isKeyword("VAR") {
-            advance()
+            _ = advance()
             while !isKeyword("END_VAR") {
                 if isAtEnd { throw error("the VAR block is not closed with END_VAR") }
                 let localToken = try expectIdentifier("a local name")
@@ -390,7 +390,7 @@ public struct SourceParser {
                 }
                 locals.append(SourceVariable(name: localToken.text, type: type, initial: initial, line: localToken.line))
             }
-            advance()   // END_VAR
+            _ = advance()   // END_VAR
         }
         if isKeyword("VAR_OUTPUT") || isKeyword("VAR_IN_OUT") {
             throw error("a FUNCTION has VAR_INPUT parameters and VAR locals only")
@@ -497,8 +497,8 @@ public struct SourceParser {
         sequenceBindings = [:]
         var sawStatement = false
         while !isAtEnd {
-            if kind == .program && isKeyword("END_PROGRAM") { advance(); return unit }
-            if kind == .functionBlock && isKeyword("END_FUNCTION_BLOCK") { advance(); return unit }
+            if kind == .program && isKeyword("END_PROGRAM") { _ = advance(); return unit }
+            if kind == .functionBlock && isKeyword("END_FUNCTION_BLOCK") { _ = advance(); return unit }
             if isKeyword("VAR") || isKeyword("VAR_INPUT") || isKeyword("VAR_OUTPUT") {
                 if sawStatement { throw error("declare every variable before the first statement") }
                 try variableBlock(into: &unit)
@@ -517,14 +517,14 @@ public struct SourceParser {
         let header = advance()   // VAR / VAR_INPUT / VAR_OUTPUT
         let region = header.text.uppercased()
         // `VAR CONSTANT`/`VAR RETAIN` are accepted and treated as plain variables.
-        if isKeyword("CONSTANT") || isKeyword("RETAIN") { advance() }
+        if isKeyword("CONSTANT") || isKeyword("RETAIN") { _ = advance() }
         while !isKeyword("END_VAR") {
             if isAtEnd { throw error("the VAR block is not closed with END_VAR") }
             let nameToken = try expectIdentifier("a variable name")
             let name = nameToken.text
             var address: (SourcePin.Direction, Int)?
             if isKeyword("AT") {
-                advance()
+                _ = advance()
                 address = try addressPin()
             }
             try expectSymbol(":")
@@ -585,7 +585,7 @@ public struct SourceParser {
                 unit.instances.append(SourceInstance(name: name, typeName: type, line: nameToken.line))
             }
         }
-        advance()   // END_VAR
+        _ = advance()   // END_VAR
     }
 
     /// ST names are case-insensitive, so `On` and `on` are the same declaration.
@@ -599,7 +599,7 @@ public struct SourceParser {
 
     /// `ARRAY[0..15] OF INT` after the colon and name have been read.
     private mutating func arrayDeclaration(name: String, line: Int) throws -> SourceArray {
-        advance()   // ARRAY
+        _ = advance()   // ARRAY
         try expectSymbol("[")
         let lower = try signedInteger("an ARRAY bound")
         try expectSymbol("..")
@@ -652,10 +652,10 @@ public struct SourceParser {
     private mutating func typeName() throws -> DeclaredType {
         if current.kind == .keyword {
             switch current.text.uppercased() {
-            case "BOOL": advance(); return .scalar(.bool)
-            case "INT", "WORD": advance(); return .scalar(.int)
-            case "LONG": advance(); return .scalar(.long)
-            case "REAL", "LREAL": advance(); return .scalar(.real)
+            case "BOOL": _ = advance(); return .scalar(.bool)
+            case "INT", "WORD": _ = advance(); return .scalar(.int)
+            case "LONG": _ = advance(); return .scalar(.long)
+            case "REAL", "LREAL": _ = advance(); return .scalar(.real)
             default: break
             }
         }
@@ -668,12 +668,12 @@ public struct SourceParser {
     /// `:= 5`, `:= -2.5`, `:= TRUE`: the literal a declaration is initialised with, if any.
     private mutating func initialValue(for type: SourceType) throws -> SourceLiteral? {
         guard isSymbol(":=") else { return nil }
-        advance()
+        _ = advance()
         if type == .bool {
             return .boolean(try booleanLiteral(required: true))
         }
         var negative = false
-        if isSymbol("-") { advance(); negative = true }
+        if isSymbol("-") { _ = advance(); negative = true }
         if current.kind == .integer {
             let token = advance()
             guard let value = Int(token.text) else { throw error("the number \(token.text) is too large", at: token) }
@@ -692,8 +692,8 @@ public struct SourceParser {
     }
 
     private mutating func booleanLiteral(required: Bool) throws -> Bool {
-        if isKeyword("TRUE") { advance(); return true }
-        if isKeyword("FALSE") { advance(); return false }
+        if isKeyword("TRUE") { _ = advance(); return true }
+        if isKeyword("FALSE") { _ = advance(); return false }
         throw error("expected TRUE or FALSE")
     }
 
@@ -702,7 +702,7 @@ public struct SourceParser {
     private mutating func statements(until end: (String) -> Bool) throws -> [SourceStmt] {
         var statements: [SourceStmt] = []
         while !isAtEnd, !end(current.text.uppercased()) {
-            if isSymbol(";") { advance(); continue }
+            if isSymbol(";") { _ = advance(); continue }
             let statement = try statement()
             statements.append(statement)
             updateBindings(from: statement, index: "", into: &sequenceBindings)
@@ -721,7 +721,7 @@ public struct SourceParser {
         }
         let name = advance()
         if isSymbol("[") {
-            advance()
+            _ = advance()
             let index = try expression()
             try expectSymbol("]")
             try expectSymbol(":=")
@@ -753,7 +753,7 @@ public struct SourceParser {
             // END_IF; it is the outer IF's.
             elseBody = [try elsifClause()]
         } else if isKeyword("ELSE") {
-            advance()
+            _ = advance()
             elseBody = try statements { $0 == "END_IF" }
         }
         try expectKeyword("END_IF")
@@ -775,7 +775,7 @@ public struct SourceParser {
         if isKeyword("ELSIF") {
             elseBody = [try elsifClause()]
         } else if isKeyword("ELSE") {
-            advance()
+            _ = advance()
             elseBody = try statements { $0 == "END_IF" }
         }
         return SourceStmt(.ifThen(condition, thenBody, elseBody), line: at.line)
@@ -792,7 +792,7 @@ public struct SourceParser {
         var elseBody: [SourceStmt]?
         while !isAtEnd, !isKeyword("END_CASE"), !isKeyword("END_PROGRAM"), !isKeyword("END_FUNCTION_BLOCK") {
             if isKeyword("ELSE") {
-                advance()
+                _ = advance()
                 elseBody = try caseBody()
                 break
             }
@@ -825,7 +825,7 @@ public struct SourceParser {
         var body: [SourceStmt] = []
         while !isAtEnd, !isKeyword("ELSE"), !isKeyword("END_CASE"), !isKeyword("END_PROGRAM"),
               !isKeyword("END_FUNCTION_BLOCK"), !isCaseLabelStart() {
-            if isSymbol(";") { advance(); continue }
+            if isSymbol(";") { _ = advance(); continue }
             body.append(try statement())
         }
         return body
@@ -840,14 +840,14 @@ public struct SourceParser {
         while true {
             let lower = try signedInteger()
             if isSymbol("..") {
-                advance()
+                _ = advance()
                 let upper = try signedInteger()
                 guard lower <= upper else { throw error("a CASE range must count upwards") }
                 labels.append((lower, upper))
             } else {
                 labels.append((lower, lower))
             }
-            if isSymbol(",") { advance(); continue }
+            if isSymbol(",") { _ = advance(); continue }
             break
         }
         try expectSymbol(":")
@@ -856,7 +856,7 @@ public struct SourceParser {
 
     private mutating func signedInteger(_ what: String = "a CASE label") throws -> Int {
         var negative = false
-        if isSymbol("-") { advance(); negative = true }
+        if isSymbol("-") { _ = advance(); negative = true }
         guard current.kind == .integer else { throw error("\(what) is a whole number") }
         let token = advance()
         guard let value = Int(token.text) else { throw error("the number \(token.text) is too large", at: token) }
@@ -933,7 +933,7 @@ public struct SourceParser {
         let end = try signedInteger("a FOR bound")
         var step = 1
         if isKeyword("BY") {
-            advance()
+            _ = advance()
             step = try signedInteger("a FOR step")
         }
         guard step != 0 else { throw error("a FOR step cannot be zero") }
@@ -1110,19 +1110,19 @@ public struct SourceParser {
     private mutating func argumentList() throws -> [SourceArgument] {
         try expectSymbol("(")
         var arguments: [SourceArgument] = []
-        if isSymbol(")") { advance(); return arguments }
+        if isSymbol(")") { _ = advance(); return arguments }
         var seen: Set<String> = []
         while true {
             guard current.kind == .identifier, peek().kind == .symbol, peek().text == ":=" else {
                 throw error("an argument is 'name := value'")
             }
             let label = advance().text
-            advance()   // :=
+            _ = advance()   // :=
             if !seen.insert(label.lowercased()).inserted {
                 throw error("'\(label)' is given twice")
             }
             arguments.append(SourceArgument(label: label, value: try expression()))
-            if isSymbol(",") { advance(); continue }
+            if isSymbol(",") { _ = advance(); continue }
             break
         }
         try expectSymbol(")")
@@ -1214,38 +1214,38 @@ public struct SourceParser {
     private mutating func primaryExpression() throws -> SourceExpr {
         let token = current
         if token.kind == .integer {
-            advance()
+            _ = advance()
             guard let value = Int(token.text) else {
                 throw error("the number \(token.text) is too large", at: token)
             }
             return SourceExpr(.integer(value), line: token.line)
         }
         if token.kind == .real {
-            advance()
+            _ = advance()
             guard let value = Double(token.text) else {
                 throw error("the number \(token.text) is not a real", at: token)
             }
             return SourceExpr(.real(value), line: token.line)
         }
         if isKeyword("TRUE") || isKeyword("FALSE") {
-            advance()
+            _ = advance()
             return SourceExpr(.boolean(token.text.uppercased() == "TRUE"), line: token.line)
         }
         if isSymbol("(") {
-            advance()
+            _ = advance()
             let inner = try expression()
             try expectSymbol(")")
             return inner
         }
         if token.kind == .identifier {
-            advance()
+            _ = advance()
             if isSymbol("(") {
-                advance()
+                _ = advance()
                 var arguments: [SourceExpr] = []
                 if !isSymbol(")") {
                     while true {
                         arguments.append(try expression())
-                        if isSymbol(",") { advance(); continue }
+                        if isSymbol(",") { _ = advance(); continue }
                         break
                     }
                 }
@@ -1254,13 +1254,13 @@ public struct SourceParser {
             }
             var base = SourceExpr(.name(token.text), line: token.line)
             if isSymbol("[") {
-                advance()
+                _ = advance()
                 let index = try expression()
                 try expectSymbol("]")
                 base = SourceExpr(.element(base, index), line: token.line)
             }
             while isSymbol(".") {
-                advance()
+                _ = advance()
                 guard current.kind == .identifier else {
                     throw error("expected an output name after '.'")
                 }

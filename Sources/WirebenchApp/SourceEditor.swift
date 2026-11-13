@@ -6,6 +6,7 @@ import WirebenchSource
 ///
 /// SwiftUI's `TextEditor` has no line numbers and no way to colour ranges, and the IDE needs both. The text view is the
 /// document; the colours are applied to its storage, and changing them does not touch the text or the undo stack.
+@MainActor
 struct SourceEditor: NSViewRepresentable {
     @Binding var text: String
     var spans: [SyntaxSpan]
@@ -80,6 +81,7 @@ struct SourceEditor: NSViewRepresentable {
 
     static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         /// Completion (F5 / Escape in the text view): keywords, types, instances and an instance's members.
         func textView(_ textView: NSTextView, completions words: [String], forPartialWordRange charRange: NSRange,
@@ -195,6 +197,7 @@ enum Palette {
 }
 
 /// The gutter: a line number for each line that starts a line, aligned with the text.
+@MainActor
 final class LineNumberRuler: NSRulerView {
     private weak var textView: NSTextView?
 
