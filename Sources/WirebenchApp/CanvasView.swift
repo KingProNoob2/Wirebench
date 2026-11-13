@@ -537,7 +537,7 @@ public struct CanvasView: View {
         ContentUnavailableView {
             Label("No Project Open", systemImage: "cpu")
         } description: {
-            Text("Open a .pcc project, or start a new one.")
+            Text("Open a .wbp project (or a legacy .pcc), or start a new one.")
         } actions: {
             HStack(spacing: 10) {
                 Button {

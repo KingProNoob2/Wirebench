@@ -19,14 +19,14 @@ struct WirebenchCLI {
         switch command {
         case "info":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli info <project.pcc>")
+                print("Error: Missing file path. Usage: wirebench-cli info <project.wbp>")
                 return
             }
             inspectProject(path: args[2])
 
         case "sim":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli sim <project.pcc> [ticks] [--profile-scheduling]")
+                print("Error: Missing file path. Usage: wirebench-cli sim <project.wbp> [ticks] [--profile-scheduling]")
                 return
             }
             let ticks = args.dropFirst(3).compactMap { Int($0) }.first ?? 100
@@ -35,7 +35,7 @@ struct WirebenchCLI {
 
         case "resave":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli resave <project.pcc> [--out <file>]")
+                print("Error: Missing file path. Usage: wirebench-cli resave <legacy.pcc> [--out <file>]")
                 return
             }
             let output = args.count >= 5 && args[3] == "--out" ? args[4] : nil
@@ -43,7 +43,7 @@ struct WirebenchCLI {
 
         case "roundtrip":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli roundtrip <project.pcc>")
+                print("Error: Missing file path. Usage: wirebench-cli roundtrip <legacy.pcc>")
                 return
             }
             verifyRoundtrip(path: args[2])
@@ -54,28 +54,28 @@ struct WirebenchCLI {
 
         case "blocks":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli blocks <project.pcc>")
+                print("Error: Missing file path. Usage: wirebench-cli blocks <project.wbp>")
                 return
             }
             reportBlocks(path: args[2])
 
         case "build":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet] [--optimize]")
+                print("Error: Missing file path. Usage: wirebench-cli build <project.wbp> [--out <dir>] [--template <program.pbd>] [--quiet] [--optimize]")
                 return
             }
             buildProject(path: args[2], options: Array(args.dropFirst(3)))
 
         case "pins":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli pins <project.pcc> [module]")
+                print("Error: Missing file path. Usage: wirebench-cli pins <project.wbp> [module]")
                 return
             }
             printPinRows(path: args[2], module: args.count >= 4 ? args[3] : nil)
 
         case "symbols":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli symbols <project.pcc>")
+                print("Error: Missing file path. Usage: wirebench-cli symbols <project.wbp>")
                 return
             }
             printSymbolTable(path: args[2])
@@ -89,7 +89,7 @@ struct WirebenchCLI {
 
         case "profile":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli profile <project.pcc>")
+                print("Error: Missing file path. Usage: wirebench-cli profile <project.wbp>")
                 return
             }
             reportProfile(path: args[2])
@@ -105,15 +105,16 @@ struct WirebenchCLI {
         Wirebench CLI - Reverse Engineered PLC Engine
         ================================================
         Usage:
-          wirebench-cli info <project.pcc>         Inspect project structure and components
-          wirebench-cli sim <project.pcc> [ticks]  Run deterministic simulation benchmark
-          wirebench-cli roundtrip <project.pcc>    Verify lossless XML AST roundtrip fidelity
-          wirebench-cli blocks <project.pcc>       Show how each module resolves to a block type
-          wirebench-cli profile <project.pcc>
+          (projects may also be given in the legacy .pcc format)
+          wirebench-cli info <project.wbp>         Inspect project structure and components
+          wirebench-cli sim <project.wbp> [ticks]  Run deterministic simulation benchmark
+          wirebench-cli roundtrip <legacy.pcc>    Verify lossless XML AST roundtrip fidelity
+          wirebench-cli blocks <project.wbp>       Show how each module resolves to a block type
+          wirebench-cli profile <project.wbp>
                                                 Show the hardware profile and SystemCmd catalogue
           wirebench-cli st <program.st> [--out <dir>] [--name <name>]
-                                                Compile IEC 61131-3 Structured Text to <name>.pcc.
-          wirebench-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet]
+                                                Compile IEC 61131-3 Structured Text to <name>.wbp.
+          wirebench-cli build <project.wbp> [--out <dir>] [--template <program.pbd>] [--quiet]
                                                 Compile the project to <name>.pbd and <name>.csv.
                                                 --optimize drops unused and switched-off (En = 0) logic and math,
                                                 and puts the records in dataflow
@@ -121,8 +122,8 @@ struct WirebenchCLI {
                                                 --template carries a real export's table, header and
                                                 profile into the build. Exits 1 if any module's class
                                                 has no record shape yet.
-          wirebench-cli symbols <project.pcc>      Write the generated symbol table to stdout as CSV
-          wirebench-cli pins <project.pcc> [module]
+          wirebench-cli symbols <project.wbp>      Write the generated symbol table to stdout as CSV
+          wirebench-cli pins <project.wbp> [module]
                                                 Print the pin rows the inspector draws, with the block
                                                 table's names — the quickest way to tell a display
                                                 problem from a project one
@@ -131,13 +132,13 @@ struct WirebenchCLI {
 
     static func inspectProject(path: String) {
         let url = URL(fileURLWithPath: path)
-        let parser = PCCParser()
         do {
             let start = Date().timeIntervalSinceReferenceDate
-            let project = try parser.parse(fileAt: url)
+            let loaded = try ProjectFile.read(at: url)
+            let project = loaded.project
             let elapsed = (Date().timeIntervalSinceReferenceDate - start) * 1000
 
-            print("\n Successfully parsed: \(url.lastPathComponent) in \(String(format: "%.2f", elapsed)) ms")
+            print("\n Successfully parsed: \(url.lastPathComponent) (\(loaded.format.rawValue)) in \(String(format: "%.2f", elapsed)) ms")
             print("-------------------------------------------------------------------")
             print("  Application     : \(project.application) \(project.applicationVersion)")
             print("  Profile         : \(project.profile)")
@@ -167,9 +168,8 @@ struct WirebenchCLI {
 
     static func runSimulation(path: String, ticks: Int, useProfileScheduling: Bool = false) {
         let url = URL(fileURLWithPath: path)
-        let parser = PCCParser()
         do {
-            let project = try parser.parse(fileAt: url)
+            let project = try ProjectFile.read(at: url).project
 
             let profile = useProfileScheduling ? ProfileRegistry.profile(for: project, in: ProfileRegistry.builtIn) : nil
             // Without `--profile-scheduling` every thread runs on every tick; with it, each thread keeps its
@@ -328,7 +328,7 @@ struct WirebenchCLI {
     /// Reports, per module, which block class handles it, and calls out anything unresolved.
     static func reportBlocks(path: String) {
         do {
-            let project = try PCCParser().parse(fileAt: URL(fileURLWithPath: path))
+            let project = try ProjectFile.read(at: URL(fileURLWithPath: path)).project
             let registry = BlockRegistry.shared
             var unresolved: [PCCModule] = []
             var byType: [String: Int] = [:]
@@ -366,7 +366,7 @@ struct WirebenchCLI {
     static func reportProfile(path: String) {
         let database = ProfileRegistry.builtIn
         do {
-            let project = try PCCParser().parse(fileAt: URL(fileURLWithPath: path))
+            let project = try ProjectFile.read(at: URL(fileURLWithPath: path)).project
             print("\nBuilt-in profiles: \(database.profiles.count) profiles, "
                   + "\(database.systemCommands.count) system commands")
             if let defaultProfile = database.defaultProfile {
@@ -447,7 +447,7 @@ struct WirebenchCLI {
 
     // MARK: - Structured Text
 
-    /// Compiles a Structured Text file to a `.pcc`. The compiler is `WirebenchSource`; this is only the file handling and the
+    /// Compiles a Structured Text file to a `.wbp`. The compiler is `WirebenchSource`; this is only the file handling and the
     /// summary, so the IDE that comes later can call the same compiler.
     static func compileSwift(path: String, options: [String]) {
         let url = URL(fileURLWithPath: path)
@@ -475,8 +475,8 @@ struct WirebenchCLI {
                 source, projectName: name ?? url.deletingPathExtension().lastPathComponent)
             try FileManager.default.createDirectory(at: outDirectory, withIntermediateDirectories: true)
             let stem = name ?? url.deletingPathExtension().lastPathComponent
-        let output = outDirectory.appendingPathComponent(stem + ".pcc")
-            try PCCSerializer().serialize(project: compiled.project).write(to: output, atomically: true, encoding: .utf8)
+            let output = outDirectory.appendingPathComponent(stem + ".wbp")
+            try ProjectFile.write(compiled.project, to: output)
             print("Compiled \(url.lastPathComponent) (\(compiled.program)): \(compiled.blockCount) blocks")
             print("  inputs  \(compiled.usedInputs.map { "DI\($0)" }.joined(separator: ", "))")
             print("  outputs \(compiled.writtenOutputs.map { "DO\($0)" }.joined(separator: ", "))")
@@ -547,7 +547,9 @@ struct WirebenchCLI {
             let build = try PLCProjectBuild.compile(xml: xml,
                                                     classForGUID: BlockTypeCatalog.classNamesByGUID,
                                                     template: template, optimize: optimize)
-            let profile = (try? PCCParser().parse(fileAt: url)).flatMap { ProfileRegistry.profile(for: $0, in: ProfileRegistry.builtIn) }
+            let profile = (try? ProjectFile.read(at: url)).flatMap { loaded in
+                ProfileRegistry.profile(for: loaded.project, in: ProfileRegistry.builtIn)
+            }
             let binary = try PLCProgramImage.programBinary(
                 table: build.table, projectName: url.lastPathComponent, header: header,
                 trailer: profile.map { PLCProgramImage.trailerPayload(eepromOffset: $0.eepromOffset, eepromWriteBlock: $0.eepromWriteBlock) })
@@ -594,7 +596,7 @@ struct WirebenchCLI {
     /// the file is the one that is out of step.
     static func printPinRows(path: String, module: String?) {
         do {
-            let project = try PCCParser().parse(fileAt: URL(fileURLWithPath: path))
+            let project = try ProjectFile.read(at: URL(fileURLWithPath: path)).project
             let wanted = project.modules.filter { module == nil || $0.name == module }
             guard !wanted.isEmpty else {
                 print("No module named \(module ?? "") in \(URL(fileURLWithPath: path).lastPathComponent)")
@@ -629,7 +631,7 @@ struct WirebenchCLI {
     /// Writes the generated symbol table to stdout, exactly as the file would be.
     static func printSymbolTable(path: String) {
         do {
-            let xml = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+            let xml = try BuildInput.xml(contentsOf: URL(fileURLWithPath: path))
             guard let template = PLCProgramTable.buildTemplate() else { exit(1) }
             let build = try PLCProjectBuild.compile(xml: xml,
                                                     classForGUID: BlockTypeCatalog.classNamesByGUID,

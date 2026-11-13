@@ -62,12 +62,11 @@ struct EditorTortureTests {
 
             // Saving must write what is open, not something the model made up on the way out.
             var written = try #require(model.project)
-            let output = Self.temporary("out.pcc")
+            let output = Self.temporary("out.wbp")
             written.projectPath = output.path
-            let expected = PCCSerializer().serialize(project: written)
             try model.saveProject(to: output)
-            #expect(try String(contentsOf: output, encoding: .utf8) == expected,
-                    "\(name): the saved file is not what the editor holds")
+            let saved = try WirebenchDocument.decode(Data(contentsOf: output))
+            #expect(saved == written, "\(name): the saved file is not what the editor holds")
         }
     }
 

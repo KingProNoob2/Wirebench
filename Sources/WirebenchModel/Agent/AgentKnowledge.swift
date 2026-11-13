@@ -33,7 +33,7 @@ enum AgentKnowledge {
     plain. Use the tools to look at the real project instead of guessing.
 
     # How Dirigo works
-    A project (a .pcc file) holds pages. Each page is a sheet with blocks (function blocks, also called modules) joined by wires. The page \
+    A project (a .wbp file; legacy .pcc files are imported) holds pages. Each page is a sheet with blocks (function blocks, also called modules) joined by wires. The page \
     "main" is the program; a page whose caption starts with * is a macro: a reusable sub-sheet.
 
     Blocks. Every block has a type (And, Counter, PulseGen, IntVar…), an instance id (#17, unique in the project), a name, a position on the \

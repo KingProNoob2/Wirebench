@@ -16,8 +16,9 @@ struct InputCountTests {
         let id = 1   // an And block
         model.updateModuleInputCount(id: id, count: 5)
         #expect(model.getNode(id: id)?.block.inPins.count == 6, "En + five inputs in the engine")
-        try model.saveProject(to: url)
-        let reloaded = try PCCParser().parse(fileAt: url)
+        let saved = FileManager.default.temporaryDirectory.appendingPathComponent("inputcount-\(UUID()).wbp")
+        try model.saveProject(to: saved)
+        let reloaded = try ProjectFile.read(at: saved).project
         #expect(reloaded.modules.first { $0.id == id }?.inputCount == 5)
     }
 }

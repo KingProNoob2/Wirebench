@@ -49,7 +49,7 @@ cannot be proven faithful, list those blocks as not recovered rather than invent
 **Tests.** An arithmetic expression (`n := (a + b) * 2`), a variable incremented per scan (`n := n + 1`), a
 comparison driving a `%QX` output, widening (`INT + LONG`), an IF on a numeric variable, initial values, and the
 refusals: assigning REAL to INT, REAL comparison, writing a pin with a number, reading an output before assignment.
-Simulation through `CxxSimulationCore` and a `.pcc` round trip of the emitted project.
+Simulation through `CxxSimulationCore` and a `.wbp` round trip of the emitted project.
 
 ## Stage 2: CASE (done, verified)
 

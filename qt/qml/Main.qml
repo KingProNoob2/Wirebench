@@ -674,7 +674,7 @@ ApplicationWindow {
             Icon { name: "chip"; size: 44; color: AppTheme.dim; anchors.horizontalCenter: parent.horizontalCenter }
             Item { width: 1; height: 4 }
             Text { text: "No Project Open"; color: AppTheme.text; font.pixelSize: 20; font.weight: Font.Bold; anchors.horizontalCenter: parent.horizontalCenter }
-            Text { text: "Open a .pcc project, or start a new one."; color: AppTheme.dim; font.pixelSize: 13
+            Text { text: "Open a .wbp project (or a legacy .pcc), or start a new one."; color: AppTheme.dim; font.pixelSize: 13
                    anchors.horizontalCenter: parent.horizontalCenter; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; width: parent.width - 48 }
             Item { width: 1; height: 8 }
             Row {
@@ -837,15 +837,15 @@ ApplicationWindow {
         parentWindow: window
         title: "Open project"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["Dirigo projects (*.pcc *.xml)", "All files (*)"]
+        nameFilters: ["Wirebench projects (*.wbp)", "Dirigo projects (*.pcc *.xml)", "All files (*)"]
         onAccepted: controller.command({cmd: "open", path: controller.localPath(selectedFile)})
     }
     FileDialog {
         id: saveDialog
         title: "Save project as"
         fileMode: FileDialog.SaveFile
-        defaultSuffix: "pcc"
-        nameFilters: ["Dirigo projects (*.pcc)", "All files (*)"]
+        defaultSuffix: "wbp"
+        nameFilters: ["Wirebench projects (*.wbp)", "All files (*)"]
         onAccepted: controller.command({cmd: "saveAs", path: controller.localPath(selectedFile)})
         // A save the model asked for (before replacing an unsaved project) that is abandoned abandons what it was gating.
         onRejected: controller.command({cmd: "panelCancelled"})

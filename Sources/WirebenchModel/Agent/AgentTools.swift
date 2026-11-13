@@ -158,11 +158,11 @@ public final class AgentToolbox: @unchecked Sendable {
                   summary: "Starts an empty project. Refused while the open one has unsaved changes: save it first.",
                   schema: schema(), changes: true),
         AgentTool(name: "open_project",
-                  summary: "Opens a .pcc project file. Refused while the open project has unsaved changes.",
+                  summary: "Opens a .wbp project file (a legacy .pcc is imported). Refused while the open project has unsaved changes.",
                   schema: schema([("path", "string", "The file's full path.")], required: ["path"]), changes: true),
         AgentTool(name: "save_project",
-                  summary: "Saves the project: to the file it was opened from, or, if it has none yet (or you give a path), to a new .pcc file. It never overwrites a different file that already exists.",
-                  schema: schema([("path", "string", "A full path ending in .pcc. Optional once the project has a file.")]), changes: true),
+                  summary: "Saves the project: to the file it was opened from, or, if it has none yet (or you give a path), to a new .wbp file. It never overwrites a different file that already exists.",
+                  schema: schema([("path", "string", "A full path ending in .wbp. Optional once the project has a file.")]), changes: true),
     ]
 
     /// The tools offered to the model: the ones that read always, the ones that change things only when editing is allowed.
@@ -596,8 +596,9 @@ public final class AgentToolbox: @unchecked Sendable {
             guard let path = string(args, "path") else { return failure("Give a path.", summary: "No path") }
             guard !model.isDocumentEdited else { return failure("The open project has unsaved changes. Save it first, or ask the user.", summary: "Unsaved changes") }
             let url = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
-            guard url.pathExtension.lowercased() == "pcc", FileManager.default.fileExists(atPath: url.path) else {
-                return failure("No .pcc file at \(url.path).", summary: "No file at \(path)")
+            let extensionOK = ["wbp", "pcc", "xml"].contains(url.pathExtension.lowercased())
+            guard extensionOK, FileManager.default.fileExists(atPath: url.path) else {
+                return failure("No .wbp file at \(url.path) (a legacy .pcc is also accepted).", summary: "No file at \(path)")
             }
             model.loadProject(url: url)
             guard model.project != nil else { return failure("The file could not be read.", summary: "Could not open \(url.lastPathComponent)") }
@@ -607,15 +608,17 @@ public final class AgentToolbox: @unchecked Sendable {
             let target: URL
             if let path = string(args, "path") {
                 target = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
-                guard target.pathExtension.lowercased() == "pcc" else { return failure("The file name must end in .pcc.", summary: "Not a .pcc path") }
+                guard target.pathExtension.lowercased() == "wbp" else { return failure("The file name must end in .wbp.", summary: "Not a .wbp path") }
                 // Never over a file that is not this project's own.
                 if FileManager.default.fileExists(atPath: target.path), target.standardizedFileURL != model.currentFileURL?.standardizedFileURL {
                     return failure("\(target.path) already exists and is not the open project, so it was not overwritten. Choose another name.", summary: "Would overwrite another file")
                 }
-            } else if let current = model.currentFileURL {
+            } else if let current = model.currentFileURL, !model.isLegacyDocument {
                 target = current
+            } else if model.isLegacyDocument {
+                return failure("This is a legacy .pcc; give a path ending in .wbp to save the project.", summary: "Legacy project needs a .wbp path")
             } else {
-                return failure("The project has no file yet. Give a path ending in .pcc.", summary: "No file yet")
+                return failure("The project has no file yet. Give a path ending in .wbp.", summary: "No file yet")
             }
             do { try model.saveProject(to: target) } catch { return failure("Saving failed: \(error.localizedDescription)", summary: "Could not save") }
             return done("Saved \(target.path).", summary: "Saved \(target.lastPathComponent)")

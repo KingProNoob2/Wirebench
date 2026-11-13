@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
     }
     engine.rootContext()->setContextProperty("toggleMs", qEnvironmentVariableIntValue("WIREBENCH_TOGGLE_MS"));
     engine.rootContext()->setContextProperty("forceLight", qEnvironmentVariableIntValue("WIREBENCH_LIGHT") != 0);
-    // `wirebench-qt project.pcc` opens a project on start.
+    // `wirebench-qt project.wbp` opens a project on start.
     if (argc > 1) controller.command({{"cmd", "open"}, {"path", QString::fromLocal8Bit(argv[1])}});
     // WIREBENCH_PRE='[{"cmd":"select","ids":[4]}]' runs commands first, for screenshots of a particular state.
     for (const QJsonValue &step : QJsonDocument::fromJson(qgetenv("WIREBENCH_PRE")).array())

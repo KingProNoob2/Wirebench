@@ -541,6 +541,9 @@ public final class AppModel: @unchecked Sendable {
 
     public var currentFileURL: URL? = nil
     public var isDocumentEdited: Bool = false
+    /// A project opened from Dirigo's `.pcc`: readable, but every save writes the current `.wbp` format, so Save
+    /// goes through Save As instead of overwriting the legacy file.
+    public private(set) var isLegacyDocument = false
 
     /// The project as last opened, created or saved, with its layout left out (`content(of:)`).
     private var savedContent: PCCProject?
@@ -657,6 +660,7 @@ public final class AppModel: @unchecked Sendable {
         isRestoringUndo = false
         history.clear()
         self.currentFileURL = nil
+        self.isLegacyDocument = false
         self.selectedPage = "main"
         self.selectedModuleId = nil
         selectedWire = nil
@@ -684,6 +688,7 @@ public final class AppModel: @unchecked Sendable {
         isRestoringUndo = false
         history.clear()
         self.currentFileURL = nil
+        self.isLegacyDocument = false
         self.selectedPage = compiled.pages.first?.caption ?? "main"
         self.selectedModuleId = nil
         selectedWire = nil
@@ -703,15 +708,24 @@ public final class AppModel: @unchecked Sendable {
     public func loadProject(url: URL) {
         pause()
         do {
-            let parser = PCCParser()
+            // Content decides the format: a `.wbp` and a `.pcc` are told apart even when the name is wrong.
+            let loaded = try ProjectFile.read(at: url)
             // A `SystemCmd` block that is only configuration becomes an entry of the PLC configuration; one in the circuit stays a block.
-            let proj = PLCConfiguration.extracting(try parser.parse(fileAt: url))
+            let proj = PLCConfiguration.extracting(loaded.project)
+            var notes: [String] = []
             if !proj.profile.isEmpty, ProfileRegistry.builtIn.profile(named: proj.profile) == nil {
-                presentMessage(title: "Unknown profile",
-                               message: "This project asks for the profile '\(proj.profile)', which this build does not know. "
-                                   + "Its threads and periods fall back to the default profile.",
-                               kind: .warning)
+                notes.append("This project asks for the profile '\(proj.profile)', which this build does not know. "
+                    + "Its threads and periods fall back to the default profile.")
             }
+            if loaded.format == .dirigo {
+                notes.append("This is a legacy Dirigo .pcc. Saving writes the current .wbp format, so Save asks for a new file.")
+            }
+            if !notes.isEmpty {
+                presentMessage(title: loaded.format == .dirigo ? "Legacy project opened" : "Unknown profile",
+                               message: notes.joined(separator: "\n\n"),
+                               kind: notes.count > 1 || loaded.format == .dirigo ? .info : .warning)
+            }
+            isLegacyDocument = loaded.format == .dirigo
             isRestoringUndo = true
             self.project = proj
             // A new document means new meanings for the same module ids, and `ModulePinCatalog`
@@ -740,7 +754,7 @@ public final class AppModel: @unchecked Sendable {
             // size (see `performPendingZoomToFit`).
             self.needsZoomToFit = true
         } catch {
-            presentMessage(title: "Failed to open PCC project",
+            presentMessage(title: "Failed to open project",
                            message: error.localizedDescription,
                            kind: .warning)
         }
@@ -783,7 +797,11 @@ public final class AppModel: @unchecked Sendable {
             pendingAdoptProject = nil
             finishQuit(intent, terminate: false)
         case .save:
-            if let url = currentFileURL {
+            // A legacy `.pcc` is never written back: saving asks for a `.wbp` destination.
+            if isLegacyDocument || currentFileURL == nil {
+                intentAwaitingSave = intent
+                pendingFilePanel = .saveAs
+            } else if let url = currentFileURL {
                 do {
                     try saveProject(to: url)
                     continueAfter(intent)
@@ -793,9 +811,6 @@ public final class AppModel: @unchecked Sendable {
                                    kind: .critical)
                     finishQuit(intent, terminate: false)
                 }
-            } else {
-                intentAwaitingSave = intent
-                pendingFilePanel = .saveAs
             }
         }
     }
@@ -865,6 +880,11 @@ public final class AppModel: @unchecked Sendable {
 
     @MainActor
     public func saveProject() {
+        // Never write a legacy file back over itself: the new format is saved under a new name.
+        if isLegacyDocument {
+            saveProjectAs()
+            return
+        }
         if let url = currentFileURL {
             do {
                 try saveProject(to: url)
@@ -1196,9 +1216,8 @@ public final class AppModel: @unchecked Sendable {
 
     /// What the save panel should suggest as a name, without the extension (see `exportDefaultName`).
     public var saveAsDefaultName: String {
-        let base = currentFileURL?.lastPathComponent
-            ?? ((project?.name.isEmpty == false) ? project!.name : "Untitled")
-        return base.hasSuffix(".pcc") ? String(base.dropLast(4)) : base
+        if let url = currentFileURL { return url.deletingPathExtension().lastPathComponent }
+        return (project?.name.isEmpty == false) ? project!.name : "Untitled"
     }
 
     /// Called once the save panel has a destination.
@@ -1219,15 +1238,15 @@ public final class AppModel: @unchecked Sendable {
 
     public func saveProject(to url: URL) throws {
         guard var project = project else { return }
+        // The document records its own path, as the legacy format did; the legacy export rewrites it for Dirigo.
         project.projectPath = url.path
-        let serializer = PCCSerializer()
-        let xmlString = serializer.serialize(project: project)
-        try xmlString.write(to: url, atomically: true, encoding: .utf8)
+        try ProjectFile.write(project, to: url)
         // The path changed, and the project setter would record that as an edit; a save is not an undo step.
         isRestoringUndo = true
         self.project = project
         isRestoringUndo = false
         self.currentFileURL = url
+        self.isLegacyDocument = false
         self.isDocumentEdited = false
         savedContent = Self.content(of: project)
     }
@@ -2469,7 +2488,7 @@ public final class AppModel: @unchecked Sendable {
             let build = try PLCProjectBuild.compile(xml: xml,
                                                     classForGUID: BlockTypeCatalog.classNamesByGUID,
                                                     template: template, optimize: optimizeProgram)
-            let name = currentFileURL?.lastPathComponent ?? (project.name + ".pcc")
+            let name = currentFileURL?.lastPathComponent ?? (project.name + ".wbp")
             // The trailer carries the project's profile's EEPROM offset and write block (`Sybas Duino-E`: 128, the P3: 8).
             let profile = ProfileRegistry.profile(for: project, in: Self.profileDatabase)
             let binary = try PLCProgramImage.programBinary(

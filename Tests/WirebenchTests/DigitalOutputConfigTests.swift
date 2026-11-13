@@ -150,7 +150,7 @@ struct IntVarEditTests {
         #expect(changed.rawAttributes["X_SliderMax"] == nil, "no second copy of the range")
 
         // Saved and opened again, it is still 40.
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("intvar-saved-\(UUID()).pcc")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("intvar-saved-\(UUID()).wbp")
         try model.saveProject(to: out)
         let reopened = AppModel()
         reopened.loadProject(url: out)

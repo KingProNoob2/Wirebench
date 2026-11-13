@@ -26,14 +26,16 @@ public enum BuildInput {
         PCCSerializer().serialize(project: needsPreparation(project) ? prepared(project, defaultThread: defaultThread) : project)
     }
 
-    /// The XML to compile for a `.pcc` on disk.
+    /// The XML to compile for a project on disk, in either format.
     ///
-    /// A file with nothing to prepare is returned exactly as read, so compiling one never depends on this app's
-    /// serialiser reproducing the file it was given.
+    /// A legacy file with nothing to prepare is returned exactly as read, so compiling one never depends on this app's
+    /// serialiser reproducing the file it was given. The current format is decoded and serialised for the compiler.
     public static func xml(contentsOf url: URL) throws -> String {
-        let raw = try String(contentsOf: url, encoding: .utf8)
-        guard let project = try? PCCParser().parse(xmlString: raw), needsPreparation(project) else { return raw }
-        return xml(for: project, defaultThread: configurationThread(of: project))
+        let loaded = try ProjectFile.read(at: url)
+        if loaded.format == .dirigo, !needsPreparation(loaded.project) {
+            return try String(contentsOf: url, encoding: .utf8)
+        }
+        return xml(for: loaded.project, defaultThread: configurationThread(of: loaded.project))
     }
 
     /// Which thread a configuration entry made in the editor runs on: the second one when the profile has two, because

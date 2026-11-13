@@ -8,7 +8,7 @@ import WirebenchSource
 /// The Structured Text editor: source on the left, what the compiler says about it on the right.
 ///
 /// It compiles as you type (debounced) so a diagnostic appears where the mistake is made, and the explicit Compile
-/// button opens the result in the block editor or saves it as a `.pcc`.
+/// button opens the result in the block editor or saves it as a `.wbp`.
 struct SwiftIDEView: View {
     @Bindable var model: AppModel
 
@@ -31,7 +31,7 @@ struct SwiftIDEView: View {
         }
         .frame(minWidth: 820, minHeight: 440)
         .onAppear {
-            // A `.pcc` carries no source, so the editor recovers one from the open project when it has none: the pages,
+            // A `.wbp` (or legacy `.pcc`) carries no source, so the editor recovers one from the open project when it has none: the pages,
             // pins and logic the subset can express, and a list of what it cannot.
             if model.swiftSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { recoverFromProject() }
             isEmpty = model.swiftSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -149,7 +149,7 @@ struct SwiftIDEView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let document = documentName {
-                Text("‘\(document)’ has no Structured Text source: a .pcc stores blocks and wires, not the text that produced them.")
+                Text("‘\(document)’ has no Structured Text source: a project stores blocks and wires, not the text that produced them.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -248,9 +248,9 @@ struct SwiftIDEView: View {
             Button("Open in Wirebench", systemImage: "arrow.up.forward.app") { openInWirebench() }
                 .disabled(compiled == nil)
                 .help("Replace the open document with the compiled project")
-            Button("Save .pcc…", systemImage: "square.and.arrow.down") { save() }
+            Button("Save .wbp…", systemImage: "square.and.arrow.down") { save() }
                 .disabled(compiled == nil)
-                .help("Save the compiled project as a .pcc file")
+                .help("Save the compiled project as a .wbp file")
         }
     }
 
@@ -269,13 +269,13 @@ struct SwiftIDEView: View {
     private func save() {
         guard let compiled else { return }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pccProject]
-        panel.nameFieldStringValue = "\(compiled.project.name).pcc"
+        panel.allowedContentTypes = [.wirebenchProject]
+        panel.nameFieldStringValue = "\(compiled.project.name).wbp"
         panel.canCreateDirectories = true
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             do {
-                try PCCSerializer().serialize(project: compiled.project).write(to: url, atomically: true, encoding: .utf8)
+                try ProjectFile.write(compiled.project, to: url)
             } catch {
                 savingError = error.localizedDescription
             }

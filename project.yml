@@ -237,12 +237,26 @@ targets:
         NSPrincipalClass: NSApplication
         NSSupportsAutomaticGraphicsSwitching: true
         CFBundleDocumentTypes:
-          - CFBundleTypeName: "PCC Project File"
+          - CFBundleTypeName: "Wirebench Project"
+            CFBundleTypeExtensions:
+              - "wbp"
+            CFBundleTypeRole: "Editor"
+            LSHandlerRank: "Default"
+          - CFBundleTypeName: "Dirigo PCC Project (legacy)"
             CFBundleTypeExtensions:
               - "pcc"
               - "xml"
-            CFBundleTypeRole: "Editor"
-            LSHandlerRank: "Default"
+            CFBundleTypeRole: "Viewer"
+            LSHandlerRank: "Alternate"
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: "com.wirebench.project"
+            UTTypeDescription: "Wirebench Project"
+            UTTypeConformsTo:
+              - "public.json"
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - "wbp"
+              public.mime-type: "application/vnd.wirebench.project+json"
     configFiles:
       Debug: Config/App.xcconfig
       Release: Config/App.xcconfig

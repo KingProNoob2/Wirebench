@@ -103,7 +103,7 @@ Everything lands on the profile's fastest thread (Sybas Duino-E: 50 ms), so the 
 
 ## Recovery
 
-Opening a `.pcc` with an empty editor recovers it to ST: programs, `%IX`/`%QX` pins, stored variables, block and macro
+Opening a `.wbp` (or a legacy `.pcc`) with an empty editor recovers it to ST: programs, `%IX`/`%QX` pins, stored variables, block and macro
 instances, calls, Boolean operators, and `IF`/`ELSE` ranges of `Set` writes. A project with only macro sheets gets a
 `PROGRAM Main` so the text is a program. What the subset cannot express — a counter, a timer, a graphic, a nested
 conditional, a non-Boolean pin — is listed under `(* Not recovered: … *)` rather than invented, and a fractional float
@@ -131,7 +131,7 @@ catalogued block instance, so its output reads as a BOOL wire rather than a numb
 wirebench-cli st Program.st --out build --name Blink
 ```
 
-`st` compiles to `<name>.pcc` (`--name` sets that name); the app's **Compile** button and its report come from the
+`st` compiles to `<name>.wbp` (`--name` sets that name); the app's **Compile** button and its report come from the
 same compiler.
 
 ## Limits

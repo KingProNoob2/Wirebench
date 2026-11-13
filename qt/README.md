@@ -52,17 +52,17 @@ sudo apt install build-essential git cmake ninja-build pkg-config zlib1g-dev qt6
   qml6-module-qtquick-dialogs libgl1-mesa-dev
 tools/build-qt.sh Release
 
-build/qt/wirebench-qt [project.pcc]
+build/qt/wirebench-qt [project.wbp]
 ```
 
 The Swift package builds on Linux with the toolchain from swift.org (tested: Swift 6.4.2, Ubuntu 26.04, x86_64) and zlib's headers.
 `swift test` runs everything but the SwiftUI app's own tests there; skip `CxxBlockFuzzTests` on a machine with under about
-8 GB (it peaks at 5.7 GB on macOS and 16 GB on Linux). `tools/bridge-smoke.sh [project.pcc]` builds the bridge and runs a C test
+8 GB (it peaks at 5.7 GB on macOS and 16 GB on Linux). `tools/bridge-smoke.sh [project.wbp]` builds the bridge and runs a C test
 that opens a project, plays it, builds and queries the palette.
 
 ## What it does
 
-Open, save and save-as through the platform's file dialogs (or drop a `.pcc` on the window); pan, zoom and fit; select (click or a
+Open, save and save-as through the platform's file dialogs (or drop a `.wbp` or legacy `.pcc` on the window); pan, zoom and fit; select (click or a
 selection box), move, wire (drag from an output pin to an input pin), delete, undo and redo; the block library with search;
 rectangles, ellipses and text; play, pause, step and reset with live values on pins and wires and a lit `Segment` display; an
 inspector with live signals and editable values; a configuration dialog for most block kinds (shared with the SwiftUI dialog through

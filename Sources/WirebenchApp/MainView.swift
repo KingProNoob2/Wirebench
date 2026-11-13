@@ -183,12 +183,12 @@ public struct MainView: View {
         // File panels and messages are presented by the view; the model only records what it wants,
         // which is what keeps it free of AppKit.
         .fileImporter(isPresented: panelBinding(.open),
-                      allowedContentTypes: [.pccProject, .xml],
+                      allowedContentTypes: [.wirebenchProject, .pccProject, .xml],
                       allowsMultipleSelection: false,
                       onCompletion: chosenFile("Could not open that file") { model.openProject(at: $0) })
         .fileExporter(isPresented: panelBinding(.saveAs),
-                      document: LegacySaveDocument(project: model.project),
-                      contentType: .pccProject,
+                      document: WirebenchSaveDocument(),
+                      contentType: .wirebenchProject,
                       defaultFilename: model.saveAsDefaultName,
                       onCompletion: savedFile("Could not save the project", kind: .critical,
                                               onNoDestination: { model.savePanelWasCancelled() }) {

@@ -11,15 +11,49 @@
 		<dict>
 			<key>CFBundleTypeExtensions</key>
 			<array>
-				<string>pcc</string>
-				<string>xml</string>
+				<string>wbp</string>
 			</array>
 			<key>CFBundleTypeName</key>
-			<string>PCC Project File</string>
+			<string>Wirebench Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
 			<string>Default</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>pcc</string>
+				<string>xml</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Dirigo PCC Project (legacy)</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.wirebench.project</string>
+			<key>UTTypeDescription</key>
+			<string>Wirebench Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>wbp</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.wirebench.project+json</string>
+			</dict>
 		</dict>
 	</array>
 	<key>CFBundleExecutable</key>

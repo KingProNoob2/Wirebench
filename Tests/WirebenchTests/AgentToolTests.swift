@@ -201,16 +201,16 @@ struct ToolTests {
         let (model, box) = make()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("agent-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let other = folder.appendingPathComponent("other.pcc")
+        let other = folder.appendingPathComponent("other.wbp")
         try "keep me".write(to: other, atomically: true, encoding: .utf8)
 
         #expect(run(box, "save_project").failed, "a project with no file needs a path")
         #expect(run(box, "save_project", ["path": other.path]).failed)
         #expect(try String(contentsOf: other, encoding: .utf8) == "keep me", "the other file is untouched")
-        #expect(run(box, "save_project", ["path": folder.appendingPathComponent("x.txt").path]).failed, "only .pcc")
+        #expect(run(box, "save_project", ["path": folder.appendingPathComponent("x.txt").path]).failed, "only .wbp")
 
         _ = run(box, "add_block", ["type": "And"])
-        let mine = folder.appendingPathComponent("mine.pcc")
+        let mine = folder.appendingPathComponent("mine.wbp")
         #expect(!run(box, "save_project", ["path": mine.path]).failed)
         #expect(FileManager.default.fileExists(atPath: mine.path))
         #expect(!run(box, "save_project").failed, "now it has a file, which it may overwrite")
@@ -222,7 +222,7 @@ struct ToolTests {
         _ = run(box, "save_project")
         #expect(!run(box, "open_project", ["path": mine.path]).failed)
         #expect(model.project?.modules.count == 2)
-        #expect(run(box, "open_project", ["path": folder.appendingPathComponent("missing.pcc").path]).failed)
+        #expect(run(box, "open_project", ["path": folder.appendingPathComponent("missing.wbp").path]).failed)
     }
 
     @Test("A project that is built and run reports its state: step moves the tick count, reset returns it")

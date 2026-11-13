@@ -12,7 +12,15 @@ import Foundation
 @MainActor
 struct UnsavedChangesTests {
     static func model() throws -> AppModel {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unsaved-\(UUID()).pcc")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unsaved-\(UUID()).wbp")
+        try ProjectFile.write(BlockDeletionTests.project(), to: url)
+        let model = AppModel()
+        model.loadProject(url: url)
+        return model
+    }
+
+    static func legacyModel() throws -> AppModel {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-\(UUID()).pcc")
         try PCCSerializer().serialize(project: BlockDeletionTests.project()).write(to: url, atomically: true, encoding: .utf8)
         let model = AppModel()
         model.loadProject(url: url)
@@ -122,6 +130,17 @@ struct UnsavedChangesTests {
         #expect(try Data(contentsOf: url) != before, "the deletion was saved")
         #expect(model.project?.modules.isEmpty == true, "and then New went ahead")
         #expect(!model.hasSignificantChanges)
+    }
+
+    @Test("A legacy project is never overwritten: Save asks for a .wbp destination")
+    func legacySaveAsks() throws {
+        let model = try Self.legacyModel()
+        #expect(model.isLegacyDocument)
+        _ = model.deleteModule(id: 2)
+        model.createNewProject()
+        model.answerUnsavedChanges(.save)
+        #expect(model.pendingFilePanel == .saveAs, "the save panel is the only way forward")
+        #expect(model.currentFileURL?.pathExtension == "pcc", "the legacy file is untouched")
     }
 
     @Test("Quit asks first, and Cancel keeps the app up")

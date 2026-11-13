@@ -8,9 +8,10 @@ There are two front ends on one Swift model: a macOS SwiftUI app and a Qt Quick 
 
 ## What it does
 
-- **Projects.** Opens and saves Dirigo `.pcc` files, including the attributes and sections the model does not
-  understand. Re-saving a project does not change it: every project in the test corpus is written back byte for
-  byte.
+- **Projects.** Saves the editor's own `.wbp` format — a versioned JSON document — and opens legacy Dirigo `.pcc`
+  files for import; the attributes and sections the model does not understand survive either way. The legacy export
+  writes `.pcc` and every project in the test corpus is written back byte for byte; the format is described in
+  [`docs/Project-Format.md`](docs/Project-Format.md).
 - **Simulation.** Runs a program on a C++ core. 144 of the 147 catalogued block types run on it; the exceptions
   are under [Limits](#limits).
 - **Structured Text.** Compiles IEC 61131-3 ST to the sheet in the editor (⌥⌘E): `PROGRAM` is a page,
@@ -80,7 +81,7 @@ sudo dnf install gcc-c++ git cmake ninja-build pkgconf-pkg-config zlib-devel mes
   qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel
 
 tools/build-qt.sh Release     # Swift bridge, then the app: build/qt/wirebench-qt
-build/qt/wirebench-qt [project.pcc]
+build/qt/wirebench-qt [project.wbp]
 ```
 
 If a package is missing, the build needs Qt Base, Declarative (Quick, Controls, Layouts, Shapes, Dialogs) and
@@ -89,7 +90,7 @@ ShaderTools. On an older distribution, install Qt 6.5 or newer from qt.io and po
 - Serial uploads need access to the port: `sudo usermod -aG dialout $USER` (`uucp` on Arch), then log in again.
   The app says why a port will not open.
 - Without a display: `QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software`.
-- `tools/bridge-smoke.sh [project.pcc]` builds the bridge and runs a C test that opens, plays and compiles a
+- `tools/bridge-smoke.sh [project.wbp]` builds the bridge and runs a C test that opens, plays and compiles a
   project, without Qt.
 
 The Qt app has its own notes on architecture, diagnostics and packaging: [`qt/README.md`](qt/README.md).
@@ -102,7 +103,7 @@ and redo cover every edit.
 
 **Pages and macros.** The SwiftUI sidebar lists the sheets; the Qt app shows them as tabs. Right-click a sheet to
 rename or delete it. Renaming a page moves its blocks, graphics and PLC configuration with it; renaming a macro
-renames the sheet and every call, including calls inside other macros. Both are saved in the `.pcc` and written
+renames the sheet and every call, including calls inside other macros. Both are saved in the `.wbp` and written
 out by the legacy export.
 
 **Wiring.** Drag from a pin to a pin. The cable is drawn as an elbow, and it snaps to the pin under the pointer
@@ -116,7 +117,7 @@ property of the PLC rather than part of the circuit, so it is a list in the proj
 `Par1`/`Par2` as decimal, `0x…` or `$…`, or take a preset. Configure Pins has a grid of the basic PLC's 14 I/O
 pins with I/O0 and I/O1 fixed as the serial link; higher pins (the Duino-E has up to 20) are typed in. The
 Hardware menu picks the project's profile, and the profile decides which commands are offered. A new project
-starts on `Sybas Duino-E`. Loading a `.pcc` moves each plain `SystemCmd` block (constant inputs, enabled, nothing
+starts on `Sybas Duino-E`. Opening a legacy `.pcc` moves each plain `SystemCmd` block (constant inputs, enabled, nothing
 wired to it) into this list; a wired one stays on the sheet. Build and Export Legacy put them back as blocks in
 their old places, and a native save keeps them in a `PLC_CONFIGURATION` section that Dirigo ignores.
 
@@ -145,12 +146,12 @@ writes. A running app never reads a profile file.
 ## Command line
 
 ```bash
-swift run wirebench-cli info      project.pcc      # modules, pages, wiring
-swift run wirebench-cli blocks    project.pcc      # how each module resolves to a block type
-swift run wirebench-cli sim       project.pcc 20000
-swift run wirebench-cli build     project.pcc      # writes the program (.pbd) and symbol table (.csv)
-swift run wirebench-cli roundtrip project.pcc      # open, save, compare: nothing may be lost
-swift run wirebench-cli resave    project.pcc      # rewrite in Dirigo's format (whole-number coordinates), keeping a .bak
+swift run wirebench-cli info      project.wbp      # modules, pages, wiring
+swift run wirebench-cli blocks    project.wbp      # how each module resolves to a block type
+swift run wirebench-cli sim       project.wbp 20000
+swift run wirebench-cli build     project.wbp      # writes the program (.pbd) and symbol table (.csv)
+swift run wirebench-cli roundtrip legacy.pcc       # legacy XML: open, save, compare, nothing lost
+swift run wirebench-cli resave    legacy.pcc       # rewrite in Dirigo's format (whole-number coordinates), keeping a .bak
 ```
 
 Dirigo reads block and wire coordinates with `StrToInt`, so a file whose `X`/`Y` have a fraction makes it refuse the

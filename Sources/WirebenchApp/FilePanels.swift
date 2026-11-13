@@ -4,7 +4,12 @@ import UniformTypeIdentifiers
 import WirebenchCore
 
 extension UTType {
-    /// Dirigo's project format.
+    /// Wirebench's own project format: JSON, declared in the app's `Info.plist`.
+    static var wirebenchProject: UTType {
+        UTType(filenameExtension: "wbp") ?? UTType(exportedAs: "com.wirebench.project", conformingTo: .json)
+    }
+
+    /// Dirigo's project format, kept for reading legacy files and for the legacy export.
     ///
     /// Named here rather than exported from an `Info.plist` because all the app needs it for is to
     /// label a file panel.
@@ -17,12 +22,25 @@ extension UTType {
     static var dbaseTable: UTType { UTType(filenameExtension: "dbf") ?? .data }
 }
 
-/// A minimal `FileDocument` so SwiftUI can present a save panel.
+/// A minimal `FileDocument` so SwiftUI can present the normal save panel.
 ///
-/// It is deliberately **not** the source of the bytes. A `.pcc` records its own path in
-/// `PROJECT_PATH`, so the file has to be written against the destination the user just chose — which
-/// is only known once the panel returns. The completion handler therefore writes through the model,
-/// and this type exists to give `fileExporter` something that names the format.
+/// It is deliberately **not** the source of the bytes: the document is written by the model against the
+/// destination the panel returns, so every save goes through one code path.
+struct WirebenchSaveDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.wirebenchProject] }
+    static var writableContentTypes: [UTType] { [.wirebenchProject] }
+
+    init() {}
+
+    init(configuration: ReadConfiguration) throws {}
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data())
+    }
+}
+
+/// The save panel for the legacy export. Its bytes are written by the model too, for the same reason; a `.pcc`
+/// records its own path in `PROJECT_PATH`, which is only known once the panel returns.
 struct LegacySaveDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.pccProject] }
     static var writableContentTypes: [UTType] { [.pccProject] }
