@@ -353,6 +353,19 @@ public final class CxxSimulationCore {
         guard let created else {
             fatalError("wirebench_sim_create returned null")
         }
+        if let extras = project.maraflow {
+            let eStop = extras.eStop
+            let rules = eStop.rules.map {
+                "\($0.channel)|\($0.activeLow ? 1 : 0)|\($0.enabled ? 1 : 0)"
+            }.joined(separator: ";")
+            let mode: Int32 = eStop.mode.contains("DEDICATED") ? 2 : 1
+            eStop.pageName.withCString { pageCString in
+                rules.withCString { rulesCString in
+                    wirebench_sim_set_estop_config(created, eStop.enabled ? 1 : 0, mode,
+                                                   eStop.manualReset ? 1 : 0, pageCString, rulesCString)
+                }
+            }
+        }
         // Parameter pins are not part of `WirebenchModuleDesc`: they are per-instance configuration, so
         // they are pushed in afterwards. Without this a `PulseGen` ran with `TOn = TOff = 0` and its
         // period was two cycles instead of four.
@@ -432,6 +445,7 @@ public final class CxxSimulationCore {
                 }
             }
             push("Name", mod.name)
+            push("Page", mod.page)
             let inLabels = BlockLabels.inputLabels(for: mod.guid, totalPins: mod.inPins.count)
             let outLabels = BlockLabels.outputLabels(for: mod.guid)
             let inNames = mod.inPins.enumerated().map { index, pin in
@@ -492,6 +506,12 @@ public final class CxxSimulationCore {
         guard let position = indexByModuleId[moduleId],
               let message = wirebench_sim_maraflow_st_error(sim, position) else { return nil }
         return String(cString: message)
+    }
+
+    /// The shared operand namespace (registers, DI/DO/AI/AO/PWM, ST and ladder writes). Useful for tests and the
+    /// inspector to observe values no module pin exposes.
+    public func operandValue(_ name: String) -> Double {
+        name.withCString { wirebench_sim_get_operand(sim, $0) }
     }
 
     public func outPins(moduleId: Int) -> [PinValue] {

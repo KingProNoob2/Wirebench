@@ -337,6 +337,13 @@ void wirebench_sim_set_string(WirebenchSim *sim, int32_t index, const char *key,
 /// A Maraflow ST page's compile error, or NULL. Valid after the page has first run.
 const char *wirebench_sim_maraflow_st_error(WirebenchSim *sim, int32_t index);
 
+/// Maraflow E-Stop supervision: enabled, mode (1 = disable outputs and stop, 2 = dedicated page),
+/// manual reset, the dedicated page name, and rules encoded as "channel|activeLow|enabled;...".
+void wirebench_sim_set_estop_config(WirebenchSim *sim, int32_t enabled, int32_t mode, int32_t manualReset,
+                                    const char *dedicatedPage, const char *rules);
+/// Read the shared operand namespace (registers, DI/DO/AI/AO/PWM, ST/ladder writes).
+double wirebench_sim_get_operand(WirebenchSim *sim, const char *name);
+
 /// The whole-project wire and macro sweep, outside a step: an edit made by hand reaches its consumers now.
 void wirebench_sim_propagate(WirebenchSim *sim);
 

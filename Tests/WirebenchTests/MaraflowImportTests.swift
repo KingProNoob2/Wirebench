@@ -965,6 +965,46 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: call.id)[0].asInt == 6, "ST macro input reaches the page and its output returns")
     }
 
+    @Test("E-Stop supervision trips on an imported rule and forces outputs to zero")
+    func eStopSupervision() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "Safety"),
+            ("project.pageCount", "2"),
+            ("project.estop.enabled", "true"),
+            ("project.estop.mode", "DISABLE_OUTPUTS_AND_STOP"),
+            ("project.estop.manualReset", "true"),
+            ("project.estop.ruleCount", "1"),
+            ("project.estop.rule.0.channel", "DI0"),
+            ("project.estop.rule.0.activeLow", "false"),
+            ("project.estop.rule.0.enabled", "true"),
+            ("page.0.name", "Drive"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "2"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "1"),
+            ("page.1.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "di", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "DriveDI", gridX: 2, gridY: 2, order: -100,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DI0")])
+        entries += Self.block("page.0.block.1.", id: "do", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "DriveDO", gridX: 10, gridY: 2, order: -90,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DO0")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "safety")
+        #expect(outcome.project.maraflow?.eStop.enabled == true)
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.operandValue("DO0") == 1, "before the rule trips the driver writes DO0")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.operandValue("DO0") == 0, "a tripped E-Stop forces hardware outputs to zero")
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [

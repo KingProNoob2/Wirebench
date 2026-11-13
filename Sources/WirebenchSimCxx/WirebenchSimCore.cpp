@@ -298,6 +298,13 @@ struct WirebenchSim {
     /// The Maraflow operand namespace: DI/DO/AI/AO/PWM channel registers and named registers.
     std::map<std::string, double> operands;
     bool maraflowEStopActive = false;
+    int32_t maraflowEStopMask = 0;
+    bool maraflowEStopEnabled = false;
+    int32_t maraflowEStopMode = 1;
+    bool maraflowEStopManualReset = true;
+    std::string maraflowEStopPage;
+    struct EStopRule { std::string channel; bool activeLow = false; bool enabled = false; };
+    std::vector<EStopRule> maraflowEStopRules;
 
     /* Construct state (the Swift `condStack` and friends), reset at the start of every step. */
     int64_t condStack = 0;
@@ -1573,11 +1580,14 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     const bool reset = m.inPins.size() > 1 && asBool(m.inPins[1]);
                     const bool previous = m.flagA;
                     m.flagA = reset;
-                    if (reset && !previous && sim) sim->maraflowEStopActive = false;
+                    if (reset && !previous && sim) {
+                        sim->maraflowEStopActive = false;
+                        sim->maraflowEStopMask = 0;
+                    }
                     if (sim == nullptr) return;
                     if (!m.outPins.empty()) m.outPins[0] = boolean(!sim->maraflowEStopActive);
                     if (m.outPins.size() > 1) m.outPins[1] = boolean(sim->maraflowEStopActive);
-                    if (m.outPins.size() > 2) m.outPins[2] = int32Value(0);
+                    if (m.outPins.size() > 2) m.outPins[2] = int32Value(sim->maraflowEStopMask);
                     return;
                 }
                 case MARAFLOW_Math_Add: {
@@ -2341,6 +2351,11 @@ void wirebench_sim_destroy(WirebenchSim *sim) { delete sim; }
 void wirebench_sim_reset(WirebenchSim *sim) {
     if (!sim) return;
     sim->tickCount = 0;
+    sim->maraflowEStopActive = false;
+    sim->maraflowEStopMask = 0;
+    for (const WirebenchSim::EStopRule &rule : sim->maraflowEStopRules) {
+        if (rule.enabled && rule.activeLow) ldWrite(sim, rule.channel, 1.0);
+    }
     sim->threadElapsedMs.clear();
     sim->threadRunCounts.clear();
     sim->arrays.clear();             /* the data area is the PLC's, and a reset clears it */
@@ -2364,6 +2379,28 @@ double wirebench_sim_ms_until_run(const WirebenchSim *sim) {
         soonest = std::min(soonest, std::max(0.0, interval - elapsed));
     }
     return soonest == std::numeric_limits<double>::max() ? 0 : soonest;
+}
+
+void updateMaraflowEStop(WirebenchSim *sim) {
+    if (!sim || !sim->maraflowEStopEnabled) {
+        if (sim) { sim->maraflowEStopActive = false; sim->maraflowEStopMask = 0; }
+        return;
+    }
+    int32_t mask = 0;
+    for (size_t i = 0; i < sim->maraflowEStopRules.size(); ++i) {
+        const WirebenchSim::EStopRule &rule = sim->maraflowEStopRules[i];
+        if (!rule.enabled) continue;
+        const bool high = std::abs(ldOperand(sim, rule.channel)) >= 0.5;
+        const bool tripped = rule.activeLow ? !high : high;
+        if (tripped) mask |= (1 << std::min<int>(14, static_cast<int>(i)));
+    }
+    if (mask != 0) {
+        sim->maraflowEStopActive = true;
+        sim->maraflowEStopMask = mask;
+    } else if (!sim->maraflowEStopManualReset) {
+        sim->maraflowEStopActive = false;
+        sim->maraflowEStopMask = 0;
+    }
 }
 
 /// The step loop. `forceAll` runs every thread whatever its timer, and leaves the timers alone.
@@ -2397,7 +2434,24 @@ static int32_t stepImpl(WirebenchSim *sim, double deltaMs, bool forceAll) {
         ranAny = true;
         sim->threadRunCounts[tid] += 1;
         Sample sample{sim->tickCount, interval};
+        updateMaraflowEStop(sim);
+        if (sim->maraflowEStopActive && sim->maraflowEStopMode == 1) {
+            for (int channel = 0; channel < 16; ++channel) ldWrite(sim, "DO" + std::to_string(channel), 0.0);
+            for (int channel = 0; channel < 8; ++channel) {
+                ldWrite(sim, "AO" + std::to_string(channel), 0.0);
+                ldWrite(sim, "PWM" + std::to_string(channel), 0.0);
+            }
+            continue;
+        }
         for (size_t index : sim->schedule[tid]) {
+            if (sim->maraflowEStopActive && sim->maraflowEStopMode == 2) {
+                const Module &module = sim->modules[index];
+                auto page = module.strings.find("Page");
+                const bool isEStopPage = page != module.strings.end()
+                    && (page->second == sim->maraflowEStopPage
+                        || (!page->second.empty() && page->second.front() == '!'));
+                if (!isEStopPage) continue;
+            }
             /* One module, in this order: construct bookkeeping (never gated), then the gate,
                then pull, process, write-through and push. */
             constructBookkeeping(sim, index);
@@ -2507,6 +2561,41 @@ const char *wirebench_sim_maraflow_st_error(WirebenchSim *sim, int32_t index) {
     if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return nullptr;
     const Module &module = sim->modules[static_cast<size_t>(index)];
     return module.stError.empty() ? nullptr : module.stError.c_str();
+}
+
+void wirebench_sim_set_estop_config(WirebenchSim *sim, int32_t enabled, int32_t mode, int32_t manualReset,
+                                    const char *dedicatedPage, const char *rules) {
+    if (!sim) return;
+    sim->maraflowEStopEnabled = enabled != 0;
+    sim->maraflowEStopMode = mode == 2 ? 2 : 1;
+    sim->maraflowEStopManualReset = manualReset != 0;
+    sim->maraflowEStopPage = dedicatedPage ? dedicatedPage : "";
+    sim->maraflowEStopRules.clear();
+    if (!rules) return;
+    std::string text = rules;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find(';', start);
+        const std::string item = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!item.empty()) {
+            const size_t first = item.find('|');
+            const size_t second = first == std::string::npos ? std::string::npos : item.find('|', first + 1);
+            if (first != std::string::npos && second != std::string::npos) {
+                WirebenchSim::EStopRule rule;
+                rule.channel = item.substr(0, first);
+                rule.activeLow = item.substr(first + 1, second - first - 1) == "1";
+                rule.enabled = item.substr(second + 1) == "1";
+                sim->maraflowEStopRules.push_back(rule);
+            }
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+}
+
+double wirebench_sim_get_operand(WirebenchSim *sim, const char *name) {
+    if (!sim || !name) return 0.0;
+    return ldOperand(sim, name);
 }
 
 void wirebench_sim_set_string(WirebenchSim *sim, int32_t index, const char *key, const char *value) {

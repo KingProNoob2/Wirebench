@@ -62,13 +62,17 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 
 ## What is visible
 
+- **Safety:** the imported E-Stop configuration supervises every thread scan. Rules sample their operand channels
+  (active-low/high), build the trip mask, latch when manual reset is required, and the E-Stop block reports
+  `Safe`/`Trip`/`Src`. Mode 1 forces `DO0…15`, `AO0…7` and `PWM0…7` to zero and stops the thread; mode 2 runs only the
+  dedicated/`!` E-Stop pages while normal pages are skipped.
 - **Canvas:** graphic objects map to native shapes/text (rectangle, ellipse, line, text), scaled from Maraflow's grid
   to 32-point cells. Other graphic kinds are drawn as rectangles; their exact kind stays in the preserved properties.
 - **Inspector:** with nothing selected, the inspector shows the Maraflow target/language, symbolic tags, E-Stop mode
   and rules, per-page language/block/rung counts, graphics, bus bundles and hidden-wire counts.
 - **CLI:** `wirebench-cli info` prints the same metadata summary next to the module/page counts.
-- **Preserved but not rendered:** wire route points, net names, bus ids and hidden flags; the raw `.mfl` properties
-  remain the source of truth for a future `.mfl` exporter.
+- **Preserved and counted, not drawn:** wire route points, net names, bus ids and hidden flags; the inspector and CLI
+  report bus/hidden counts, and the raw `.mfl` properties remain the source of truth for a future `.mfl` exporter.
 
 ## Limits
 
