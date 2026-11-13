@@ -736,6 +736,59 @@ struct StructuredTextTests {
         #expect(core.outPins(moduleId: variable.id)[0].asInt == 12, "(1+1) * (2*3)")
     }
 
+    @Test("A FUNCTION with IF merges its locals into selects")
+    func functionControlFlow() throws {
+        let compiled = try SourceCompiler().compile("""
+        FUNCTION AbsDiff : INT
+        VAR_INPUT
+            a : INT;
+            b : INT;
+        END_VAR
+        VAR
+            d : INT := 0;
+        END_VAR
+            IF a > b THEN
+                d := a - b;
+            ELSE
+                d := b - a;
+            END_IF;
+            AbsDiff := d;
+        END_FUNCTION
+
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            n := AbsDiff(3, 7);
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 4)
+    }
+
+    @Test("A FUNCTION IF that leaves a local unassigned on a path is refused")
+    func functionMayBeUnassigned() {
+        let message = Self.error("""
+        FUNCTION F : INT
+        VAR_INPUT a : INT; END_VAR
+        VAR t : INT; END_VAR
+            IF a > 0 THEN
+                t := 1;
+            END_IF;
+            F := t;
+        END_FUNCTION
+        PROGRAM P
+        VAR n : INT := 0; END_VAR
+            n := F(1);
+        END_PROGRAM
+        """)
+        #expect(message?.contains("may be unassigned") == true)
+    }
+
     @Test("Function body refusals: an unassigned local, a parameter write, control flow")
     func functionBodyRefusals() {
         let cases: [(String, String)] = [
@@ -764,17 +817,16 @@ struct StructuredTextTests {
             ("""
              FUNCTION F : INT
              VAR_INPUT x : INT; END_VAR
-                 IF x > 0 THEN
-                     F := 1;
-                 ELSE
-                     F := 0;
-                 END_IF;
+                 FOR i := 1 TO 2 DO
+                     x := x + 1;
+                 END_FOR;
+                 F := x;
              END_FUNCTION
              PROGRAM P
              VAR n : INT := 0; END_VAR
                  n := F(1);
              END_PROGRAM
-             """, "straight assignments only"),
+             """, "allows assignments and IF/CASE only"),
         ]
         for (source, fragment) in cases {
             let message = Self.error(source)
@@ -804,7 +856,7 @@ struct StructuredTextTests {
              VAR n : INT := 0; END_VAR
                  n := F(1);
              END_PROGRAM
-             """, "not a parameter/local"),
+             """, "not a parameter or local"),
             ("""
              FUNCTION F : INT
              VAR_INPUT x : INT; END_VAR

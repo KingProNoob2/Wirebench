@@ -399,30 +399,13 @@ public struct SourceParser {
         try expectKeyword("END_FUNCTION")
         guard !body.isEmpty else { throw error("a FUNCTION body is empty") }
         let parameterNames = Set(parameters.map { $0.name.lowercased() })
-        var available = Set(parameters.map { $0.name.lowercased() })
-        for local in locals where local.initial != nil { available.insert(local.name.lowercased()) }
-        var returns = false
+        let localNames = Set(locals.map { $0.name.lowercased() })
+        let allowed = parameterNames.union(localNames).union([name.lowercased()])
         for statement in body {
-            guard case .assign(let target, let expression) = statement.kind else {
-                throw SourceError(line: statement.line,
-                                  message: "a FUNCTION body is straight assignments only (no IF, loops, calls or array writes)")
-            }
-            if parameterNames.contains(target.lowercased()) {
-                throw SourceError(line: statement.line,
-                                  message: "a FUNCTION parameter ('\(target)') is read-only; copy it to a local")
-            }
-            try validateFunctionBody(expression, available: available, function: name)
-            if target.lowercased() == name.lowercased() {
-                returns = true
-            } else {
-                guard locals.contains(where: { $0.name.lowercased() == target.lowercased() }) else {
-                    throw SourceError(line: statement.line,
-                                      message: "'\(target)' is not a local of '\(name)'; assign locals or '\(name)'")
-                }
-                available.insert(target.lowercased())
-            }
+            try validateFunctionStatement(statement, function: name, parameters: parameterNames,
+                                          locals: localNames, allowed: allowed)
         }
-        guard returns else {
+        guard assignsFunctionName(body, function: name) else {
             throw error("a FUNCTION body must assign its name, as in '\(name) := …;'")
         }
         return SourceFunction(name: name, returnType: returnType, parameters: parameters, locals: locals,
@@ -437,28 +420,73 @@ public struct SourceParser {
         return type
     }
 
-    /// A FUNCTION body may use its parameters, its assigned locals and literals: no caller variables, instances or
-    /// arrays. A local that has not been assigned yet (and has no initialiser) is an error here.
-    private func validateFunctionBody(_ expression: SourceExpr, available: Set<String>, function: String) throws {
+    /// A FUNCTION body may assign locals and its own name, with `IF`/`CASE`; anything else is refused. Expressions
+    /// may use parameters, locals and the function name (the last is the return value). Whether a name is assigned on
+    /// every path is checked while inlining, so a local read with no value is reported there.
+    private func validateFunctionStatement(_ statement: SourceStmt, function: String, parameters: Set<String>,
+                                           locals: Set<String>, allowed: Set<String>) throws {
+        switch statement.kind {
+        case .assign(let target, let expression):
+            if parameters.contains(target.lowercased()) {
+                throw SourceError(line: statement.line,
+                                  message: "a FUNCTION parameter ('\(target)') is read-only; copy it to a local")
+            }
+            guard target.lowercased() == function.lowercased() || locals.contains(target.lowercased()) else {
+                throw SourceError(line: statement.line,
+                                  message: "'\(target)' is not a local of '\(function)'; assign locals or '\(function)'")
+            }
+            try validateFunctionExpression(expression, allowed: allowed, function: function)
+        case .ifThen(let condition, let thenBody, let elseBody):
+            try validateFunctionExpression(condition, allowed: allowed, function: function)
+            for inner in thenBody {
+                try validateFunctionStatement(inner, function: function, parameters: parameters,
+                                              locals: locals, allowed: allowed)
+            }
+            for inner in elseBody ?? [] {
+                try validateFunctionStatement(inner, function: function, parameters: parameters,
+                                              locals: locals, allowed: allowed)
+            }
+        default:
+            throw SourceError(line: statement.line,
+                              message: "a FUNCTION body allows assignments and IF/CASE only (no loops, calls as statements or arrays)")
+        }
+    }
+
+    private func validateFunctionExpression(_ expression: SourceExpr, allowed: Set<String>, function: String) throws {
         switch expression.kind {
         case .boolean, .integer, .real:
             break
         case .name(let name):
-            guard available.contains(name.lowercased()) else {
+            guard allowed.contains(name.lowercased()) else {
                 throw SourceError(line: expression.line,
-                                  message: "'\(name)' is used before it is assigned in '\(function)', or is not a parameter/local")
+                                  message: "'\(name)' is not a parameter or local of '\(function)'")
             }
         case .member, .element:
             throw SourceError(line: expression.line,
                               message: "a FUNCTION body cannot read instances or arrays")
         case .unary(_, let operand):
-            try validateFunctionBody(operand, available: available, function: function)
+            try validateFunctionExpression(operand, allowed: allowed, function: function)
         case .binary(_, let left, let right):
-            try validateFunctionBody(left, available: available, function: function)
-            try validateFunctionBody(right, available: available, function: function)
+            try validateFunctionExpression(left, allowed: allowed, function: function)
+            try validateFunctionExpression(right, allowed: allowed, function: function)
         case .functionCall(_, let arguments):
-            for argument in arguments { try validateFunctionBody(argument, available: available, function: function) }
+            for argument in arguments { try validateFunctionExpression(argument, allowed: allowed, function: function) }
         }
+    }
+
+    private func assignsFunctionName(_ statements: [SourceStmt], function: String) -> Bool {
+        for statement in statements {
+            switch statement.kind {
+            case .assign(let target, _) where target.lowercased() == function.lowercased():
+                return true
+            case .ifThen(_, let thenBody, let elseBody):
+                if assignsFunctionName(thenBody, function: function)
+                    || assignsFunctionName(elseBody ?? [], function: function) { return true }
+            default:
+                break
+            }
+        }
+        return false
     }
 
     private mutating func unit(_ kind: SourceUnit.Kind) throws -> SourceUnit {

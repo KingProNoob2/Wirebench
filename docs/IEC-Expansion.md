@@ -78,8 +78,8 @@ Array declarations, element reads and writes are lowered to `Create…Array`/`Re
 lower bound subtracted and at most 16 arrays; REAL arrays use `CreateLongArray` (which allocates Long or Float slots)
 with the Float read/write blocks. Array writes are listed in recovery
 rather than recovered. FUNCTIONS are implemented as pure inlined functions: typed parameters and `VAR` locals with optional initialisers,
-straight-line assignments (locals become ordered expression bindings), the last assignment to the function name as
-the result, argument count and return type checked, recursion refused. Control flow inside a function and typed
+assignments and IF/CASE (locals become value bindings; IF merges into selects), the last assignment to the
+function name as the result, argument count and return type checked, recursion refused. Control flow inside a function and typed
 function-block interfaces remain out of scope.
 
 Functions (`FUNCTION f : INT ... END_FUNCTION`) lower to a macro-style page plus a call block, or are refused

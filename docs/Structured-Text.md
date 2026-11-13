@@ -59,10 +59,10 @@ END_PROGRAM
   CASE is lowered to the same comparisons and merges as an IF chain.
 - **Functions.** `FUNCTION Add : INT VAR_INPUT a : INT; b : INT; END_VAR Add := a + b; END_FUNCTION` declares a pure
   function; a call `Add(1, 2)` is inlined into the caller's expression at compile time. A body may declare `VAR`
-  locals (with optional initialisers) and contains **straight-line assignments** to those locals and to the function's
-  own name (its result, last assignment wins); assignments are substituted in order, so locals need no storage.
-  Parameters are read-only, a local must be assigned (or initialised) before it is read, and instances, arrays and
-  control flow are not allowed inside a function. Argument count and the declared return type are checked at the call;
+  locals (with optional initialisers) and assignments to those locals and to the function's own name (its result,
+  last assignment wins), plus `IF`/`CASE`. Locals are value bindings; an `IF` merges every name it changed into a
+  select, so no storage is created and the function is still one scan's expression. Parameters are read-only, a local
+  must be assigned on every path before it is read, and instances, arrays and loops are not allowed inside a function. Argument count and the declared return type are checked at the call;
   recursion and very large expansions are refused. Calls are expressions, not statements.
 - **Function blocks.** `FUNCTION_BLOCK Name VAR_INPUT … VAR_OUTPUT … END_FUNCTION_BLOCK` is a macro page. Its inputs and
   outputs are the interface blocks; declaring `t : Name;` makes a `Macro` block, `t(value := x);` wires it, and
@@ -135,9 +135,9 @@ same compiler.
 - `REAL` comparisons, `LONG` multiply/divide and `INT` modulo have no block and are refused. Arrays, structures,
   `VAR_GLOBAL` and direct addresses other than `%IX`/`%QX` are refused.
 - `CASE` labels must be disjoint whole numbers or ranges; a `REAL` selector and overlapping labels are refused.
-- A `FUNCTION` body is straight-line assignments to its locals and its name: no control flow, no instances/arrays;
-  calls are inlined (parameters substituted, locals as ordered bindings), so a recursive function is refused
-  (nesting/expansion cap).
+- A `FUNCTION` body allows assignments to its locals/name and `IF`/`CASE`; loops, instances and arrays are not
+  allowed. Calls are inlined purely (locals as value bindings, IF as selects), so a recursive function and a path
+  that leaves a local unassigned are refused.
 - `FOR` needs literal bounds/step and unrolls to at most 256 iterations; an instance cannot be called once per
   iteration (the same block call twice in one scan is refused). `WHILE` and `REPEAT` are refused.
 - Arrays are INT/LONG/REAL, at most 16, and cannot be written inside IF or CASE. A read in the same scan as a write

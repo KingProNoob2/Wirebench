@@ -884,93 +884,165 @@ struct Lowering {
         }
     }
 
-    /// Inline a FUNCTION: parameters become the caller's argument expressions, locals become bindings accumulated in
-    /// body order, and the last assignment to the function's name is its result. Nested calls expand recursively.
-    private func expandFunction(_ function: SourceFunction, arguments: [SourceExpr], depth: Int,
-                                line: Int) throws -> SourceExpr {
-        guard depth < 32 else {
+    /// Inline a FUNCTION purely: parameters become the argument values, locals become value bindings, and an `IF`
+    /// merges each name it changed into a select. No block or variable is created, so a function behaves as one scan's
+    /// expression.
+    private func evaluateFunction(_ function: SourceFunction, arguments: [Value], depth: Int,
+                                  line: Int) throws -> Value {
+        guard depth < 20 else {
             throw SourceError(line: line, message: "a function call is recursive or nested too deeply")
         }
-        var bindings: [String: SourceExpr] = [:]
+        guard arguments.count == function.parameters.count else {
+            throw SourceError(line: line,
+                              message: "'\(function.name)' takes \(function.parameters.count) argument(s), not \(arguments.count)")
+        }
+        var bindings: [String: Value] = [:]
         for (parameter, argument) in zip(function.parameters, arguments) {
             bindings[parameter.name.lowercased()] = argument
         }
         for local in function.locals {
             if let initial = local.initial {
-                bindings[local.name.lowercased()] = literalExpression(initial, line: local.line)
+                bindings[local.name.lowercased()] = literalValue(initial, type: local.type, line: local.line)
             }
         }
-        var result: SourceExpr?
-        for statement in function.statements {
-            guard case .assign(let target, let expression) = statement.kind else {
-                throw SourceError(line: statement.line,
-                                  message: "a FUNCTION body is straight assignments only")
-            }
-            let expanded = try expandExpression(expression, bindings: &bindings, depth: depth, line: line)
-            if target.lowercased() == function.name.lowercased() {
-                result = expanded
-            } else {
-                bindings[target.lowercased()] = expanded
-            }
-        }
-        guard let result else {
-            throw SourceError(line: line, message: "function '\(function.name)' never assigns its name")
+        try evaluateFunctionStatements(function.statements, bindings: &bindings, depth: depth + 1, line: line)
+        guard let result = bindings[function.name.lowercased()] else {
+            throw SourceError(line: line,
+                              message: "function '\(function.name)' does not assign its name on every path")
         }
         return result
     }
 
-    private func literalExpression(_ literal: SourceLiteral, line: Int) -> SourceExpr {
+    private func literalValue(_ literal: SourceLiteral, type: SourceType, line: Int) -> Value {
         switch literal {
-        case .boolean(let value): return SourceExpr(.boolean(value), line: line)
-        case .integer(let value): return SourceExpr(.integer(value), line: line)
-        case .real(let value): return SourceExpr(.real(value), line: line)
+        case .boolean(let value):
+            return .bool(.constant(value))
+        case .integer(let value):
+            return .number(.constant(integerValue(value)), type == .long ? .long : .int)
+        case .real(let value):
+            return .number(.constant(.float(Float(value))), .real)
         }
     }
 
-    private func expandExpression(_ expression: SourceExpr, bindings: inout [String: SourceExpr],
-                                  depth: Int, line: Int) throws -> SourceExpr {
-        guard depth < 32 else {
-            throw SourceError(line: line, message: "a function call is recursive or nested too deeply")
+    private func evaluateFunctionStatements(_ statements: [SourceStmt], bindings: inout [String: Value],
+                                            depth: Int, line: Int) throws {
+        for statement in statements {
+            switch statement.kind {
+            case .assign(let target, let expression):
+                bindings[target.lowercased()] =
+                    try evaluateFunctionExpression(expression, bindings: bindings, depth: depth, line: statement.line)
+            case .ifThen(let condition, let thenBody, let elseBody):
+                let test = try boolValue(try evaluateFunctionExpression(condition, bindings: bindings, depth: depth,
+                                                                        line: statement.line),
+                                         line: statement.line, what: "an IF condition")
+                var thenBindings = bindings
+                try evaluateFunctionStatements(thenBody, bindings: &thenBindings, depth: depth, line: statement.line)
+                var elseBindings = bindings
+                if let elseBody {
+                    try evaluateFunctionStatements(elseBody, bindings: &elseBindings, depth: depth, line: statement.line)
+                }
+                for name in Set(thenBindings.keys).union(elseBindings.keys)
+                where thenBindings[name] != elseBindings[name] {
+                    guard let fallback = bindings[name] else {
+                        throw SourceError(line: statement.line,
+                                          message: "'\(name)' may be unassigned on a path through a FUNCTION IF")
+                    }
+                    let whenTrue = thenBindings[name] ?? fallback
+                    let whenFalse = elseBindings[name] ?? fallback
+                    bindings[name] = try merge(test, whenTrue, whenFalse, line: statement.line)
+                }
+            default:
+                throw SourceError(line: statement.line,
+                                  message: "a FUNCTION body allows assignments and IF/CASE only")
+            }
         }
+    }
+
+    private func evaluateFunctionExpression(_ expression: SourceExpr, bindings: [String: Value],
+                                            depth: Int, line: Int) throws -> Value {
         switch expression.kind {
+        case .boolean(let value):
+            return .bool(.constant(value))
+        case .integer(let value):
+            return .number(.constant(integerValue(value)), Int32(exactly: value) != nil ? .int : .long)
+        case .real(let value):
+            return .number(.constant(.float(Float(value))), .real)
         case .name(let name):
-            return bindings[name.lowercased()] ?? expression
-        case .functionCall(let name, let callArguments):
+            guard let value = bindings[name.lowercased()] else {
+                throw SourceError(line: expression.line,
+                                  message: "'\(name)' is used before it is assigned in this function")
+            }
+            return value
+        case .functionCall(let name, let arguments):
             guard let function = functions[name.lowercased()] else {
-                throw SourceError(line: line, message: "unknown function '\(name)'")
+                throw SourceError(line: expression.line, message: "unknown function '\(name)'")
             }
-            guard callArguments.count == function.parameters.count else {
-                throw SourceError(line: line,
-                                  message: "'\(name)' takes \(function.parameters.count) argument(s), not \(callArguments.count)")
+            var values: [Value] = []
+            for argument in arguments {
+                values.append(try evaluateFunctionExpression(argument, bindings: bindings, depth: depth + 1,
+                                                             line: expression.line))
             }
-            var expandedArguments: [SourceExpr] = []
-            for argument in callArguments {
-                expandedArguments.append(try expandExpression(argument, bindings: &bindings, depth: depth + 1, line: line))
-            }
-            return try expandFunction(function, arguments: expandedArguments, depth: depth + 1, line: line)
-        case .unary(let op, let operand):
-            return SourceExpr(.unary(op, try expandExpression(operand, bindings: &bindings, depth: depth + 1, line: line)),
-                              line: expression.line)
-        case .binary(let op, let left, let right):
-            return SourceExpr(.binary(op,
-                                      try expandExpression(left, bindings: &bindings, depth: depth + 1, line: line),
-                                      try expandExpression(right, bindings: &bindings, depth: depth + 1, line: line)),
-                              line: expression.line)
+            return try evaluateFunction(function, arguments: values, depth: depth + 1, line: expression.line)
         case .member, .element:
-            throw SourceError(line: line, message: "a FUNCTION body cannot read instances or arrays")
-        case .boolean, .integer, .real:
-            return expression
-        }
-    }
-
-    private func expandNodeCount(_ expression: SourceExpr) -> Int {
-        switch expression.kind {
-        case .boolean, .integer, .real, .name: return 1
-        case .member(let base, _): return 1 + expandNodeCount(base)
-        case .element(let base, let indexExpression): return 1 + expandNodeCount(base) + expandNodeCount(indexExpression)
-        case .functionCall(_, let arguments): return 1 + arguments.reduce(0) { $0 + expandNodeCount($1) }
-        case .unary(_, let operand): return 1 + expandNodeCount(operand)
-        case .binary(_, let left, let right): return 1 + expandNodeCount(left) + expandNodeCount(right)
+            throw SourceError(line: expression.line, message: "a FUNCTION body cannot read instances or arrays")
+        case .unary(let op, let operand):
+            let value = try evaluateFunctionExpression(operand, bindings: bindings, depth: depth, line: line)
+            switch op {
+            case "!": return .bool(.negated(try boolValue(value, line: expression.line)))
+            case "-":
+                let (inner, type) = try numberValue(value, line: expression.line)
+                return .number(.negate(inner, type), type)
+            default: throw SourceError(line: expression.line, message: "unknown operator '\(op)'")
+            }
+        case .binary(let op, let left, let right):
+            let leftValue = try evaluateFunctionExpression(left, bindings: bindings, depth: depth, line: line)
+            let rightValue = try evaluateFunctionExpression(right, bindings: bindings, depth: depth, line: line)
+            switch op {
+            case "&&", "||", "xor":
+                let a = try boolValue(leftValue, line: left.line)
+                let b = try boolValue(rightValue, line: right.line)
+                switch op {
+                case "&&": return .bool(.conjunction(a, b))
+                case "||": return .bool(.disjunction(a, b))
+                default: return .bool(.exclusiveOr(a, b))
+                }
+            case "==", "!=":
+                if case .bool(let a) = leftValue, case .bool(let b) = rightValue {
+                    let unequal = BoolExpr.exclusiveOr(a, b)
+                    return .bool(op == "==" ? .negated(unequal) : unequal)
+                }
+                let (a, ta) = try numberValue(leftValue, line: left.line)
+                let (b, tb) = try numberValue(rightValue, line: right.line)
+                let type = widened(ta, tb)
+                guard type != .real else {
+                    throw SourceError(line: expression.line, message: "REAL comparison is not supported yet")
+                }
+                let equal = BoolExpr.comparison("==", a, b, type)
+                return .bool(op == "==" ? equal : .negated(equal))
+            case "<", ">", "<=", ">=":
+                let (a, ta) = try numberValue(leftValue, line: left.line)
+                let (b, tb) = try numberValue(rightValue, line: right.line)
+                let type = widened(ta, tb)
+                guard type != .real else {
+                    throw SourceError(line: expression.line, message: "REAL comparison is not supported yet")
+                }
+                switch op {
+                case "<": return .bool(.comparison("<", a, b, type))
+                case ">": return .bool(.comparison(">", a, b, type))
+                case "<=": return .bool(.disjunction(.comparison("<", a, b, type), .comparison("==", a, b, type)))
+                default: return .bool(.disjunction(.comparison(">", a, b, type), .comparison("==", a, b, type)))
+                }
+            case "+", "-", "*", "/", "%":
+                let (a, ta) = try numberValue(leftValue, line: left.line)
+                let (b, tb) = try numberValue(rightValue, line: right.line)
+                let type = widened(ta, tb)
+                guard numericBlock(op, type) != nil else {
+                    throw SourceError(line: expression.line, message: "no block computes '\(op)' on \(type.name)")
+                }
+                return .number(.binary(op, a, b, type), type)
+            default:
+                throw SourceError(line: expression.line, message: "unknown operator '\(op)'")
+            }
         }
     }
 
@@ -1253,11 +1325,11 @@ struct Lowering {
                 throw SourceError(line: expression.line,
                                   message: "'\(name)' takes \(function.parameters.count) argument(s), not \(arguments.count)")
             }
-            let expanded = try expandFunction(function, arguments: arguments, depth: 0, line: expression.line)
-            guard expandNodeCount(expanded) <= 50_000 else {
-                throw SourceError(line: expression.line, message: "this function call expands to too large an expression")
+            var argumentValues: [Value] = []
+            for argument in arguments {
+                argumentValues.append(try lower(argument, scan: &scan))
             }
-            let value = try lower(expanded, scan: &scan)
+            let value = try evaluateFunction(function, arguments: argumentValues, depth: 0, line: expression.line)
             switch (function.returnType, value) {
             case (.bool, .bool):
                 return value
