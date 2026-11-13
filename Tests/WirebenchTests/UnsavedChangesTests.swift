@@ -42,6 +42,41 @@ struct UnsavedChangesTests {
         #expect(!model.hasSignificantChanges)
     }
 
+    @Test("Saving is not an undo step, and undoing back to the saved state clears the edited flag")
+    func saveAndUndo() throws {
+        let model = try Self.model()
+        _ = model.deleteModule(id: 2)
+        try model.saveProject(to: try #require(model.currentFileURL))
+        #expect(!model.isDocumentEdited)
+        model.undo()
+        #expect(model.isDocumentEdited, "the undo brought content back")
+        model.redo()
+        #expect(!model.isDocumentEdited, "redo returns to exactly what is on disk")
+    }
+
+    @Test("The source buffer belongs to the open document")
+    func sourceBufferIsDocumentScoped() throws {
+        let model = try Self.model()
+        model.swiftSource = "PROGRAM Old END_PROGRAM"
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("other-\(UUID()).pcc")
+        try PCCSerializer().serialize(project: BlockDeletionTests.project()).write(to: other, atomically: true, encoding: .utf8)
+        model.loadProject(url: other)
+        #expect(model.swiftSource.isEmpty, "a different document does not inherit the last source")
+    }
+
+    @Test("Open in Wirebench asks before replacing unsaved work")
+    func adoptAsks() throws {
+        let model = try Self.model()
+        _ = model.deleteModule(id: 2)
+        var replacement = PCCProject(name: "Replacement", profile: "Sybas Duino-E")
+        replacement.pages = [ProjectPage(caption: "main")]
+        model.requestAdopt(replacement)
+        #expect(model.pendingUnsavedIntent == .adopt, "the editor asks before replacing the sheet")
+        #expect(model.project?.name != "Replacement")
+        model.answerUnsavedChanges(.discard)
+        #expect(model.project?.name == "Replacement")
+    }
+
     @Test("Cancel in the dialog keeps the project open")
     func cancelKeepsProject() throws {
         let model = try Self.model()

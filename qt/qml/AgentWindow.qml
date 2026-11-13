@@ -17,6 +17,9 @@ Window {
     property var state: ({presets: [], messages: [], provider: "", model: "", baseURL: "", custom: false, needsKey: true, hasKey: false,
                           keyHelp: "", keyLocation: "", models: [], loadingModels: false, modelsError: "", modelsHint: "", sending: false, error: "", canEdit: false, toolsRefused: false, toolsRefusal: "", currentAction: ""})
     property bool showConnection: true
+    /// False when this build was compiled without WIREBENCH_AI: the bridge answers available:false and every command
+    /// refuses, so the panel must say so instead of offering a dead Send.
+    property bool available: true
     Connections { target: controller; function onSceneChanged() { if (win.visible && !controller.hasProject) win.visible = false } }
     property string seen: ""
 
@@ -30,10 +33,12 @@ Window {
         const json = JSON.stringify(reply.state.messages) + reply.state.sending
         const changed = json !== seen
         seen = json
+        available = reply.state.available !== false
         state = reply.state
         if (changed) { messages.clear(); for (const m of state.messages) messages.append(m); list.positionViewAtEnd() }
     }
     function send() {
+        if (!available) return
         const text = field.text.trim()
         if (text === "") return
         win.ask({cmd: "agentSend", text: text})
@@ -94,6 +99,14 @@ Window {
     }
 
     ColumnLayout {
+        Text {
+            visible: !win.available
+            text: "The agent is not built into this copy of Wirebench."
+            color: AppTheme.faint
+            font.pixelSize: 12
+            Layout.leftMargin: 12; Layout.rightMargin: 12; Layout.topMargin: 8
+            wrapMode: Text.WordWrap
+        }
         anchors.fill: parent
         spacing: 0
 
@@ -312,7 +325,7 @@ Window {
                 placeholderText: "Ask the agent…"
                 onAccepted: win.send()
             }
-            IconButton { label: "Send"; accented: true; enabled: field.text.trim() !== "" && !win.state.sending; onClicked: win.send() }
+            IconButton { label: "Send"; accented: true; enabled: win.available && field.text.trim() !== "" && !win.state.sending; onClicked: win.send() }
         }
     }
 }

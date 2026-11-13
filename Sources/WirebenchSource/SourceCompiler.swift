@@ -2,7 +2,7 @@ import Foundation
 import WirebenchCore
 import WirebenchLibrary
 
-/// A macro the source declared, as the compiled project sees it.
+/// A function block the source declared, as the compiled project sees it.
 public struct CompiledMacro: Equatable, Sendable {
     public var name: String
     public var caption: String
@@ -10,11 +10,12 @@ public struct CompiledMacro: Equatable, Sendable {
     public var outputs: [String]
 }
 
-/// What one source file compiled to.
+/// What one Structured Text file compiled to.
 public struct CompiledSource {
     public var project: PCCProject
-    public var entryPoint: String
-    /// The main page's pins.
+    /// The `PROGRAM` the document opens on.
+    public var program: String
+    /// The main program's pins.
     public var usedInputs: [Int]
     public var writtenOutputs: [Int]
     public var variables: [String]
@@ -24,27 +25,28 @@ public struct CompiledSource {
     public var blockCount: Int
 }
 
-/// Compiles PLC Swift — a subset of Embedded Swift — into a Dirigo project.
+/// Compiles IEC 61131-3 Structured Text into a Dirigo project.
 ///
-/// The syntax is real Swift (`swift-syntax` builds the tree). Every `struct` is a page; `@macro` makes it a macro page:
-/// its `@Input`/`@Output` properties become the `Inputs`/`Outputs` interface, its `scan` the blocks between them, and a
-/// `let t = Name(...)` in another page becomes a `Macro` call whose pins mirror that interface. `t.output` reads a call's
-/// output. Pages run on the profile's fastest thread; macro pages, as Dirigo stores them, on thread 0.
-/// `docs/PLC-Swift.md` has the grammar, the mapping and the limits.
-public struct SwiftSourceCompiler {
+/// Each `PROGRAM` is a page and each `FUNCTION_BLOCK` a macro page: its `VAR_INPUT`/`VAR_OUTPUT` becomes the
+/// `Inputs`/`Outputs` interface, its body the blocks between them. A `VAR` declaration of a function block or a
+/// catalogued block type makes an instance, `instance(name := value)` wires its inputs, and `instance.output` reads its
+/// output. `AT %IXn`/`AT %QXn` pins are one `8xDI`/`8xDO`, a stored `BOOL` a `BoolVar` plus the `Set` that writes it,
+/// and `IF` a selection of wires rather than `If` markers. `docs/Structured-Text.md` has the subset and the limits.
+public struct SourceCompiler {
     public init() {}
 
     public func compile(_ source: String, projectName: String = "Program") throws -> CompiledSource {
         let program = try SourceParser.parse(source)
         guard let mainPage = program.main else {
-            throw SwiftSourceError(line: 1, message: "the file has no page to compile")
+            throw SourceError(line: 1, message: "the file has no PROGRAM to compile")
         }
-        let macros = Dictionary(program.macros.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
-        try checkRecursion(macros: macros)
+        var macrosByName: [String: SourceUnit] = [:]
+        for block in program.macros { macrosByName[block.name.lowercased()] = block }
+        try checkRecursion(units: program.units, macros: macrosByName)
 
         var project = PCCProject(name: mainPage.name.isEmpty ? projectName : mainPage.name, profile: "Sybas Duino-E")
         project.appOptions.cycleDelay = 10
-        // Timers are written in milliseconds and the blocks count scans, so the conversion needs the thread's period.
+        // Time-based blocks count scans, so a millisecond timing needs the thread's period.
         let thread = ProfileRegistry.profile(for: project, in: ProfileRegistry.builtIn)?
             .threads.filter { $0.intervalMs > 0 }
             .min { $0.intervalMs < $1.intervalMs }
@@ -55,21 +57,23 @@ public struct SwiftSourceCompiler {
         var modules: [PCCModule] = []
         var connections: [Connection] = []
         var pages: [String] = []
-
-        // The pages: the main one first, then the macros.
-        let ordered = [mainPage] + program.units.filter { $0.kind == .page && $0.name != mainPage.name } + program.macros
         var compiledMacros: [CompiledMacro] = []
+
+        // The program first, then the other programs, then the function blocks.
+        let ordered = [mainPage]
+            + program.units.filter { $0.kind == .program && $0.name != mainPage.name }
+            + program.units.filter { $0.kind == .functionBlock }
         for unit in ordered {
             let emitter = Emitter(page: unit.caption,
-                                  thread: unit.kind == .macro ? 0 : threadId,
+                                  thread: unit.kind == .functionBlock ? 0 : threadId,
                                   allocator: allocator,
                                   intervalMs: interval,
-                                  macros: macros)
+                                  macros: macrosByName)
             let summary = try emitter.emit(unit)
             modules.append(contentsOf: emitter.modules)
             connections.append(contentsOf: emitter.connections)
             pages.append(unit.caption)
-            if unit.kind == .macro {
+            if unit.kind == .functionBlock {
                 compiledMacros.append(CompiledMacro(name: unit.name, caption: unit.caption,
                                                     inputs: summary.inputs, outputs: summary.outputs))
             }
@@ -80,7 +84,7 @@ public struct SwiftSourceCompiler {
         project.inConnections = connections
 
         return CompiledSource(project: project,
-                              entryPoint: mainPage.scan?.name ?? "scan",
+                              program: mainPage.name,
                               usedInputs: mainPage.inputs.map(\.index),
                               writtenOutputs: mainPage.outputs.map(\.index),
                               variables: mainPage.variables.map(\.name),
@@ -89,42 +93,34 @@ public struct SwiftSourceCompiler {
                               blockCount: modules.count)
     }
 
-    /// A macro that calls itself, directly or through another, would compile to a call block that recurses forever.
-    private func checkRecursion(macros: [String: SourceUnit]) throws {
-        func called(_ unit: SourceUnit) -> [String] {
-            guard let scan = unit.scan else { return [] }
-            var names: [String] = []
-            func walk(_ statements: [SourceStmt]) {
-                for statement in statements {
-                    switch statement.kind {
-                    case .bind(_, let expr):
-                        if case .call(let name, _) = expr.kind, macros[name] != nil { names.append(name) }
-                    case .ifThen(_, let thenBody, let elseBody):
-                        walk(thenBody)
-                        if let elseBody { walk(elseBody) }
-                    default:
-                        break
-                    }
-                }
+    /// A function block that calls itself, directly or through another, would compile to a call that recurses forever.
+    private func checkRecursion(units: [SourceUnit], macros: [String: SourceUnit]) throws {
+        var callsByBlock: [String: [String]] = [:]
+        for unit in units where unit.kind == .functionBlock {
+            var targets: [String] = []
+            let types = Dictionary(unit.instances.map { ($0.name.lowercased(), $0.typeName.lowercased()) },
+                                   uniquingKeysWith: { first, _ in first })
+            for statement in unit.body {
+                guard case .call(let instance, _) = statement.kind,
+                      let type = types[instance.lowercased()], macros[type] != nil else { continue }
+                targets.append(type)
             }
-            walk(scan.body)
-            return names
+            callsByBlock[unit.name.lowercased()] = targets
         }
-        for (name, unit) in macros {
+        for (name, _) in macros {
+            var stack = callsByBlock[name] ?? []
             var seen: Set<String> = []
-            var stack = called(unit)
             while let next = stack.popLast() {
                 if next == name {
-                    throw SwiftSourceError(line: unit.line, message: "macro '\(name)' calls itself")
+                    throw SourceError(line: macros[name]?.line ?? 1,
+                                      message: "function block '\(macros[name]?.name ?? name)' calls itself")
                 }
-                if seen.insert(next).inserted, let callee = macros[next] {
-                    stack.append(contentsOf: called(callee))
-                }
+                if seen.insert(next).inserted { stack.append(contentsOf: callsByBlock[next] ?? []) }
             }
         }
     }
 
-    /// Ids are unique across pages; the per-page emitter handles order and position.
+    /// Ids are unique across pages; each page restarts order and position.
     final class IDAllocator {
         private var next = 1
         func take() -> Int {
@@ -136,14 +132,12 @@ public struct SwiftSourceCompiler {
 
 // MARK: - The Boolean expression tree
 
-/// A Boolean signal as a pure expression. `if` becomes `select`, so a whole scan is one expression per output.
+/// A Boolean signal as a pure expression. `IF` becomes `select`, so a whole scan is one expression per output.
 indirect enum BoolExpr: Equatable {
     case constant(Bool)
     case input(Int)
     case variable(String)
-    /// A `PulseGen` clock: the period in milliseconds. The emitter converts it to cycles.
-    case pulse(Int)
-    /// A macro page's own input, by pin position.
+    /// A function block's own input, by pin position.
     case macroInput(Int)
     /// The output of a macro call site (index) by pin position.
     case macroCall(Int, Int)
@@ -154,16 +148,10 @@ indirect enum BoolExpr: Equatable {
     case or(BoolExpr, BoolExpr)
     case xor(BoolExpr, BoolExpr)
 
-    var readsInput: Bool {
-        var found = false
-        walk { if case .input = $0 { found = true } }
-        return found
-    }
-
     func walk(_ visit: (BoolExpr) -> Void) {
         visit(self)
         switch self {
-        case .constant, .input, .variable, .pulse, .macroInput, .macroCall, .blockOutput:
+        case .constant, .input, .variable, .macroInput, .macroCall, .blockOutput:
             break
         case .not(let a):
             a.walk(visit)
@@ -220,7 +208,7 @@ enum PinSource {
     case pin(module: Int, outPin: Int)
 }
 
-/// What one unit's emitter learned: a macro's pin names, or nothing for a page.
+/// What one unit's emitter learned: a function block's pin names, or nothing for a program.
 struct UnitSummary {
     var inputs: [String] = []
     var outputs: [String] = []
@@ -233,24 +221,24 @@ final class Emitter {
     private(set) var connections: [Connection] = []
     private let page: String
     private let thread: Int
-    private let allocator: SwiftSourceCompiler.IDAllocator
+    private let allocator: SourceCompiler.IDAllocator
     private let intervalMs: Int
     private let macros: [String: SourceUnit]
     private var order = 10
     private var placed = 0
     private var digitalInput: Int?
-    private var pulseBlocks: [Int: Int] = [:]
     private var variableBlocks: [String: Int] = [:]
     private var macroInputs: Int?
     private var macroOutputs: Int?
-    private var callBlocks: [Int: Int] = [:]
+    private var calls: [CallSite] = []
     private var blockCalls: [BlockCall] = []
+    private var callBlocks: [Int: Int] = [:]
     private var blockCallBlocks: [Int: Int] = [:]
     private var isMacro: Bool { page.hasPrefix("*") }
 
     private static let columns = 4
 
-    init(page: String, thread: Int, allocator: SwiftSourceCompiler.IDAllocator, intervalMs: Int,
+    init(page: String, thread: Int, allocator: SourceCompiler.IDAllocator, intervalMs: Int,
          macros: [String: SourceUnit]) {
         self.page = page
         self.thread = thread
@@ -260,25 +248,27 @@ final class Emitter {
     }
 
     @discardableResult
-    func addBlock(_ guid: UUID, at point: (x: Double, y: Double)? = nil) -> Int {
+    func addBlock(_ guid: UUID) -> Int {
         let id = allocator.take()
-        let position = point ?? (x: Double(40 + (placed % Self.columns) * 200),
-                                 y: Double(40 + (placed / Self.columns) * 150))
-        placed += 1
         let module = BlockFactory.makeModule(guid: guid, id: id,
                                              name: BlockFactory.suggestedName(for: guid, existing: modules),
-                                             x: position.x, y: position.y,
+                                             x: Double(40 + (placed % Self.columns) * 200),
+                                             y: Double(40 + (placed / Self.columns) * 150),
                                              order: order, threadId: thread, page: page)
+        placed += 1
         order += 10
         modules.append(module)
         return id
     }
 
-    /// Adds a module built by hand (`Inputs`/`Outputs`/a macro call), which `BlockFactory` does not make.
-    func addModule(_ module: PCCModule) {
+    /// Adds a module built by hand (`Inputs`/`Outputs`/a call), which `BlockFactory` does not make.
+    ///
+    /// `ordered: false` leaves ORDER for `assignOrder()` once the call's arguments are materialised: a call has to run
+    /// after the blocks that feed it, and a self-wire is why it must exist before they are wired.
+    func addModule(_ module: PCCModule, ordered: Bool = true) {
         var module = module
         module.id = allocator.take()
-        module.order = order
+        module.order = ordered ? order : 0
         module.threadId = thread
         module.page = page
         module.x = Double(40 + (placed % Self.columns) * 200)
@@ -287,8 +277,15 @@ final class Emitter {
             module.name = BlockFactory.suggestedName(for: module.guid, existing: modules)
         }
         placed += 1
-        order += 10
+        if ordered { order += 10 }
         modules.append(module)
+    }
+
+    /// Gives a module the next ORDER, now that everything it consumes has one.
+    func assignOrder(_ id: Int) {
+        guard let index = modules.firstIndex(where: { $0.id == id }) else { return }
+        modules[index].order = order
+        order += 10
     }
 
     func connect(_ consumer: Int, _ pin: Int, _ source: PinSource) {
@@ -321,22 +318,17 @@ final class Emitter {
     // MARK: - Compiling one unit
 
     func emit(_ unit: SourceUnit) throws -> UnitSummary {
-        guard let scan = unit.scan else { return UnitSummary() }
         var lowering = Lowering(unit: unit, macros: macros, intervalMs: intervalMs)
-        let lowered = try lowering.lower(scan.body)
+        let lowered = try lowering.lower(unit.body)
+        calls = lowered.calls
         blockCalls = lowered.blockCalls
 
         var summary = UnitSummary()
-        if unit.kind == .macro {
-            // The interface blocks are the macro's pin list: `Inputs` hands its values out, `Outputs` takes them in.
+        if unit.kind == .functionBlock {
             summary.inputs = unit.inputs.map(\.name)
             summary.outputs = unit.outputs.map(\.name)
-            if !summary.inputs.isEmpty {
-                macroInputs = makeInterface(.inputs, names: summary.inputs)
-            }
-            if !summary.outputs.isEmpty {
-                macroOutputs = makeInterface(.outputs, names: summary.outputs)
-            }
+            if !summary.inputs.isEmpty { macroInputs = makeInterface(.inputs, names: summary.inputs) }
+            if !summary.outputs.isEmpty { macroOutputs = makeInterface(.outputs, names: summary.outputs) }
         }
 
         // Variables exist before anything reads them: a read is the block's output, the value at the start of the scan.
@@ -344,197 +336,37 @@ final class Emitter {
         for variable in unit.variables {
             let block = addBlock(BoolVarBlock.guid)
             setOut(block, pin: 0, .bool(variable.initial))
-            variableBlocks[variable.name] = block
+            variableBlocks[variable.name.lowercased()] = block
         }
 
         var sources: [(pin: Int, source: PinSource)] = []
         for (pin, expression) in lowered.outputs.sorted(by: { $0.key < $1.key }) {
-            sources.append((pin, try materialise(expression, calls: lowered.calls, unit: unit)))
+            sources.append((pin, try materialise(expression)))
         }
-
-        if unit.kind == .page && !sources.isEmpty {
+        if unit.kind == .program && !sources.isEmpty {
             let doBlock = addBlock(EightDOBlock.guid)
             for (pin, source) in sources { connect(doBlock, pin + 1, source) }
         }
-        if unit.kind == .macro {
+        if unit.kind == .functionBlock {
             if let macroOutputs {
                 for (pin, source) in sources { connect(macroOutputs, pin, source) }
             } else if !sources.isEmpty {
-                throw SwiftSourceError(line: unit.line, message: "macro '\(unit.name)' writes an output it does not declare")
+                throw SourceError(line: unit.line, message: "function block '\(unit.name)' writes an output it does not declare")
             }
         }
 
-        // Every call site runs, whether or not its outputs are read: the call is the statement.
-        for (index, _) in lowered.calls.enumerated() {
-            _ = try materialiseCall(index, calls: lowered.calls, unit: unit)
-        }
-        for index in lowered.blockCalls.indices {
-            _ = try materialiseBlockCall(index, calls: lowered.calls, unit: unit)
-        }
+        // Only instances the body calls are emitted: an uncalled function block must not run every scan.
+        for index in lowered.calledCalls.sorted() { _ = try materialiseCall(index) }
+        for index in lowered.calledBlocks.sorted() { _ = try materialiseBlockCall(index) }
 
         for (name, expression) in lowered.variableWrites.sorted(by: { $0.key < $1.key }) {
-            guard let variableBlock = variableBlocks[name] else { continue }
-            let value = try materialise(expression, calls: lowered.calls, unit: unit)
+            guard let variableBlock = variableBlocks[name.lowercased()] else { continue }
+            let value = try materialise(expression)
             let set = addBlock(SetBlock.guid)
             connect(set, 1, value)
             connect(set, 2, .pin(module: variableBlock, outPin: 0))
         }
         return summary
-    }
-
-    private func outputName(_ key: Int, unit: SourceUnit) -> String {
-        if unit.kind == .macro {
-            return unit.outputs.indices.contains(key) ? unit.outputs[key].name : "output \(key)"
-        }
-        return unit.outputs.first { $0.index == key }?.name ?? "output \(key)"
-    }
-
-    // MARK: - Expressions
-
-    func materialise(_ expression: BoolExpr, calls: [CallSite], unit: SourceUnit) throws -> PinSource {
-        switch expression {
-        case .constant(let value):
-            return .constant(value)
-        case .input(let pin):
-            if digitalInput == nil { digitalInput = addBlock(EightDIBlock.guid) }
-            return .pin(module: digitalInput!, outPin: pin)
-        case .variable(let name):
-            guard let block = variableBlocks[name] else { return .constant(false) }
-            return .pin(module: block, outPin: 0)
-        case .macroInput(let pin):
-            guard let macroInputs else {
-                throw SwiftSourceError(line: unit.line, message: "macro '\(unit.name)' reads an input it does not declare")
-            }
-            return .pin(module: macroInputs, outPin: pin)
-        case .macroCall(let call, let pin):
-            let block = try materialiseCall(call, calls: calls, unit: unit)
-            return .pin(module: block, outPin: pin)
-        case .blockOutput(let call, let pin):
-            let block = try materialiseBlockCall(call, calls: calls, unit: unit)
-            return .pin(module: block, outPin: pin)
-        case .pulse(let milliseconds):
-            if let existing = pulseBlocks[milliseconds] { return .pin(module: existing, outPin: 1) }
-            let block = addBlock(PulseGenBlock.guid)
-            let cycles = max(2, Int((Double(milliseconds) / Double(intervalMs)).rounded()))
-            setIn(block, 1, .bool(true))
-            setParam(block, 0, .int32(Int32(max(1, cycles / 2))))
-            setParam(block, 1, .int32(Int32(max(1, cycles / 2))))
-            pulseBlocks[milliseconds] = block
-            return .pin(module: block, outPin: 1)
-        case .not(let operand):
-            let value = try materialise(operand, calls: calls, unit: unit)
-            let block = addBlock(NotBlock.guid)
-            connect(block, 1, value)
-            return .pin(module: block, outPin: 0)
-        case .and(let a, let b):
-            let left = try materialise(a, calls: calls, unit: unit)
-            let right = try materialise(b, calls: calls, unit: unit)
-            let block = addBlock(AndBlock.guid)
-            connect(block, 1, left)
-            connect(block, 2, right)
-            return .pin(module: block, outPin: 0)
-        case .or(let a, let b):
-            let left = try materialise(a, calls: calls, unit: unit)
-            let right = try materialise(b, calls: calls, unit: unit)
-            let block = addBlock(OrBlock.guid)
-            connect(block, 1, left)
-            connect(block, 2, right)
-            return .pin(module: block, outPin: 0)
-        case .xor(let a, let b):
-            let left = try materialise(a, calls: calls, unit: unit)
-            let right = try materialise(b, calls: calls, unit: unit)
-            let block = addBlock(XorBlock.guid)
-            connect(block, 1, left)
-            connect(block, 2, right)
-            return .pin(module: block, outPin: 0)
-        }
-    }
-
-    /// Creates (once) the block a `Block.Type(...)` call names, with its input pins and parameters set.
-    private func materialiseBlockCall(_ index: Int, calls: [CallSite], unit: SourceUnit) throws -> Int {
-        if let existing = blockCallBlocks[index] { return existing }
-        let call = blockCalls[index]
-        var module = BlockFactory.makeModule(guid: call.guid, id: allocator.take(),
-                                             name: BlockFactory.suggestedName(for: call.guid, existing: modules),
-                                             x: 0, y: 0, order: 0, threadId: thread, page: page)
-        if call.inputs.count > module.inPins.count {
-            while module.inPins.count < call.inputs.count {
-                module.inPins.append(Pin(id: module.inPins.count, value: .bool(false)))
-            }
-            if let count = BlockLabels.countedInputCount(for: call.guid, totalPins: call.inputs.count) {
-                module.inputCount = count
-            }
-        }
-        addModule(module)
-        let block = modules[modules.count - 1].id
-        // Registered before its inputs are wired: a feedback loop wires this block's own output back into it, and the
-        // lookup has to find it rather than recurse.
-        blockCallBlocks[index] = block
-        let paramLabels = BlockLabels.paramLabels(for: call.guid)
-        for (pin, argument) in call.inputs.enumerated() {
-            switch argument {
-            case .constant(let value):
-                setIn(block, pin, value)
-            case .signal(let expression):
-                connect(block, pin, try materialise(expression, calls: calls, unit: unit))
-            }
-        }
-        for (label, value) in call.params {
-            if let parameter = paramLabels.firstIndex(of: label) { setParam(block, parameter, value) }
-        }
-        return block
-    }
-
-    /// Creates (once) the `Macro` call block of a call site, with its arguments wired to the interface's inputs.
-    private func materialiseCall(_ index: Int, calls: [CallSite], unit caller: SourceUnit) throws -> Int {
-        if let existing = callBlocks[index] { return existing }
-        let call = calls[index]
-        let outputs = call.macro.outputs
-
-        // Arguments first, so the call runs after them.
-        var wired: [(pin: Int, source: PinSource)] = []
-        for (position, input) in call.macro.inputs.enumerated() {
-            let argument: CallArgument?
-            if let labelled = call.arguments.first(where: { $0.label == input.name }) {
-                argument = labelled
-            } else if call.arguments.count == call.macro.inputs.count {
-                argument = call.arguments[position]
-            } else {
-                argument = nil
-            }
-            guard let argument else {
-                throw SwiftSourceError(line: call.line,
-                                       message: "'\(call.macro.name)' needs a value for '\\(input.name)'")
-            }
-            let source = try materialise(argument.value, calls: calls, unit: caller)
-            wired.append((position, source))
-        }
-        if call.arguments.count > call.macro.inputs.count {
-            throw SwiftSourceError(line: call.line,
-                                   message: "'\(call.macro.name)' takes \\(call.macro.inputs.count) argument(s), not \\(call.arguments.count)")
-        }
-
-        var module = PCCModule(id: 0, guid: MacroInterface.callGUID,
-                               name: BlockFactory.suggestedName(for: MacroInterface.callGUID, existing: modules),
-                               x: 0, y: 0, order: 0, threadId: thread, page: page)
-        module.rawAttributes["MACRO_NAME"] = call.macro.name
-        module.inPins = call.macro.inputs.enumerated().map { index, pin in
-            var value = Pin(id: index, value: .bool(false))
-            value.name = pin.name
-            value.rawAttributes["TYPE"] = "1"
-            return value
-        }
-        module.outPins = outputs.enumerated().map { index, pin in
-            var value = Pin(id: index, value: .bool(false), rights: 2)
-            value.name = pin.name
-            value.rawAttributes["TYPE"] = "1"
-            return value
-        }
-        addModule(module)
-        let block = modules[modules.count - 1].id
-        for (pin, source) in wired { connect(block, pin, source) }
-        callBlocks[index] = block
-        return block
     }
 
     private func makeInterface(_ kind: MacroInterface.Kind, names: [String]) -> Int {
@@ -561,58 +393,170 @@ final class Emitter {
         addModule(module)
         return modules[modules.count - 1].id
     }
+
+    // MARK: - Expressions
+
+    func materialise(_ expression: BoolExpr) throws -> PinSource {
+        switch expression {
+        case .constant(let value):
+            return .constant(value)
+        case .input(let pin):
+            if digitalInput == nil { digitalInput = addBlock(EightDIBlock.guid) }
+            return .pin(module: digitalInput!, outPin: pin)
+        case .variable(let name):
+            guard let block = variableBlocks[name.lowercased()] else { return .constant(false) }
+            return .pin(module: block, outPin: 0)
+        case .macroInput(let pin):
+            guard let macroInputs else { return .constant(false) }
+            return .pin(module: macroInputs, outPin: pin)
+        case .macroCall(let call, let pin):
+            return .pin(module: try materialiseCall(call), outPin: pin)
+        case .blockOutput(let call, let pin):
+            let block = try materialiseBlockCall(call)
+            let count = modules.first { $0.id == block }?.outPins.count ?? 0
+            guard pin < count else {
+                throw SourceError(line: blockCalls[call].line,
+                                  message: "'\(blockCalls[call].name)' has no output pin \(pin); it has \(count)")
+            }
+            return .pin(module: block, outPin: pin)
+        case .not(let operand):
+            let value = try materialise(operand)
+            let block = addBlock(NotBlock.guid)
+            connect(block, 1, value)
+            return .pin(module: block, outPin: 0)
+        case .and(let a, let b):
+            let left = try materialise(a), right = try materialise(b)
+            let block = addBlock(AndBlock.guid)
+            connect(block, 1, left)
+            connect(block, 2, right)
+            return .pin(module: block, outPin: 0)
+        case .or(let a, let b):
+            let left = try materialise(a), right = try materialise(b)
+            let block = addBlock(OrBlock.guid)
+            connect(block, 1, left)
+            connect(block, 2, right)
+            return .pin(module: block, outPin: 0)
+        case .xor(let a, let b):
+            let left = try materialise(a), right = try materialise(b)
+            let block = addBlock(XorBlock.guid)
+            connect(block, 1, left)
+            connect(block, 2, right)
+            return .pin(module: block, outPin: 0)
+        }
+    }
+
+    /// Creates (once) the block a declared instance stands for, wires the inputs its call gave, and sets its parameters.
+    private func materialiseBlockCall(_ index: Int) throws -> Int {
+        if let existing = blockCallBlocks[index] { return existing }
+        let call = blockCalls[index]
+        var module = BlockFactory.makeModule(guid: call.guid, id: allocator.take(),
+                                             name: BlockFactory.suggestedName(for: call.guid, existing: modules),
+                                             x: 0, y: 0, order: 0, threadId: thread, page: page)
+        if let highest = call.inputs.keys.max(), highest >= module.inPins.count {
+            while module.inPins.count <= highest {
+                module.inPins.append(Pin(id: module.inPins.count, value: .bool(false)))
+            }
+            if let count = BlockLabels.countedInputCount(for: call.guid, totalPins: module.inPins.count) {
+                module.inputCount = count
+            }
+        }
+        addModule(module, ordered: false)
+        let block = modules[modules.count - 1].id
+        // Registered before wiring: feedback wires this block's own output back into it.
+        blockCallBlocks[index] = block
+        for (pin, argument) in call.inputs {
+            switch argument {
+            case .constant(let value): setIn(block, pin, value)
+            case .signal(let expression): connect(block, pin, try materialise(expression))
+            }
+        }
+        for (parameter, value) in call.params { setParam(block, parameter, value) }
+        assignOrder(block)
+        return block
+    }
+
+    /// Creates (once) the `Macro` block a function-block instance stands for, with its arguments wired.
+    private func materialiseCall(_ index: Int) throws -> Int {
+        if let existing = callBlocks[index] { return existing }
+        let call = calls[index]
+        let outputs = call.macro.outputs
+        let names = call.macro.inputs.map(\.name)
+        var module = PCCModule(id: 0, guid: MacroInterface.callGUID,
+                               name: BlockFactory.suggestedName(for: MacroInterface.callGUID, existing: modules),
+                               x: 0, y: 0, order: 0, threadId: thread, page: page)
+        module.rawAttributes["MACRO_NAME"] = call.macro.name
+        module.inPins = names.enumerated().map { index, name in
+            var pin = Pin(id: index, value: .bool(false))
+            pin.name = name
+            pin.rawAttributes["TYPE"] = "1"
+            return pin
+        }
+        let outputNames = outputs.map(\.name)
+        module.outPins = outputNames.enumerated().map { index, name in
+            var pin = Pin(id: index, value: .bool(false), rights: 2)
+            pin.name = name
+            pin.rawAttributes["TYPE"] = "1"
+            return pin
+        }
+        addModule(module, ordered: false)
+        let block = modules[modules.count - 1].id
+        callBlocks[index] = block
+        for (position, name) in names.enumerated() {
+            guard let argument = call.arguments[name.lowercased()] else { continue }
+            connect(block, position, try materialise(argument))
+        }
+        assignOrder(block)
+        return block
+    }
 }
 
 // MARK: - Lowering
 
-/// One argument of a macro call, lowered to an expression in the caller.
-struct CallArgument {
-    var label: String?
-    var value: BoolExpr
-}
-
-/// One argument of a library block call.
+/// One argument of a block call.
 enum BlockArg {
     case constant(PinValue)
     case signal(BoolExpr)
 }
 
-/// One `let b = Block.Type(...)` written in a scan: a block from the catalogue, its inputs in pin order and its
-/// parameters by name.
+/// A declared instance of a catalogued block.
 struct BlockCall {
     var guid: UUID
     var name: String
-    var inputs: [BlockArg]
-    var params: [(label: String, value: PinValue)]
+    var inputs: [Int: BlockArg] = [:]
+    var params: [Int: PinValue] = [:]
     var line: Int
 }
 
-/// One `let t = Macro(...)` written in a scan.
+/// A declared instance of a function block, with the arguments its call gave.
 struct CallSite {
     var macro: SourceUnit
-    var arguments: [CallArgument]
+    var arguments: [String: BoolExpr] = [:]
     var line: Int
 }
 
-/// What a scan lowered to: the expression each output is driven with, the value each variable takes, and the calls it
-/// makes.
+/// What a unit's body lowered to.
 struct LoweredScan {
     var outputs: [Int: BoolExpr] = [:]
     var variableWrites: [String: BoolExpr] = [:]
     var calls: [CallSite] = []
     var blockCalls: [BlockCall] = []
+    /// Which instances the body actually calls; an uncalled one is not emitted at all.
+    var calledCalls: Set<Int> = []
+    var calledBlocks: Set<Int> = []
 }
 
-/// Lowers one struct's `scan`. A page's outputs are its `@DO` pins, a macro's its `@Output` pins; a macro's inputs are
-/// reads of its `Inputs` block.
+/// Lowers one unit's body.
 struct Lowering {
     let unit: SourceUnit
     let macros: [String: SourceUnit]
     let intervalMs: Int
-    private var env: [String: BoolExpr] = [:]
-    private var macroInstances: [String: Int] = [:]
-    private var blockInstances: [String: Int] = [:]
+    private var instances: [String: Instance] = [:]
     private var inBranch = false
+
+    private enum Instance {
+        case macro(index: Int, block: SourceUnit)
+        case block(index: Int)
+    }
 
     init(unit: SourceUnit, macros: [String: SourceUnit], intervalMs: Int) {
         self.unit = unit
@@ -622,112 +566,119 @@ struct Lowering {
 
     mutating func lower(_ statements: [SourceStmt]) throws -> LoweredScan {
         var scan = LoweredScan()
+        // Declare every instance first: they are the blocks the body then calls.
+        for declaration in unit.instances {
+            let key = declaration.name.lowercased()
+            if let block = macros[declaration.typeName.lowercased()] {
+                scan.calls.append(CallSite(macro: block, line: declaration.line))
+                instances[key] = .macro(index: scan.calls.count - 1, block: block)
+            } else if let guid = BlockLabels.guid(forSourceName: declaration.typeName) {
+                scan.blockCalls.append(BlockCall(guid: guid, name: declaration.typeName, line: declaration.line))
+                instances[key] = .block(index: scan.blockCalls.count - 1)
+            } else {
+                throw SourceError(line: declaration.line,
+                                  message: "unknown type '\(declaration.typeName)'; declare a FUNCTION_BLOCK or a block type")
+            }
+        }
         try lower(statements, into: &scan)
         return scan
     }
 
     private func outputIndex(_ name: String) -> Int? {
-        if unit.kind == .macro { return unit.outputs.firstIndex { $0.name == name } }
-        return unit.outputs.first { $0.name == name }?.index
+        unit.outputs.first { $0.name.lowercased() == name.lowercased() }?.index
     }
-
-    private func inputIndex(_ name: String) -> Int? {
-        unit.inputs.first { $0.name == name }?.index
+    private func inputPin(_ name: String) -> SourcePin? {
+        unit.inputs.first { $0.name.lowercased() == name.lowercased() }
     }
-
-    /// The pin *position* of an output in the macro's interface (its index is only the declaration order).
     private func outputPosition(_ name: String) -> Int? {
-        unit.outputs.firstIndex { $0.name == name }
+        unit.outputs.firstIndex { $0.name.lowercased() == name.lowercased() }
     }
-
     private func inputPosition(_ name: String) -> Int? {
-        unit.inputs.firstIndex { $0.name == name }
+        unit.inputs.firstIndex { $0.name.lowercased() == name.lowercased() }
     }
+    private func variableName(_ name: String) -> String? {
+        unit.variables.first { $0.name.lowercased() == name.lowercased() }?.name
+    }
+    private func instance(_ name: String) -> Instance? { instances[name.lowercased()] }
 
-    mutating func lower(_ statements: [SourceStmt], into scan: inout LoweredScan) throws {
+    private mutating func lower(_ statements: [SourceStmt], into scan: inout LoweredScan) throws {
         for statement in statements {
             switch statement.kind {
-            case .bind(let name, let expression):
-                if case .call(let callName, let arguments) = expression.kind, callName.hasPrefix("Block.") {
-                    // A call inside a branch would be registered in the branch's copy of the scan and lost, so the
-                    // block has to be created before the `if` and wired with `set`.
-                    if inBranch {
-                        throw SwiftSourceError(line: statement.line,
-                                               message: "a block cannot be created inside 'if' yet; create it before the branch and wire it with set")
-                    }
-                    let index = try addBlockCall(callName, arguments, line: statement.line, scan: &scan)
-                    blockInstances[name] = index
-                    continue
-                }
-                if case .call(let macroName, let arguments) = expression.kind, let macro = macros[macroName] {
-                    if inBranch {
-                        throw SwiftSourceError(line: statement.line,
-                                               message: "a macro call cannot be inside 'if' yet; it runs every scan where it is written")
-                    }
-                    var loweredArguments: [CallArgument] = []
-                    for argument in arguments {
-                        loweredArguments.append(CallArgument(label: argument.label,
-                                                             value: try lower(argument.value, scan: &scan)))
-                    }
-                    scan.calls.append(CallSite(macro: macro, arguments: loweredArguments, line: statement.line))
-                    macroInstances[name] = scan.calls.count - 1
-                    continue
-                }
-                env[name] = try lower(expression, scan: &scan)
             case .assign(let name, let expression):
                 let value = try lower(expression, scan: &scan)
                 if let index = outputIndex(name) {
                     scan.outputs[index] = value
-                } else if unit.variables.contains(where: { $0.name == name }) {
-                    scan.variableWrites[name] = value
-                } else if inputIndex(name) != nil {
-                    throw SwiftSourceError(line: statement.line, message: "'\(name)' is an input; it is read, not written")
-                } else if env[name] != nil {
-                    throw SwiftSourceError(line: statement.line, message: "'\(name)' is a 'let'; it cannot be assigned")
+                } else if let variable = variableName(name) {
+                    scan.variableWrites[variable.lowercased()] = value
+                } else if inputPin(name) != nil {
+                    throw SourceError(line: statement.line, message: "'\(name)' is an input; it is read, not written")
+                } else if instance(name) != nil {
+                    throw SourceError(line: statement.line, message: "'\(name)' is an instance; write one of its outputs? No — read it instead")
                 } else {
-                    throw SwiftSourceError(line: statement.line, message: "unknown name '\(name)'")
+                    throw SourceError(line: statement.line, message: "unknown name '\(name)'")
                 }
-            case .blockSet(let instance, let pin, let value):
+            case .call(let name, let arguments):
                 if inBranch {
-                    throw SwiftSourceError(line: statement.line,
-                                           message: "wiring a block cannot be inside 'if'; wire it before the branch")
+                    throw SourceError(line: statement.line,
+                                      message: "a block call cannot be inside IF; wire it before the branch")
                 }
-                guard let call = blockInstances[instance] else {
-                    throw SwiftSourceError(line: statement.line,
-                                           message: "'\(instance)' is not a block instance; 'set' needs a 'let name = Block...'")
+                guard let target = instance(name) else {
+                    throw SourceError(line: statement.line, message: "unknown instance '\(name)'")
                 }
-                let argument = try argumentValue(value, scan: &scan)
-                let block = scan.blockCalls[call]
-                let limit = BlockLabels.maxInputPins(for: block.guid)
-                guard pin >= 0, pin < limit else {
-                    throw SwiftSourceError(line: statement.line,
-                                           message: "'\(block.name)' has no input pin \(pin); it takes at most \(limit)")
+                switch target {
+                case .macro(let index, let block):
+                    guard scan.calledCalls.insert(index).inserted else {
+                        throw SourceError(line: statement.line,
+                                          message: "'\(name)' is called twice; one block is wired once per scan")
+                    }
+                    for argument in arguments {
+                        guard let position = block.inputs.firstIndex(where: {
+                            $0.name.lowercased() == argument.label.lowercased()
+                        }) else {
+                            throw SourceError(line: argument.value.line,
+                                              message: "'\(block.name)' has no input '\(argument.label)'; it has "
+                                                  + block.inputs.map(\.name).joined(separator: ", "))
+                        }
+                        _ = position
+                        scan.calls[index].arguments[argument.label.lowercased()] = try lower(argument.value, scan: &scan)
+                    }
+                case .block(let index):
+                    guard scan.calledBlocks.insert(index).inserted else {
+                        throw SourceError(line: statement.line,
+                                          message: "'\(name)' is called twice; one block is wired once per scan")
+                    }
+                    let call = scan.blockCalls[index]
+                    let inputs = BlockLabels.inputLabels(for: call.guid, totalPins: BlockLabels.maxInputPins(for: call.guid))
+                    let params = BlockLabels.paramLabels(for: call.guid)
+                    for argument in arguments {
+                        if let pin = inputs.firstIndex(where: { $0.lowercased() == argument.label.lowercased() }) {
+                            scan.blockCalls[index].inputs[pin] = try blockArgument(argument.value, scan: &scan)
+                        } else if let parameter = params.firstIndex(where: { $0.lowercased() == argument.label.lowercased() }) {
+                            scan.blockCalls[index].params[parameter] = try constantValue(argument.value)
+                        } else {
+                            throw SourceError(line: argument.value.line,
+                                              message: "'\(call.name)' has no input or parameter '\(argument.label)'")
+                        }
+                    }
                 }
-                while scan.blockCalls[call].inputs.count <= pin {
-                    scan.blockCalls[call].inputs.append(.constant(.bool(false)))
-                }
-                scan.blockCalls[call].inputs[pin] = argument
-            case .returnVoid:
-                break
             case .ifThen(let condition, let thenBody, let elseBody):
                 let test = try lower(condition, scan: &scan)
                 let wasInBranch = inBranch
-                let savedEnv = env
-                let savedBlocks = blockInstances
-                let savedMacros = macroInstances
                 inBranch = true
                 var thenScan = scan
                 try lower(thenBody, into: &thenScan)
-                env = savedEnv
-                blockInstances = savedBlocks
-                macroInstances = savedMacros
                 var elseScan = scan
                 if let elseBody { try lower(elseBody, into: &elseScan) }
-                env = savedEnv
-                blockInstances = savedBlocks
-                macroInstances = savedMacros
                 inBranch = wasInBranch
                 for pin in Set(thenScan.outputs.keys).union(elseScan.outputs.keys) {
+                    let writtenBefore = scan.outputs[pin] != nil
+                    let inThen = thenScan.outputs[pin] != nil
+                    let inElse = elseScan.outputs[pin] != nil
+                    if !writtenBefore && !(inThen && inElse) {
+                        throw SourceError(line: statement.line,
+                                          message: "an output written only inside IF is cleared when the condition is false; "
+                                              + "assign it before the IF or add an ELSE")
+                    }
                     let whenTrue = thenScan.outputs[pin] ?? scan.outputs[pin] ?? .constant(false)
                     let whenFalse = elseScan.outputs[pin] ?? scan.outputs[pin] ?? .constant(false)
                     scan.outputs[pin] = .select(test, whenTrue, whenFalse)
@@ -741,55 +692,12 @@ struct Lowering {
         }
     }
 
-    /// Registers `Block.Type(...)` and returns its call index.
-    private mutating func addBlockCall(_ callName: String, _ arguments: [SourceArgument],
-                                       line: Int, scan: inout LoweredScan) throws -> Int {
-        let typeName = String(callName.dropFirst("Block.".count))
-        guard let guid = BlockLabels.guid(forSourceName: typeName) else {
-            throw SwiftSourceError(line: line, message: "there is no block type called '\(typeName)'")
-        }
-        var inputs: [BlockArg] = []
-        var params: [(label: String, value: PinValue)] = []
-        let paramLabels = BlockLabels.paramLabels(for: guid)
-        for argument in arguments {
-            if let label = argument.label {
-                guard let index = paramLabels.firstIndex(of: label) else {
-                    throw SwiftSourceError(line: argument.value.line,
-                                           message: "'\(typeName)' has no parameter '\(label)'; it has \(paramLabels.joined(separator: ", "))")
-                }
-                params.append((paramLabels[index], try constantValue(argument.value)))
-            } else {
-                switch argument.value.kind {
-                case .boolean(let value): inputs.append(.constant(.bool(value)))
-                case .integer(let value): inputs.append(.constant(integerValue(value)))
-                case .unary("-", let operand):
-                    if case .integer(let value) = operand.kind {
-                        inputs.append(.constant(integerValue(-value)))
-                    } else {
-                        inputs.append(.signal(try lower(argument.value, scan: &scan)))
-                    }
-                default: inputs.append(.signal(try lower(argument.value, scan: &scan)))
-                }
-            }
-        }
-        let limit = BlockLabels.maxInputPins(for: guid)
-        guard inputs.count <= limit else {
-            throw SwiftSourceError(line: line,
-                                   message: "'\(typeName)' takes at most \(limit) inputs, and \(inputs.count) were given")
-        }
-        scan.blockCalls.append(BlockCall(guid: guid, name: typeName, inputs: inputs, params: params, line: line))
-        return scan.blockCalls.count - 1
-    }
-
-    /// An integer as a pin value: 32-bit when it fits, 64-bit otherwise. `Int32(_:)` traps above its range, and a
-    /// literal large enough to need that is still a legal number in the language.
     private func integerValue(_ value: Int) -> PinValue {
         if let small = Int32(exactly: value) { return .int32(small) }
         return .int64(Int64(value))
     }
 
-    /// One block-call argument: a literal stays a constant, anything else becomes a signal.
-    private func argumentValue(_ expression: SourceExpr, scan: inout LoweredScan) throws -> BlockArg {
+    private func blockArgument(_ expression: SourceExpr, scan: inout LoweredScan) throws -> BlockArg {
         switch expression.kind {
         case .boolean(let value): return .constant(.bool(value))
         case .integer(let value): return .constant(integerValue(value))
@@ -806,11 +714,11 @@ struct Lowering {
         case .integer(let value): return integerValue(value)
         case .unary("-", let operand):
             guard case .integer(let value) = operand.kind else {
-                throw SwiftSourceError(line: expression.line, message: "expected a number")
+                throw SourceError(line: expression.line, message: "expected a number")
             }
             return integerValue(-value)
         default:
-            throw SwiftSourceError(line: expression.line, message: "a parameter takes a literal value")
+            throw SourceError(line: expression.line, message: "a parameter takes a literal value")
         }
     }
 
@@ -819,64 +727,60 @@ struct Lowering {
         case .boolean(let value):
             return .constant(value)
         case .integer(let value):
-            throw SwiftSourceError(line: expression.line,
-                                   message: "the number \(value) is not a signal; numbers are only used for pins and times")
+            throw SourceError(line: expression.line,
+                              message: "the number \(value) is not a signal; an expression here is Boolean")
         case .name(let name):
-            if let value = env[name] { return value }
-            if macroInstances[name] != nil {
-                throw SwiftSourceError(line: expression.line, message: "'\(name)' is a macro call; read one of its outputs, as in '\\(name).result'")
+            if let pin = inputPin(name) {
+                return unit.kind == .functionBlock ? .macroInput(inputPosition(name) ?? 0) : .input(pin.index)
             }
-            if let index = inputIndex(name) {
-                return unit.kind == .macro ? .macroInput(inputPosition(name) ?? 0) : .input(index)
+            if let variable = variableName(name) { return .variable(variable) }
+            if instance(name) != nil {
+                throw SourceError(line: expression.line,
+                                  message: "'\(name)' is an instance; read one of its outputs, as in '\(name).Y'")
             }
-            if unit.variables.contains(where: { $0.name == name }) { return .variable(name) }
             if let index = outputIndex(name) {
-                return scan.outputs[index] ?? .constant(false)
+                guard let value = scan.outputs[index] else {
+                    throw SourceError(line: expression.line,
+                                      message: "'\(name)' is an output read before it is assigned; use a VAR to keep its value")
+                }
+                return value
             }
-            throw SwiftSourceError(line: expression.line, message: "unknown name '\(name)'")
+            throw SourceError(line: expression.line, message: "unknown name '\(name)'")
         case .member(let base, let name):
-            guard case .name(let instance) = base.kind else {
-                throw SwiftSourceError(line: expression.line, message: "only a call's outputs can be read, as in 't.result'")
+            guard case .name(let instanceName) = base.kind else {
+                throw SourceError(line: expression.line, message: "only an instance's outputs can be read")
             }
-            if let call = macroInstances[instance] {
-                let macro = scan.calls[call].macro
-                guard let position = macro.outputs.firstIndex(where: { $0.name == name }) else {
-                    throw SwiftSourceError(line: expression.line,
-                                           message: "macro '\(macro.name)' has no output '\(name)'; it has \(macro.outputs.map(\.name).joined(separator: ", "))")
+            switch instance(instanceName) {
+            case .macro(let index, let block):
+                guard scan.calledCalls.contains(index) else {
+                    throw SourceError(line: expression.line, message: "'\(instanceName)' is read before it is called")
                 }
-                return .macroCall(call, position)
-            }
-            if let call = blockInstances[instance] {
-                let guid = scan.blockCalls[call].guid
-                let labels = BlockLabels.outputLabels(for: guid)
-                guard let position = labels.firstIndex(of: name) else {
-                    throw SwiftSourceError(line: expression.line,
-                                           message: "'\(scan.blockCalls[call].name)' has no output '\(name)'; it has \(labels.joined(separator: ", "))")
+                guard let position = block.outputs.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) else {
+                    throw SourceError(line: expression.line,
+                                      message: "'\(block.name)' has no output '\(name)'; it has "
+                                          + block.outputs.map(\.name).joined(separator: ", "))
                 }
-                return .blockOutput(call, position)
+                return .macroCall(index, position)
+            case .block(let index):
+                guard scan.calledBlocks.contains(index) else {
+                    throw SourceError(line: expression.line, message: "'\(instanceName)' is read before it is called")
+                }
+                let call = scan.blockCalls[index]
+                let labels = BlockLabels.outputLabels(for: call.guid)
+                guard let position = labels.firstIndex(where: { $0.lowercased() == name.lowercased() }) else {
+                    throw SourceError(line: expression.line,
+                                      message: "'\(call.name)' has no output '\(name)'; it has "
+                                          + labels.joined(separator: ", "))
+                }
+                return .blockOutput(index, position)
+            case nil:
+                throw SourceError(line: expression.line, message: "unknown instance '\(instanceName)'")
             }
-            throw SwiftSourceError(line: expression.line, message: "only a call's outputs can be read, as in 't.result'")
-        case .call(let name, let arguments):
-            guard name == "pulse", arguments.count == 1, case .integer(let milliseconds) = arguments[0].value.kind else {
-                throw SwiftSourceError(line: expression.line,
-                                       message: "unknown call '\(name)'; this subset has pulse(ms:)")
-            }
-            guard milliseconds > 0 else {
-                throw SwiftSourceError(line: expression.line, message: "a pulse needs a time in milliseconds above zero")
-            }
-            guard milliseconds >= intervalMs else {
-                throw SwiftSourceError(line: expression.line,
-                                       message: "a pulse of \(milliseconds) ms is shorter than the \(intervalMs) ms scan of the profile's fastest thread")
-            }
-            if unit.kind == .macro {
-                throw SwiftSourceError(line: expression.line, message: "a macro cannot start a timer yet")
-            }
-            return .pulse(milliseconds)
         case .unary(let op, let operand):
             switch op {
             case "!": return .negated(try lower(operand, scan: &scan))
-            case "-": throw SwiftSourceError(line: expression.line, message: "negation needs numbers, which are not supported yet")
-            default: throw SwiftSourceError(line: expression.line, message: "unknown operator '\(op)'")
+            case "-": throw SourceError(line: expression.line, message: "negation needs numbers, which are not supported yet")
+            default: throw SourceError(line: expression.line, message: "unknown operator '\(op)'")
             }
         case .binary(let op, let left, let right):
             let a = try lower(left, scan: &scan)
@@ -884,13 +788,12 @@ struct Lowering {
             switch op {
             case "&&": return .conjunction(a, b)
             case "||": return .disjunction(a, b)
+            case "xor": return .exclusiveOr(a, b)
             case "==": return .negated(.exclusiveOr(a, b))
             case "!=": return .exclusiveOr(a, b)
-            case "<", ">", "<=", ">=", "+", "-", "*", "/", "%":
-                throw SwiftSourceError(line: expression.line,
-                                       message: "'\(op)' needs numbers, which are not supported yet; this subset is Boolean logic")
             default:
-                throw SwiftSourceError(line: expression.line, message: "unknown operator '\(op)'")
+                throw SourceError(line: expression.line,
+                                  message: "'\(op)' needs numbers, which are not supported yet; this subset is Boolean")
             }
         }
     }

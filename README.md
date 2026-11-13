@@ -13,6 +13,9 @@ There are two front ends on one Swift model: a macOS SwiftUI app and a Qt Quick 
   byte.
 - **Simulation.** Runs a program on a C++ core. 144 of the 147 catalogued block types run on it; the exceptions
   are under [Limits](#limits).
+- **Structured Text.** Compiles IEC 61131-3 ST to the sheet in the editor (⌥⌘E): `PROGRAM` is a page,
+  `FUNCTION_BLOCK` a macro, `AT %IX0`/`AT %QX0` are pins, and catalogued blocks are instances. The reference is
+  [`docs/Structured-Text.md`](docs/Structured-Text.md).
 - **Compiling.** Produces the PLC program (`.pbd`) and the symbol table (`.csv`). For the projects whose Dirigo
   output is in `Tests/Fixtures`, both match byte for byte.
 - **Uploading.** Sends a compiled program over a serial link, following the DbNet frames Dirigo uses.
@@ -36,6 +39,7 @@ On Linux install `zlib1g-dev` first. Under a file sandbox, add `--disable-sandbo
 
 ```bash
 WIREBENCH_AI=1 swift build          # and WIREBENCH_AI=1 swift test for its tests
+# In Xcode, set WIREBENCH_AI_FLAGS in project.yml (xcodegen rewrites the generated project).
 xcodebuild ... WIREBENCH_AI_FLAGS=-DWIREBENCH_AI   # or set that user-defined setting in Xcode
 ```
 

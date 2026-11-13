@@ -170,8 +170,8 @@ extension AppModel {
     /// `project` setter is the single undo choke point, so the wire is undoable for free.
     @discardableResult
     public func connectPins(from: PinReference, to: PinReference) -> Bool {
-        guard from.moduleId != to.moduleId else { return false }
-
+        // A block may feed its own input: a counter's output into its own reset is exactly how a self-resetting counter
+        // is built, and the engine reads the producer's value as it stands, which is feedback, not a cycle to reject.
         let output: PinReference
         let input: PinReference
         switch (from.side, to.side) {

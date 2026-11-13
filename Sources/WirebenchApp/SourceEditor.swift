@@ -174,8 +174,19 @@ final class LineNumberRuler: NSRulerView {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
 
-        var index = 0
+        // Start at the first visible line: counting from line 1 lays out every line above the viewport on every
+        // keystroke, which is quadratic on a large file.
+        let probe = NSPoint(x: 0, y: max(0, visible.minY - inset))
+        let visibleCharacter = layoutManager.characterIndex(for: probe, in: container,
+                                                           fractionOfDistanceBetweenInsertionPoints: nil)
+        var index = string.lineRange(for: NSRange(location: min(visibleCharacter, string.length), length: 0)).location
         var number = 1
+        var counted = 0
+        while counted < index {
+            let line = string.lineRange(for: NSRange(location: counted, length: 0))
+            counted = max(NSMaxRange(line), counted + 1)
+            number += 1
+        }
         while index <= string.length {
             let lineRange = string.lineRange(for: NSRange(location: index, length: 0))
             let glyph = layoutManager.glyphIndexForCharacter(at: min(index, max(0, string.length - 1)))

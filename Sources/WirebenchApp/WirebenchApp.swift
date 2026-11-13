@@ -35,8 +35,8 @@ struct WirebenchApp: App {
         }
         .defaultSize(width: 380, height: 540)
 #endif
-        // The PLC Swift editor: its own window, since it is a source buffer beside the sheet rather than a pane of it.
-        Window("PLC Swift", id: "swift") {
+        // The Structured Text editor: its own window, since it is a source buffer beside the sheet rather than a pane of it.
+        Window("Structured Text", id: "swift") {
             SwiftIDEView(model: model)
                 .preferredColorScheme(model.appearance.colorScheme)
         }
@@ -72,7 +72,7 @@ struct WirebenchApp: App {
 #endif
 
                 // The source editor makes its own project, so it does not need one open.
-                Button("PLC Swift Editor") { openWindow(id: "swift") }
+                Button("Structured Text Editor") { openWindow(id: "swift") }
                     .keyboardShortcut("e", modifiers: [.option, .command])
             }
 

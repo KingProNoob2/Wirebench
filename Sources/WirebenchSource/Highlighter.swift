@@ -1,6 +1,4 @@
 import Foundation
-import SwiftParser
-import SwiftSyntax
 
 /// What a span of source is, for the editor's colours.
 public enum SyntaxTokenKind: Sendable, Equatable {
@@ -28,126 +26,138 @@ public struct SyntaxSpan: Sendable, Equatable {
     }
 }
 
-/// Colours a source file for the editor, from the same parse the compiler uses.
+/// Colours a Structured Text file for the editor.
 ///
-/// `swift-syntax` reports positions in UTF-8 bytes; an `NSTextStorage` counts UTF-16 units, and a Czech comment or a
-/// string with an accent makes those differ. The spans are therefore converted through one table built from the source,
-/// so a colour never drifts onto the wrong characters.
-public enum SwiftSourceHighlighter {
+/// A small lexer of its own, so the editor and the compiler need no parser library and no C module: the spans are
+/// measured in UTF-16 units as the text is scanned, which is what an `NSTextStorage` counts, so a Czech comment or an
+/// accented identifier cannot shift a colour onto the wrong characters.
+public enum SourceHighlighter {
+    private static let keywords: Set<String> = [
+        "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK",
+        "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
+        "IF", "THEN", "ELSIF", "ELSE", "END_IF",
+        "AND", "OR", "XOR", "NOT", "MOD", "AT", "TRUE", "FALSE",
+    ]
+    private static let types: Set<String> = ["BOOL", "INT", "REAL", "LREAL", "WORD"]
+
     public static func spans(in source: String) -> [SyntaxSpan] {
-        let tree = Parser.parse(source: source)
-        let offsets = UTF16Offsets(source)
+        let characters = Array(source)
+        // Prefix sums of UTF-16 widths: a character index becomes a text offset in one lookup, and a character can be
+        // two UTF-16 units (a Czech letter in a comment, an emoji in a name).
+        var offsets = [Int](repeating: 0, count: characters.count + 1)
+        for (i, character) in characters.enumerated() {
+            offsets[i + 1] = offsets[i] + String(character).utf16.count
+        }
         var spans: [SyntaxSpan] = []
+        var index = 0
 
-        func add(_ start: Int, _ end: Int, _ kind: SyntaxTokenKind) {
-            guard end > start,
-                  let location = offsets.utf16(at: start),
-                  let finish = offsets.utf16(at: end), finish > location else { return }
-            spans.append(SyntaxSpan(location: location, length: finish - location, kind: kind))
+        func add(_ start: Int, _ end: Int, _ kind: SyntaxTokenKind, in slice: [Character] = []) {
+            guard end > start else { return }
+            spans.append(SyntaxSpan(location: offsets[start], length: offsets[min(end, characters.count)] - offsets[start],
+                                    kind: kind))
         }
 
-        var offset = 0
-        for token in tree.tokens(viewMode: .sourceAccurate) {
-            for piece in token.leadingTrivia {
-                if piece.isComment { add(offset, offset + piece.sourceLength.utf8Length, .comment) }
-                offset += piece.sourceLength.utf8Length
+        // The scan is over the whole source; `slice` is the full array, and locations are its UTF-16 offsets.
+        while index < characters.count {
+            let character = characters[index]
+            if character == " " || character == "\t" || character.isNewline {
+                index += 1
+                continue
             }
-            let length = token.text.utf8.count
-            if let kind = tokenKind(of: token) {
-                add(offset, offset + length, kind)
+            if character == "(" && index + 1 < characters.count && characters[index + 1] == "*" {
+                var end = index + 2
+                var depth = 1
+                while end < characters.count {
+                    if characters[end] == "(" && end + 1 < characters.count && characters[end + 1] == "*" {
+                        depth += 1
+                        end += 2
+                    } else if characters[end] == "*" && end + 1 < characters.count && characters[end + 1] == ")" {
+                        depth -= 1
+                        end += 2
+                        if depth == 0 { break }
+                    } else {
+                        end += 1
+                    }
+                }
+                add(index, min(end, characters.count), .comment)
+                index = min(end, characters.count)
+                continue
             }
-            offset += length
-            for piece in token.trailingTrivia {
-                if piece.isComment { add(offset, offset + piece.sourceLength.utf8Length, .comment) }
-                offset += piece.sourceLength.utf8Length
+            if character == "/" && index + 1 < characters.count && characters[index + 1] == "/" {
+                var end = index
+                while end < characters.count && !characters[end].isNewline { end += 1 }
+                add(index, end, .comment)
+                index = end
+                continue
             }
-        }
-
-        // Names are coloured by their position in the tree, which the token stream alone cannot tell from any other
-        // identifier: a declaration's name, a type, an attribute, a call.
-        for token in tree.tokens(viewMode: .sourceAccurate) {
-            guard let kind = nameKind(of: token) else { continue }
-            let start = token.positionAfterSkippingLeadingTrivia.utf8Offset
-            add(start, start + token.text.utf8.count, kind)
+            if character.isLetter || character == "_" {
+                var end = index
+                while end < characters.count,
+                      characters[end].isLetter || characters[end].isNumber || characters[end] == "_" {
+                    end += 1
+                }
+                let word = String(characters[index..<end])
+                let upper = word.uppercased()
+                let kind: SyntaxTokenKind?
+                if keywords.contains(upper) {
+                    kind = .keyword
+                } else if types.contains(upper) {
+                    kind = .type
+                } else if nextSignificant(characters, from: end) == "(" {
+                    kind = .call
+                } else if isDeclarationColon(characters, from: end) {
+                    kind = .declaration
+                } else {
+                    kind = nil
+                }
+                if let kind { add(index, end, kind) }
+                index = end
+                continue
+            }
+            if character.isNumber {
+                var end = index
+                while end < characters.count, characters[end].isNumber { end += 1 }
+                add(index, end, .number)
+                index = end
+                continue
+            }
+            // Operators and punctuation are coloured only where they carry meaning.
+            if character == ":" && index + 1 < characters.count && characters[index + 1] == "=" {
+                add(index, index + 2, .operatorToken)
+                index += 2
+                continue
+            }
+            if character == "<" || character == ">" {
+                let two = index + 1 < characters.count && (characters[index + 1] == "=" || characters[index + 1] == ">")
+                if two {
+                    add(index, index + 2, .operatorToken)
+                    index += 2
+                    continue
+                }
+            }
+            if character == "=" || character == "<" || character == ">" || character == "+" || character == "-"
+                || character == "*" || character == "/" {
+                add(index, index + 1, .operatorToken)
+            }
+            index += 1
         }
         return spans
     }
 
-    /// The colour a token's own text carries.
-    private static func tokenKind(of token: TokenSyntax) -> SyntaxTokenKind? {
-        switch token.tokenKind {
-        case .keyword: return .keyword
-        case .integerLiteral, .floatLiteral: return .number
-        case .stringSegment: return .string
-        case .binaryOperator, .prefixOperator, .postfixOperator: return .operatorToken
-        default: return nil
-        }
+    /// The next character that is not a space or a tab, for spotting `name(`.
+    private static func nextSignificant(_ characters: [Character], from index: Int) -> Character? {
+        var i = index
+        while i < characters.count, characters[i] == " " || characters[i] == "\t" { i += 1 }
+        return i < characters.count ? characters[i] : nil
     }
 
-    /// The colour of an identifier, decided by the node it names.
-    private static func nameKind(of token: TokenSyntax) -> SyntaxTokenKind? {
-        guard case .identifier = token.tokenKind, let parent = token.parent else { return nil }
-        switch parent.as(SyntaxEnum.self) {
-        case .structDecl(let node) where node.name.id == token.id: return .declaration
-        case .functionDecl(let node) where node.name.id == token.id: return .declaration
-        case .identifierPattern(let node) where node.identifier.id == token.id: return .declaration
-        // `@DI` is an attribute whose name is an `IdentifierTypeSyntax`, so the attribute is the parent of the parent.
-        case .identifierType(let node):
-            if let attribute = node.parent?.as(AttributeSyntax.self), attribute.attributeName.id == node.id {
-                return .attribute
-            }
-            return node.name.id == token.id ? .type : nil
-        case .declReferenceExpr(let node) where node.baseName.id == token.id: return .call
-        default: return nil
-        }
-    }
-}
-
-/// Maps UTF-8 byte offsets to UTF-16 offsets for one string.
-private struct UTF16Offsets {
-    private var table: [Int?]
-    private let utf8Count: Int
-
-    init(_ source: String) {
-        let count = source.utf8.count
-        var table = [Int?](repeating: nil, count: count + 1)
-        var utf8 = 0
-        var utf16 = 0
-        for scalar in source.unicodeScalars {
-            let width = UTF8Width.width(scalar)
-            for step in 0..<width { table[utf8 + step] = utf16 }
-            utf8 += width
-            utf16 += scalar.utf16.count
-        }
-        table[count] = utf16
-        self.table = table
-        self.utf8Count = count
-    }
-
-    func utf16(at utf8Offset: Int) -> Int? {
-        guard utf8Offset >= 0, utf8Offset <= utf8Count else { return nil }
-        return table[utf8Offset]
-    }
-}
-
-private enum UTF8Width {
-    static func width(_ scalar: Unicode.Scalar) -> Int {
-        switch scalar.value {
-        case 0..<0x80: return 1
-        case 0x80..<0x800: return 2
-        case 0x800..<0x1_0000: return 3
-        default: return 4
-        }
-    }
-}
-
-private extension TriviaPiece {
-    var isComment: Bool {
-        switch self {
-        case .lineComment, .blockComment, .docLineComment, .docBlockComment:
-            return true
-        default:
-            return false
-        }
+    /// `name : BOOL` declares, `name := …` assigns. The `:` of `:=` must not be mistaken for a declaration.
+    private static func isDeclarationColon(_ characters: [Character], from index: Int) -> Bool {
+        var i = index
+        while i < characters.count, characters[i] == " " || characters[i] == "\t" { i += 1 }
+        guard i < characters.count, characters[i] == ":" else { return false }
+        var j = i + 1
+        while j < characters.count, characters[j] == " " || characters[j] == "\t" { j += 1 }
+        return !(j < characters.count && characters[j] == "=")
     }
 }

@@ -217,6 +217,9 @@ typedef struct {
     /// so Swift resolves them and hands the result over; what each kind expects is noted on its enum value.
     int32_t variant;
     int64_t config[4];
+    /// 1 when the block's first pin is its `En` (the help's pin table), so the engine's gate is the block's own
+    /// enable. A block whose first pin is data (`Yes`, `Int2Bits`, `Limiter`) must always run.
+    int32_t hasEnable;
 } WirebenchModuleDesc;
 
 typedef struct {

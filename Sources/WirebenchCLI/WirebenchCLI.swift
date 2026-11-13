@@ -80,9 +80,9 @@ struct WirebenchCLI {
             }
             printSymbolTable(path: args[2])
 
-        case "swift":
+        case "st":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli swift <program.swift> [--out <dir>] [--name <name>]")
+                print("Error: Missing file path. Usage: wirebench-cli st <program.st> [--out <dir>] [--name <name>]")
                 return
             }
             compileSwift(path: args[2], options: Array(args.dropFirst(3)))
@@ -111,8 +111,8 @@ struct WirebenchCLI {
           wirebench-cli blocks <project.pcc>       Show how each module resolves to a block type
           wirebench-cli profile <project.pcc>
                                                 Show the hardware profile and SystemCmd catalogue
-          wirebench-cli swift <program.swift> [--out <dir>] [--name <name>]
-                                                Compile PLC Swift (a subset of Embedded Swift) to <name>.pcc.
+          wirebench-cli st <program.st> [--out <dir>] [--name <name>]
+                                                Compile IEC 61131-3 Structured Text to <name>.pcc.
           wirebench-cli build <project.pcc> [--out <dir>] [--template <program.pbd>] [--quiet]
                                                 Compile the project to <name>.pbd and <name>.csv.
                                                 --optimize drops unused and switched-off (En = 0) logic and math,
@@ -445,9 +445,9 @@ struct WirebenchCLI {
         }
     }
 
-    // MARK: - PLC Swift
+    // MARK: - Structured Text
 
-    /// Compiles a PLC Swift file to a `.pcc`. The compiler is `WirebenchSource`; this is only the file handling and the
+    /// Compiles a Structured Text file to a `.pcc`. The compiler is `WirebenchSource`; this is only the file handling and the
     /// summary, so the IDE that comes later can call the same compiler.
     static func compileSwift(path: String, options: [String]) {
         let url = URL(fileURLWithPath: path)
@@ -471,12 +471,13 @@ struct WirebenchCLI {
         }
         do {
             let source = try String(contentsOf: url, encoding: .utf8)
-            let compiled = try SwiftSourceCompiler().compile(
+            let compiled = try SourceCompiler().compile(
                 source, projectName: name ?? url.deletingPathExtension().lastPathComponent)
             try FileManager.default.createDirectory(at: outDirectory, withIntermediateDirectories: true)
-            let output = outDirectory.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".pcc")
+            let stem = name ?? url.deletingPathExtension().lastPathComponent
+        let output = outDirectory.appendingPathComponent(stem + ".pcc")
             try PCCSerializer().serialize(project: compiled.project).write(to: output, atomically: true, encoding: .utf8)
-            print("Compiled \(url.lastPathComponent) (\(compiled.entryPoint)): \(compiled.blockCount) blocks")
+            print("Compiled \(url.lastPathComponent) (\(compiled.program)): \(compiled.blockCount) blocks")
             print("  inputs  \(compiled.usedInputs.map { "DI\($0)" }.joined(separator: ", "))")
             print("  outputs \(compiled.writtenOutputs.map { "DO\($0)" }.joined(separator: ", "))")
             print("  \(output.path)")

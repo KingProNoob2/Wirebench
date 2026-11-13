@@ -155,6 +155,7 @@ struct Module {
     int32_t order = 0;
     int32_t threadId = 0;
     int32_t kind = WIREBENCH_BLOCK_UNRESOLVED;
+    bool hasEnable = false;
     std::vector<WirebenchValue> inPins;
     std::vector<WirebenchValue> paramPins;
     std::vector<WirebenchValue> outPins;
@@ -1102,9 +1103,12 @@ void resetModule(Module &m) {
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             if (!m.outPins.empty()) m.outPins[0] = int32Value(0);
             return;
-        case WIREBENCH_BLOCK_COUNTER:
         case WIREBENCH_BLOCK_COMPARATOR:
         case WIREBENCH_BLOCK_INT2BITS:
+            // Every output is Boolean; clearing only outPins[0] left AGtB/ALtB and the upper bits stale.
+            std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
+            return;
+        case WIREBENCH_BLOCK_COUNTER:
         case WIREBENCH_BLOCK_SWITCH:
             /* `ISwitchBlock.reset`: a zero of the switch's own element type. */
             if (!m.outPins.empty()) m.outPins[0] = m.variant == 1 ? floatValue(0) : int32Value(0);
@@ -1246,8 +1250,9 @@ void applySetWriteThrough(WirebenchSim *sim, size_t index) {
     /* Walk the connections whose *destination* is this module: `inConnectionMap[module.id]`. */
     for (size_t connectionIndex : self.incoming) {
         const Connection &c = sim->connections[connectionIndex];
-        /* `inConnectionMap` holds in-pin connections only, so a param connection is never written back. */
-        if (c.toParamPins || c.inPin < 2) continue;    /* `where conn.inPinId >= 2` */
+        /* A `Set` writes its value back to the variable wired to P1…Pn, and those are parameter pins; the
+           in-pin rule (`where conn.inPinId >= 2`) must not skip them. */
+        if (!c.toParamPins && c.inPin < 2) continue;
         writeThroughConnection(sim, c, value);
     }
 }
@@ -1420,6 +1425,7 @@ WirebenchSim *wirebench_sim_create(const WirebenchModuleDesc *modules, int32_t c
         m.threadId = d.threadId;
         m.kind = d.kind;
         m.variant = d.variant;
+        m.hasEnable = d.hasEnable != 0;
         for (int c = 0; c < 4; ++c) m.config[c] = d.config[c];
         m.inPins.assign(static_cast<size_t>(std::max(0, d.inCount)), boolean(false));
         m.paramPins.assign(static_cast<size_t>(std::max(0, d.paramCount)), int32Value(0));
@@ -1450,10 +1456,14 @@ WirebenchSim *wirebench_sim_create(const WirebenchModuleDesc *modules, int32_t c
     }
 
     for (size_t t = 0; t < sim->schedule.size(); ++t) {
-        std::stable_sort(sim->schedule[t].begin(), sim->schedule[t].end(),
-                         [sim](size_t a, size_t b) {
-                             return sim->modules[a].order < sim->modules[b].order;
-                         });
+        std::sort(sim->schedule[t].begin(), sim->schedule[t].end(),
+                  [sim](size_t a, size_t b) {
+                      const Module &left = sim->modules[a];
+                      const Module &right = sim->modules[b];
+                      if (left.order != right.order) return left.order < right.order;
+                      // The hardware compiler breaks ORDER ties by descending module id; agree with it.
+                      return left.id > right.id;
+                  });
         if (!sim->schedule[t].empty()) sim->threadIds.push_back(static_cast<int32_t>(t));
     }
 
@@ -1539,7 +1549,14 @@ void wirebench_sim_reset(WirebenchSim *sim) {
     sim->threadElapsedMs.clear();
     sim->threadRunCounts.clear();
     sim->arrays.clear();             /* the data area is the PLC's, and a reset clears it */
-    for (Module &m : sim->modules) resetModule(m);
+    for (Module &m : sim->modules) {
+        // A reset clears state, not configuration: the pins keep the values the project gave them, as the
+        // per-module reset already does.
+        const std::vector<WirebenchValue> ins = m.inPins, params = m.paramPins;
+        resetModule(m);
+        m.inPins = ins;
+        m.paramPins = params;
+    }
 }
 
 double wirebench_sim_ms_until_run(const WirebenchSim *sim) {
@@ -1595,7 +1612,7 @@ static int32_t stepImpl(WirebenchSim *sim, double deltaMs, bool forceAll) {
                the pull, as the Swift does. */
             const Module &gated = sim->modules[index];
             if (sim->condStack != 0) continue;
-            if (!gated.inPins.empty() && !asBool(gated.inPins[0])) continue;
+            if (gated.hasEnable && !gated.inPins.empty() && !asBool(gated.inPins[0])) continue;
             pullInputs(sim, index);
             processModule(sim, sim->modules[index], sample, sim->wallClock);
             const int32_t kind = sim->modules[index].kind;

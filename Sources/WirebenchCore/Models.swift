@@ -253,6 +253,9 @@ public struct Connection: Sendable, Codable, Equatable {
     public var rawAttributes: AttributeBag
     /// Children of `<CONNECTION>` this model does not understand, kept verbatim.
     public var rawChildren: [RawXMLNode]
+    /// Attributes of the `<POINTS>` element, and of each `<POINT>`, kept so a save does not drop them.
+    public var pointsAttributes: AttributeBag
+    public var pointAttributes: [AttributeBag]
 
     public init(
         inModuleId: Int,
@@ -264,7 +267,9 @@ public struct Connection: Sendable, Codable, Equatable {
         points: [RoutePoint] = [],
         isParam: Bool = false,
         rawAttributes: AttributeBag = [:],
-        rawChildren: [RawXMLNode] = []
+        rawChildren: [RawXMLNode] = [],
+        pointsAttributes: AttributeBag = [:],
+        pointAttributes: [AttributeBag] = []
     ) {
         self.inModuleId = inModuleId
         self.inPinId = inPinId
@@ -276,6 +281,8 @@ public struct Connection: Sendable, Codable, Equatable {
         self.isParam = isParam
         self.rawAttributes = rawAttributes
         self.rawChildren = rawChildren
+        self.pointsAttributes = pointsAttributes
+        self.pointAttributes = pointAttributes
     }
 }
 
@@ -577,7 +584,6 @@ public extension PCCProject {
 extension PCCProject {
     /// Why a proposed connection was refused.
     public enum ConnectionError: Error, Equatable, Sendable {
-        case sameModule
         case unknownPin
         case alreadyConnected
     }
@@ -592,8 +598,6 @@ extension PCCProject {
     @discardableResult
     public mutating func connect(outModuleId: Int, outPinId: Int,
                                  toModuleId: Int, inPinId: Int, toParam: Bool = false) -> ConnectionError? {
-        guard outModuleId != toModuleId else { return .sameModule }
-
         guard let source = modules.first(where: { $0.id == outModuleId }),
               let destination = modules.first(where: { $0.id == toModuleId }),
               outPinId >= 0, outPinId < source.outPins.count,

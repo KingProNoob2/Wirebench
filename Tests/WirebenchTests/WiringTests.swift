@@ -63,11 +63,6 @@ struct WiringTests {
 
     @Test("Refused cases are reported rather than silently accepted")
     func refusals() {
-        var selfWire = Self.project([Self.module(1, inPins: 2, outPins: 2)])
-        let same = selfWire.connect(outModuleId: 1, outPinId: 0, toModuleId: 1, inPinId: 0)
-        #expect(same == .sameModule, "a module cannot wire to itself")
-        #expect(selfWire.inConnections.isEmpty)
-
         var q = Self.project([Self.module(1, inPins: 0, outPins: 1), Self.module(2, inPins: 1, outPins: 0)])
         let badOut = q.connect(outModuleId: 1, outPinId: 5, toModuleId: 2, inPinId: 0)
         let badIn = q.connect(outModuleId: 1, outPinId: 0, toModuleId: 2, inPinId: 7)

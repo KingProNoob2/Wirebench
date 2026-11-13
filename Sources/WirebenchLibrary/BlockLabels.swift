@@ -2,7 +2,7 @@ import Foundation
 
 /// The bridge between block types and their source spelling.
 ///
-/// Every catalogued block gets a constructor in PLC Swift: `Block.IAdd(X0, X1)`-style calls name the type, take its input
+/// Every catalogued block gets a type name in Structured Text: an instance is declared `sum : IAdd;` and called
 /// pins positionally, and take parameters by label. That is what lets the editor recover a sheet of any blocks, not only
 /// the ones with a Boolean operator behind them.
 public enum BlockLabels {
@@ -41,12 +41,28 @@ public enum BlockLabels {
         return table
     }()
 
+    /// The block type a source name stands for, accepting the case-insensitive spelling and a trailing `_` added to
+    /// keep a name that is a keyword (`Not` is `NOT` in Structured Text) out of the reserved words.
     public static func guid(forSourceName name: String) -> UUID? {
-        sourceNames[name]
+        if let direct = sourceNames[name] { return direct }
+        if let folded = sourceNames.first(where: { $0.key.lowercased() == name.lowercased() })?.value { return folded }
+        if name.hasSuffix("_") {
+            let stripped = String(name.dropLast()).lowercased()
+            return sourceNames.first { $0.key.lowercased() == stripped }?.value
+        }
+        return nil
     }
 
     public static func sourceName(for guid: UUID) -> String? {
         sourceNames.first { $0.value == guid }?.key
+    }
+
+    /// Whether the block's first input pin is its `En`. The engine gates a module on that pin only then; the help's
+    /// pin tables show `Yes`, `Int2Bits` and `Limiter` start with data, not an enable.
+    public static func hasEnablePin(for guid: UUID) -> Bool {
+        guard let first = template(for: guid)?.inputs.first else { return false }
+        let name = first.abbrev.lowercased()
+        return name == "en" || name == "enabled"
     }
 
     public static func isBooleanType(_ type: String) -> Bool {
@@ -68,6 +84,20 @@ public enum BlockLabels {
         return fixed.map(\.dataType) + Array(repeating: placeholder.dataType, count: run)
     }
 
+    /// The input pins' source names, in pin order, for a block configured with `totalPins` inputs.
+    public static func inputLabels(for guid: UUID, totalPins: Int) -> [String] {
+        guard let template = template(for: guid) else {
+            return (0..<max(0, totalPins)).map { "Pin\($0 + 1)" }
+        }
+        guard let placeholder = runPlaceholder(template) else {
+            return unique(template.inputs.map(\.abbrev))
+        }
+        let prefix = prefix(of: placeholder)
+        let fixed = template.inputs.filter { $0.abbrev != placeholder.abbrev && !isRunMember($0, prefix: prefix) }
+        let run = max(0, totalPins - fixed.count)
+        return unique(fixed.map(\.abbrev)) + (0..<run).map { "\(prefix)\($0)" }
+    }
+
     public static func paramTypes(for guid: UUID) -> [String] {
         template(for: guid)?.params.map(\.dataType) ?? []
     }
@@ -80,7 +110,7 @@ public enum BlockLabels {
 
     /// The parameter pins' source names, in pin order.
     public static func paramLabels(for guid: UUID) -> [String] {
-        unique(template(for: guid)?.params.map(\.name) ?? [])
+        unique(template(for: guid)?.params.map(\.abbrev) ?? [])
     }
 
     /// How many operands a block with `totalPins` input pins was configured for, when it has a configurable run; `nil`
@@ -128,7 +158,9 @@ public enum BlockLabels {
     }
 
     private static func template(for guid: UUID) -> BlockPinTemplate? {
-        PinTemplateCatalog.template(forGuid: guid)
+        // BlockFactory builds the module from its own layout where the help's pin table is wrong (SystemCmd's
+        // parameters, Logger's runs); names and types must come from the same layout as the pins.
+        BlockFactory.layoutOverrides[guid.uuidString.uppercased()] ?? PinTemplateCatalog.template(forGuid: guid)
     }
 
     private static func unique(_ names: [String]) -> [String] {

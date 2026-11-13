@@ -322,15 +322,20 @@ public final class PCCParser: @unchecked Sendable {
             let nameY = Double(attrs["NAME_Y"] ?? "0") ?? 0
 
             var points: [RoutePoint] = []
+            var pointAttrs: [AttributeBag] = []
+            var pointsAttrs: AttributeBag = [:]
             var extraChildren: [RawXMLNode] = []
             for pChild in connElem.children ?? [] {
                 guard let childElem = pChild as? XMLElement else { continue }
                 if childElem.name == "POINTS" {
+                    pointsAttrs = XMLAttributes.bag(of: childElem)
                     for ptChild in childElem.children ?? [] {
                         guard let ptElem = ptChild as? XMLElement, ptElem.name == "POINT" else { continue }
-                        let px = Double(ptElem.attribute(forName: "X")?.stringValue ?? "0") ?? 0
-                        let py = Double(ptElem.attribute(forName: "Y")?.stringValue ?? "0") ?? 0
+                        let attrs = XMLAttributes.bag(of: ptElem)
+                        let px = Double(attrs["X"] ?? "0") ?? 0
+                        let py = Double(attrs["Y"] ?? "0") ?? 0
                         points.append(RoutePoint(x: px, y: py))
+                        pointAttrs.append(attrs)
                     }
                 } else {
                     extraChildren.append(RawXMLNode(childElem))
@@ -347,7 +352,9 @@ public final class PCCParser: @unchecked Sendable {
                 points: points,
                 isParam: isParam,
                 rawAttributes: attrs,
-                rawChildren: extraChildren
+                rawChildren: extraChildren,
+                pointsAttributes: pointsAttrs,
+                pointAttributes: pointAttrs
             ))
         }
         return conns

@@ -5,7 +5,7 @@ import WirebenchCore
 import WirebenchModel
 import WirebenchSource
 
-/// The PLC Swift editor: source on the left, what the compiler says about it on the right.
+/// The Structured Text editor: source on the left, what the compiler says about it on the right.
 ///
 /// It compiles as you type (debounced) so a diagnostic appears where the mistake is made, and the explicit Compile
 /// button opens the result in the block editor or saves it as a `.pcc`.
@@ -16,7 +16,7 @@ struct SwiftIDEView: View {
     /// True when the editor has no text: either a fresh scratch, or a document that carries no source.
     @State private var isEmpty = false
     @State private var compiled: CompiledSource?
-    @State private var diagnostics: [SwiftSourceError] = []
+    @State private var diagnostics: [SourceError] = []
     @State private var failure: String?
     @State private var jumpLine: Int?
     @State private var savingError: String?
@@ -34,6 +34,10 @@ struct SwiftIDEView: View {
             if model.swiftSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { recoverFromProject() }
             isEmpty = model.swiftSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if isEmpty { rebuildEmpty() } else { rebuild() }
+        }
+        .onChange(of: model.currentFileURL) { _, _ in
+            // Opening another document leaves an empty buffer; recover that document rather than keep the last one.
+            if model.swiftSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { recoverFromProject() }
         }
         .onChange(of: model.swiftSource) { _, new in
             isEmpty = new.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -125,7 +129,7 @@ struct SwiftIDEView: View {
 
                 Divider()
 
-                Text("The source is a subset of Swift. Pins are \(Text("@DI").font(.system(.callout, design: .monospaced))) and \(Text("@DO").font(.system(.callout, design: .monospaced))) properties, a \(Text("var").font(.system(.callout, design: .monospaced))) is state, and \(Text("if").font(.system(.callout, design: .monospaced))) becomes a selection of wires.")
+                Text("The source is IEC 61131-3 Structured Text. A \(Text("PROGRAM").font(.system(.callout, design: .monospaced))) is a page, a \(Text("FUNCTION_BLOCK").font(.system(.callout, design: .monospaced))) a macro, pins are \(Text("AT %IX0").font(.system(.callout, design: .monospaced))) / \(Text("AT %QX0").font(.system(.callout, design: .monospaced))), and \(Text("IF").font(.system(.callout, design: .monospaced))) becomes a selection of wires.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -140,7 +144,7 @@ struct SwiftIDEView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let document = documentName {
-                Text("‘\(document)’ has no PLC Swift source: a .pcc stores blocks and wires, not the text that produced them.")
+                Text("‘\(document)’ has no Structured Text source: a .pcc stores blocks and wires, not the text that produced them.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +192,7 @@ struct SwiftIDEView: View {
 
     private func summary(_ compiled: CompiledSource) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("\(compiled.blockCount) blocks from \(compiled.entryPoint)()", systemImage: "checkmark.circle.fill")
+            Label("\(compiled.blockCount) blocks from \(compiled.program)", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .font(.callout)
             if !compiled.variables.isEmpty {
@@ -203,7 +207,7 @@ struct SwiftIDEView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if model.swiftSource.contains("// Not recovered:") || model.swiftSource.contains("// Conditional blocks") {
+            if model.swiftSource.contains("(* Not recovered:") || model.swiftSource.contains("(* Conditional blocks") {
                 Label("This sheet has blocks the subset cannot express; compiling replaces it with what is here.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -235,11 +239,12 @@ struct SwiftIDEView: View {
 
     private func openInWirebench() {
         guard let compiled else { return }
-        model.adoptCompiledProject(compiled.project)
-        model.zoomToFit()
+        let hadChanges = model.hasSignificantChanges
+        model.requestAdopt(compiled.project)
+        if !hadChanges { model.zoomToFit() }
         NSApp.activate(ignoringOtherApps: true)
         // The document lives in the main window; this one keeps the source for the next edit.
-        if let document = NSApp.windows.first(where: { $0.canBecomeMain && $0.title != "PLC Swift" }) {
+        if let document = NSApp.windows.first(where: { $0.canBecomeMain && $0.title != "Structured Text" }) {
             document.makeKeyAndOrderFront(nil)
         }
     }
@@ -292,13 +297,13 @@ struct SwiftIDEView: View {
     }
 
     private func rebuild() {
-        spans = SwiftSourceHighlighter.spans(in: model.swiftSource)
+        spans = SourceHighlighter.spans(in: model.swiftSource)
         do {
-            let result = try SwiftSourceCompiler().compile(model.swiftSource, projectName: "Untitled")
+            let result = try SourceCompiler().compile(model.swiftSource, projectName: "Untitled")
             compiled = result
             diagnostics = []
             failure = nil
-        } catch let error as SwiftSourceError {
+        } catch let error as SourceError {
             compiled = nil
             diagnostics = [error]
             failure = nil

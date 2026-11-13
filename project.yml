@@ -15,11 +15,6 @@ configFiles:
 fileGroups:
   - Release.xcconfig
 
-packages:
-  swift-syntax:
-    url: https://github.com/swiftlang/swift-syntax.git
-    from: "604.0.0"
-
 settings:
   base:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -174,27 +169,19 @@ targets:
         DEFINES_MODULE: true
         SKIP_INSTALL: true
 
-  # A *static framework*, not a static library: Xcode does not give a static library the include paths of a package
-  # dependency's C target, and the compiler imports SwiftParser, whose SwiftSyntax dependency needs `_SwiftSyntaxCShims`.
-  # A framework links package products, so the module map is found; `MACH_O_TYPE = staticlib` keeps the archive static, so
-  # nothing has to be embedded or copied next to the CLI.
   WirebenchSource:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/WirebenchSource
     dependencies:
       - target: WirebenchCore
       - target: WirebenchLibrary
-      - package: swift-syntax
-        product: SwiftParser
-      - package: swift-syntax
-        product: SwiftSyntax
     settings:
       groups: [recommendedLibrary]
       base:
         PRODUCT_NAME: WirebenchSource
-        MACH_O_TYPE: staticlib
+        DEFINES_MODULE: true
         SKIP_INSTALL: true
 
   WirebenchCLI:
@@ -232,7 +219,6 @@ targets:
       - target: WirebenchEngine
       - target: WirebenchHardware
       - target: WirebenchSource
-        embed: false
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx
@@ -283,7 +269,6 @@ targets:
       - target: WirebenchEngine
       - target: WirebenchHardware
       - target: WirebenchSource
-        embed: false
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx

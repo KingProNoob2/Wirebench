@@ -1,5 +1,9 @@
 /// Pin recordings (see `PinChain`) taken from the Swift `SimulationEngine` before it was deleted, while it and
-/// the C++ core agreed pin for pin on every project here. Each run is 200 every-tick steps at the fixed test
+/// the C++ core agreed pin for pin on every project here.
+///
+/// `SSemafor(1).pcc` was re-baselined when the engine's pin-0 gate was corrected: the old engine skipped any block
+/// whose first input read 0, but the help gives `Int2Bits` no `En` — its first pin is X — so an X of 0 must run and
+/// drive every bit low rather than hold the previous bits. Each run is 200 every-tick steps at the fixed test
 /// instant; the four values are the chain after steps 49, 99, 149 and 199.
 ///
 /// Keyed by fixture name or `.pcc` file name. A project added to the corpus later has no recording, and the
@@ -15,7 +19,7 @@ enum CorpusRecordings {
         "LEDky.pcc": [0x24c41bdd77696423, 0x2b72805fc63e4f23, 0xbfdcc0c092577a23, 0xd8315ed8ade4e523],
         "RS a RST.pcc": [0x4edfa073af9f0e85, 0xd342e9198244b065, 0xf28c29159e08bfc5, 0x67a916a4c7f6f5a5],
         "RST.pcc": [0x28de5c67911cbb3d, 0xb3ea868c0a90ac95, 0x429e71cd22d8c7ad, 0xccbf6138b6c4fc05],
-        "SSemafor(1).pcc": [0x86f85fab099a7bbf, 0xc2be4de0507ba0ea, 0x42cb20e95eb26f77, 0x1f5180777557065],
+        "SSemafor(1).pcc": [9725628583511751615, 1279638271165106778, 6145921008825782999, 17495457952356736069],
         "autoplexer.pcc": [0x28de63be65b595e5, 0xbbae9e895d2c43a5, 0xabd7cb06fb04e265, 0x9abb74ce73f7dc25],
         "binarni odcitacka.pcc": [0xdf47d429d6bcb485, 0x3c74e329596666e5, 0x7a433a40a4fd0f45, 0x63567ddb2d797ea5],
         "binarni scitacka.pcc": [0xda5f0e5d7b338bab, 0x51d4713c89230af1, 0xb8e2b1ed23278bf7, 0xa7765af180b50b8d],

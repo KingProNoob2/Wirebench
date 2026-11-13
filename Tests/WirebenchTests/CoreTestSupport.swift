@@ -100,10 +100,12 @@ final class TestEngine {
 }
 
 /// One unwired module, run through its Swift block class the way the deleted Swift engine ran it: a module whose
-/// first input reads 0 does not run at all; otherwise the block's `process`. That is everything the engine did
-/// for a module with no wires, so it is a reference for comparing the core block by block.
+/// first input is its `En` and reads 0 does not run at all; otherwise the block's `process`. That is everything the
+/// engine did for a module with no wires, so it is a reference for comparing the core block by block. Blocks whose
+/// first pin is data (`Yes`, `Int2Bits`, `Limiter`) always run — the help gives them no `En`.
 final class BlockOracle {
     let block: FunctionBlock
+    private let hasEnable: Bool
     private var tick: UInt64 = 0
     private let cycle: Double
     private let now: Date
@@ -113,13 +115,14 @@ final class BlockOracle {
         for (index, pin) in module.inPins.enumerated() where index < block.inPins.count { block.inPins[index] = pin.value }
         for (index, pin) in module.paramPins.enumerated() where index < block.paramPins.count { block.paramPins[index] = pin.value }
         (block as? SystemCmdBlock)?.applyDefinition()
+        hasEnable = BlockLabels.hasEnablePin(for: module.guid)
         cycle = cycleDelayMs
         self.now = now
     }
 
     func step() {
         tick += 1
-        guard block.inPins.first?.asBool ?? true else { return }
+        guard !hasEnable || (block.inPins.first?.asBool ?? true) else { return }
         block.process(sample: SampleContext(tickCount: tick, deltaMs: cycle, timestamp: now))
     }
 }

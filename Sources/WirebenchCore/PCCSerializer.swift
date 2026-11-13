@@ -78,6 +78,9 @@ public final class PCCSerializer: @unchecked Sendable {
             case PCCElement.plcConfiguration:
                 if !project.plcConfiguration.isEmpty {
                     children.append(.node(name: PCCElement.plcConfiguration, attrs: [:], children: project.plcConfiguration.map(moduleElement)))
+                } else if project.sectionOrder.contains(PCCElement.plcConfiguration) {
+                    // The file had the section (possibly empty); keep it, or the next save drops a section.
+                    children.append(.leaf(name: PCCElement.plcConfiguration, attrs: [:]))
                 }
             default:
                 // Unmodelled section (CONSTANTS and friends): write back what we read, or an
@@ -288,13 +291,14 @@ public final class PCCSerializer: @unchecked Sendable {
 
         var children: [XMLOut] = []
         if !conn.points.isEmpty {
-            let points = conn.points.map { pt -> XMLOut in
-                var pa = Attrs()
+            var pointChildren: [XMLOut] = []
+            for (index, pt) in conn.points.enumerated() {
+                var pa = Attrs(index < conn.pointAttributes.count ? conn.pointAttributes[index] : [:])
                 pa.int("X", coordinate(pt.x))
                 pa.int("Y", coordinate(pt.y))
-                return .leaf(name: "POINT", attrs: pa.result)
+                pointChildren.append(.leaf(name: "POINT", attrs: pa.result))
             }
-            children.append(.node(name: "POINTS", attrs: [:], children: points))
+            children.append(.node(name: "POINTS", attrs: Attrs(conn.pointsAttributes).result, children: pointChildren))
         }
         children.append(contentsOf: conn.rawChildren.map { resolve($0) })
 
@@ -311,13 +315,42 @@ public final class PCCSerializer: @unchecked Sendable {
         a.str("PAGE", g.page)
         if let text = g.text { a.str("TEXT", text) }
 
-        // The verbatim subtree is authoritative whenever we have one, so a graphic this app has not
-        // touched keeps every attribute Dirigo wrote — including the FONT details we do not model.
-        // Synthesising from the typed fields is the fallback, used only for graphics built here (see
-        // `PCCGraphicBuilder`). Editing a text object changes only its TEXT, which is an attribute
-        // and so is written from the typed field either way.
+        // The verbatim subtree is authoritative for what the model does not type, but the typed fields must win
+        // where they exist: moving a node or changing a pen/brush/font used to be silently discarded here.
         if !g.rawChildren.isEmpty {
-            return .node(name: "GRAPHICS", attrs: a.result, children: g.rawChildren.map { resolve($0) })
+            var children = g.rawChildren
+            if !g.nodes.isEmpty {
+                let built = g.nodes.map { node -> RawXMLNode in
+                    RawXMLNode(name: "NODE", attributes: AttributeBag(["X": "\(coordinate(node.x))", "Y": "\(coordinate(node.y))"]))
+                }
+                if let index = children.firstIndex(where: { $0.name == "NODES" }) {
+                    var nodes = children[index].children
+                    for (offset, node) in built.enumerated() where offset < nodes.count {
+                        nodes[offset].attributes["X"] = node.attributes["X"]
+                        nodes[offset].attributes["Y"] = node.attributes["Y"]
+                    }
+                    if nodes.count < built.count { nodes.append(contentsOf: built[nodes.count...]) }
+                    children[index].children = nodes
+                } else {
+                    children.append(RawXMLNode(name: "NODES", children: built))
+                }
+            }
+            func merge(_ name: String, _ values: [String: String?]) {
+                let present = values.compactMapValues { $0 }
+                guard !present.isEmpty else { return }
+                if let index = children.firstIndex(where: { $0.name == name }) {
+                    for (key, value) in present { children[index].attributes[key] = value }
+                } else {
+                    children.append(RawXMLNode(name: name, attributes: AttributeBag(present)))
+                }
+            }
+            merge("PEN", ["COLOR": g.penColor, "MODE": g.penMode.map(String.init),
+                          "STYLE": g.penStyle.map(String.init), "WIDTH": g.penWidth.map(String.init)])
+            merge("BRUSH", ["COLOR": g.brushColor, "STYLE": g.brushStyle.map(String.init)])
+            merge("FONT", ["NAME": g.fontName, "BOLD": g.fontBold.map { $0 ? "True" : "False" },
+                           "ITALIC": g.fontItalic.map { $0 ? "True" : "False" }, "SIZE": g.fontSize.map(String.init),
+                           "COLOR": g.fontColor])
+            return .node(name: "GRAPHICS", attrs: a.result, children: children.map { resolve($0) })
         }
 
         var children: [XMLOut] = []

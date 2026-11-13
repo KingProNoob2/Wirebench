@@ -9,6 +9,8 @@ final class BridgeSession {
     let model: AppModel
     let layout = WireLayout()
     var dirty = true
+    /// What the Hardware tab last showed: its state changes outside `simulationVersion`, so the tick compares it too.
+    var hardwareFingerprint = ""
     /// Set when the model has agreed to quit.
     var quitRequested = false
     /// Blocks being dragged, shown moved before the move is committed.
@@ -66,6 +68,14 @@ public func wirebench_tick(_ pointer: UnsafeMutableRawPointer?, _ elapsedMs: Dou
         let before = s.model.simulationVersion
         s.model.hostTick(elapsedMs: elapsedMs)
         if s.model.simulationVersion != before { s.dirty = true }
+        // Upload progress, the log and the port list change on the main actor without touching the version.
+        let hardware = [s.model.uploadStatus, s.model.uploadPhase,
+                        String(describing: s.model.uploadProgress), String(s.model.uploadLog.count),
+                        String(s.model.availablePorts.count), String(s.model.isUploading)].joined(separator: "|")
+        if hardware != s.hardwareFingerprint {
+            s.hardwareFingerprint = hardware
+            s.dirty = true
+        }
         return s.dirty ? 1 : 0
     }
 }

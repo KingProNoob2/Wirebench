@@ -68,14 +68,10 @@ let featureTargets: [Target] = [
         publicHeadersPath: "include",
         swiftSettings: aiSettings
     ),
-    // PLC Swift: the source front end and its lowering to blocks, on top of Swift's own parser.
+    // Structured Text: the source front end (its own lexer and parser) and its lowering to blocks.
     .target(
         name: "WirebenchSource",
-        dependencies: [
-            "WirebenchCore", "WirebenchLibrary",
-            .product(name: "SwiftParser", package: "swift-syntax"),
-            .product(name: "SwiftSyntax", package: "swift-syntax"),
-        ]
+        dependencies: ["WirebenchCore", "WirebenchLibrary"]
     ),
     .executableTarget(
         name: "WirebenchCLI",
@@ -113,9 +109,5 @@ let package = Package(
         .library(name: "WirebenchBridge", type: .dynamic, targets: ["WirebenchBridge"]),
         .executable(name: "wirebench-cli", targets: ["WirebenchCLI"]),
     ] + appProducts,
-    dependencies: [
-        // The Swift parser, used by the PLC Swift front end: the source is real Swift syntax, not a lookalike.
-        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
-    ],
     targets: coreTargets + featureTargets + appTargets
 )

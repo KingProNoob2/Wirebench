@@ -353,11 +353,14 @@ public final class ProfilesParser: @unchecked Sendable {
     static func parseSystemCommand(mnemonic: String, definition: String) -> SystemCommandInfo? {
         let text = definition.components(separatedBy: ",")[0].trimmingCharacters(in: .whitespaces)
 
+        let fields = definition.components(separatedBy: ",")
         func field(_ key: String) -> String? {
-            guard let range = definition.range(of: "\(key)=") else { return nil }
-            let rest = definition[range.upperBound...]
-            let value = rest.prefix { $0 != "," }.trimmingCharacters(in: .whitespaces)
-            return value.isEmpty ? nil : String(value)
+            let prefix = key.uppercased() + "="
+            guard let part = fields.first(where: { $0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix(prefix) })
+            else { return nil }
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            let value = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
         }
 
         guard let cmdText = field("CMD"), let command = parseCommandWord(cmdText) else { return nil }

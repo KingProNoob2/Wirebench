@@ -129,7 +129,7 @@ enum BridgeCommands {
             model.selectedAnnotationIndex = nil
         case "move":
             let ids = Set((arguments["ids"] as? [Int]) ?? [])
-            guard let lead = ids.first else { break }
+            guard let lead = ids.min() else { break }
             session.dragOffsets = [:]
             model.moveModules(ids, lead: lead, deltaX: double(arguments, "dx") ?? 0, deltaY: double(arguments, "dy") ?? 0)
         case "drag":
@@ -204,7 +204,11 @@ enum BridgeCommands {
                   let value = double(arguments, "value") else { return ["ok": false] }
             let current = model.getNode(id: module)?.block.inPins[safe: pin]
             if case .bool = current { model.setModuleInput(moduleId: module, pinIndex: pin, value: .bool(value != 0)) }
-            else { model.setModuleInput(moduleId: module, pinIndex: pin, value: .int32(Int32(value))) }
+            else {
+                // A JSON number is a Double; converting it straight to Int32 traps out of range and on NaN.
+                let clamped = min(max(value.isFinite ? value : 0, -2_000_000_000), 2_000_000_000)
+                model.setModuleInput(moduleId: module, pinIndex: pin, value: .int32(Int32(clamped.rounded())))
+            }
         case "inspect":
             guard let id = int(arguments, "id"), let snapshot = InspectorSnapshot.make(of: model, moduleId: id),
                   let data = try? JSONEncoder().encode(snapshot),

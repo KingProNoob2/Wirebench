@@ -2,16 +2,17 @@ import Foundation
 import WirebenchCore
 import WirebenchLibrary
 
-/// Turns a project back into PLC Swift: what the IDE shows when a `.pcc` is opened that has no source.
+/// Turns a project back into Structured Text: what the IDE shows when a `.pcc` is opened that has no source.
 ///
-/// The subset cannot express every block, so this recovers what it can — pages, `@DI`/`@DO` pins, variables, macro
-/// calls, Boolean logic, `pulse` — and lists the rest as a comment at the end of each page instead of inventing code.
+/// The subset cannot express every block, so this recovers what it can — programs, `AT %IXn`/`AT %QXn` pins, variables,
+/// function-block calls, Boolean logic — and lists the rest as a comment at the end of each unit instead of inventing code.
 /// Compiling the result back gives the same pages and the same pins for a project the subset can describe; for anything
 /// else it is a readable skeleton, not a faithful round trip.
 public struct PCCDecompiler {
     public init() {}
 
-    public func source(for project: PCCProject, named name: String? = nil) -> String {
+    public func source(for input: PCCProject, named name: String? = nil) -> String {
+        let project = ConstructContainers.expanded(input)
         let profile = ProfileRegistry.profile(for: project, in: ProfileRegistry.builtIn)
         let interval = max(1, profile?.threads.filter { $0.intervalMs > 0 }
             .min { $0.intervalMs < $1.intervalMs }?.intervalMs ?? 10)
@@ -49,12 +50,17 @@ public struct PCCDecompiler {
         }
 
         var out: [String] = [
-            "// Recovered from \(name ?? (project.name.isEmpty ? "the project" : project.name)) by Wirebench.",
-            "// The subset cannot express every block; what was not recovered is listed at the end of each page.",
-            "",
-            "import PLC",
+            "(* Recovered from \(name ?? (project.name.isEmpty ? "the project" : project.name)) by Wirebench.",
+            "   The subset cannot express every block; what was not recovered is listed at the end of each unit. *)",
             "",
         ]
+        // A project can hold only macro sheets (a library of them, with no program of its own). The source needs a
+        // PROGRAM to be a program, so one is added; compiling it back adds that page to the project.
+        if normal.isEmpty {
+            out.append("PROGRAM \(fileNames.unique("Main"))")
+            out.append("END_PROGRAM")
+            out.append("")
+        }
         for (index, caption) in ordered.enumerated() {
             let reader = PageReader(project: project, page: caption, interval: interval,
                                     structName: structNames[caption] ?? "Page",
@@ -117,15 +123,18 @@ private final class PageReader {
         for name in ["And", "Or", "Not", "Xor", "Yes"] {
             if let guid = BlockTypeCatalog.info(forBlockName: name)?.guid { guids.insert(guid) }
         }
-        for info in BlockTypeCatalog.all where info.category.hasPrefix("Math")
-            || info.category == "Main\\Comparators" || info.category == "Bool" {
+        let stateful: Set<String> = ["RS", "Mean", "HystComparator"]
+        for info in BlockTypeCatalog.all where (info.category.hasPrefix("Math")
+            || info.category == "Main\\Comparators" || info.category == "Bool") && !stateful.contains(info.blockName) {
             guids.insert(info.guid)
         }
         return guids
     }()
 
     private var diNames: [Int: String] = [:]
+    private var diChannels: [Int: Int] = [:]
     private var outputNames: [Int: String] = [:]
+    private var outputChannels: [Int: Int] = [:]
     private var variableNames: [Int: String] = [:]
     private var callNames: [Int: String] = [:]
     /// The call blocks that made it into the source. A read of a call that was skipped must not become a name.
@@ -147,8 +156,9 @@ private final class PageReader {
         let pageModules = project.modules.filter { $0.page == page }
         self.modules = pageModules
         let ordered = pageModules.sorted { $0.order < $1.order }
-        self.primaryDI = ordered.first { $0.guid == EightDIBlock.guid }?.id
-        self.primaryDO = ordered.first { $0.guid == EightDOBlock.guid }?.id
+        let macroPage = page.hasPrefix("*")
+        self.primaryDI = macroPage ? nil : ordered.first { $0.guid == EightDIBlock.guid }?.id
+        self.primaryDO = macroPage ? nil : ordered.first { $0.guid == EightDOBlock.guid }?.id
         var wires: [Int: [Int: (module: Int, pin: Int)]] = [:]
         for connection in project.inConnections {
             wires[connection.inModuleId, default: [:]][connection.inPinId] = (connection.outModuleId, connection.outPinId)
@@ -167,75 +177,65 @@ private final class PageReader {
         markConditionals()
         assignNames()
 
-        var declarations: [String] = []
+        var inputDeclarations: [String] = []
+        var outputDeclarations: [String] = []
+        var variableDeclarations: [String] = []
+
         if isMacro {
-            for (index, name) in interface.inputs.enumerated() {
-                declarations.append("    @Input(\(index)) var \(name): Bool")
-            }
-            for (index, name) in interface.outputs.enumerated() {
-                declarations.append("    @Output(\(index)) var \(name): Bool")
-            }
+            for name in interface.inputs { inputDeclarations.append("    \(name) : BOOL;") }
+            for name in interface.outputs { outputDeclarations.append("    \(name) : BOOL;") }
         } else {
             for (pin, name) in diNames.sorted(by: { $0.key < $1.key }) {
-                declarations.append("    @DI(\(pin)) var \(name): Bool")
+                variableDeclarations.append("    \(name) AT %IX\(diChannels[pin] ?? pin) : BOOL;")
             }
             for (pin, name) in outputNames.sorted(by: { $0.key < $1.key }) {
-                declarations.append("    @DO(\(pin)) var \(name): Bool")
+                variableDeclarations.append("    \(name) AT %QX\(outputChannels[pin] ?? pin) : BOOL;")
             }
         }
         for module in modules where module.guid == BoolVarBlock.guid {
-            declarations.append("    var \(variableNames[module.id] ?? "state"): Bool = \(module.outPins.first?.value.asBool == true)")
+            let initial = module.outPins.first?.value.asBool == true
+            variableDeclarations.append("    \(variableNames[module.id] ?? "state") : BOOL"
+                                        + (initial ? " := TRUE" : "") + ";")
         }
 
-        // Blocks are created first, with their parameters only: their inputs are wired afterwards with `set`, which is
-        // what lets a feedback loop — a counter whose output reaches its own input — be written down at all.
-        var lets: [String] = []
+        // Declare every instance first: a block type from the catalogue, or a macro's function block.
         let callModules = orderedModules().filter { $0.guid == MacroInterface.callGUID }
         let blockModules = orderedModules().filter(isLibraryBlock)
+        var instanceDeclarations: [String] = []
         for module in blockModules {
-            guard let text = blockStatement(module) else {
+            guard let text = blockDeclaration(module) else {
                 unsupported.append("\(module.name) (\(BlockTypeCatalog.info(forGuid: module.guid)?.blockName ?? "block"))")
                 continue
             }
-            lets.append(text)
+            instanceDeclarations.append(text)
             boundBlocks.insert(module.id)
         }
-        var pendingCalls = Set(callModules.map(\.id))
-        var progress = true
-        while progress {
-            progress = false
-            for module in callModules where pendingCalls.contains(module.id) {
-                guard let text = callStatement(module) else { continue }
-                lets.append(text)
-                boundCalls.insert(module.id)
-                pendingCalls.remove(module.id)
-                progress = true
+        for module in callModules {
+            let macro = module.rawAttributes["MACRO_NAME"] ?? "Macro"
+            guard let type = macroStructByCallName[macro] else {
+                unsupported.append("\(module.name) call of \(macro)")
+                continue
             }
+            instanceDeclarations.append("    \(callNames[module.id] ?? "call") : \(type);")
+            boundCalls.insert(module.id)
         }
-        for module in callModules where pendingCalls.contains(module.id) {
-            unsupported.append("\(module.name) call of \(module.rawAttributes["MACRO_NAME"] ?? "macro")")
-        }
+        variableDeclarations.append(contentsOf: instanceDeclarations)
 
-        var sets: [String] = []
+        // The calls that wire those instances' inputs, and their parameters.
+        var calls: [String] = []
+        for module in callModules where boundCalls.contains(module.id) {
+            if let text = macroCall(module) { calls.append(text) }
+        }
         for module in blockModules where boundBlocks.contains(module.id) {
             guard let name = blockNames[module.id] else { continue }
-            // Every input pin is written explicitly: an unwired pin holds a constant, and creating the block with no
-            // inputs would lose it.
-            for pin in module.inPins.indices {
-                guard let value = expression(module: module.id, pin: pin, depth: 0) else {
-                    unsupported.append("\(module.name) input \(pin)")
-                    continue
-                }
-                sets.append("        \(name).set(\(pin), \(value))")
-            }
+            calls.append(blockCall(module, name: name))
         }
-
-        var assignments: [String] = []
-        var thenByGroup: [Int: [String]] = [:]
-        var elseByGroup: [Int: [String]] = [:]
 
         // A `Set` writes its input into the variable it is wired to; that is an assignment here, and inside a recovered
         // conditional it goes into the branch the `Set` sits in.
+        var assignments: [String] = []
+        var thenByGroup: [Int: [String]] = [:]
+        var elseByGroup: [Int: [String]] = [:]
         for module in orderedModules() where module.guid == SetBlock.guid {
             // A `Set`'s X pin is typed Long in Dirigo, but the variable it writes here is Boolean, so an unwired
             // constant is `true`/`false` and not the number 0.
@@ -245,7 +245,7 @@ private final class PageReader {
             }
             for connection in project.inConnections where connection.inModuleId == module.id && connection.inPinId >= 2 {
                 guard let variable = variableNames[connection.outModuleId] else { continue }
-                let assignment = "        \(variable) = \(value)"
+                let assignment = "        \(variable) := \(value);"
                 if let branch = branchOf[module.id],
                    let group = conditionalGroups.first(where: { $0.thenIds.contains(module.id) || $0.elseIds.contains(module.id) }) {
                     if branch == .then {
@@ -265,13 +265,13 @@ private final class PageReader {
                 unsupported.append("If\(group.id) condition")
                 continue
             }
-            var lines = ["        if \(condition) {"]
-            for line in thenByGroup[group.id] ?? [] { lines.append("    " + line) }
+            var lines = ["    IF \(condition) THEN"]
+            for line in thenByGroup[group.id] ?? [] { lines.append(line) }
             if group.hasElse {
-                lines.append("        } else {")
-                for line in elseByGroup[group.id] ?? [] { lines.append("    " + line) }
+                lines.append("    ELSE")
+                for line in elseByGroup[group.id] ?? [] { lines.append(line) }
             }
-            lines.append("        }")
+            lines.append("    END_IF;")
             conditionals.append(lines.joined(separator: "\n"))
         }
 
@@ -282,7 +282,7 @@ private final class PageReader {
                         unsupported.append("\(outputsBlock.name) pin \(name)")
                         continue
                     }
-                    assignments.append("        \(name) = \(value)")
+                    assignments.append("    \(name) := \(value);")
                 }
             }
         } else {
@@ -290,43 +290,117 @@ private final class PageReader {
                 for pin in module.inPins.indices.dropFirst()
                 where (isDriven(module: module.id, pin: pin) || module.inPins[pin].value.asBool) && pin - 1 <= 7 {
                     let index = pin - 1
-                    guard let name = outputNames[index] else { continue }
+                    guard let name = outputNames[index] else {
+                        unsupported.append("\(module.name) output \(index)")
+                        continue
+                    }
                     guard let value = expression(module: module.id, pin: pin, depth: 0) else {
                         unsupported.append("\(module.name) input \(name)")
                         continue
                     }
-                    assignments.append("        \(name) = \(value)")
+                    assignments.append("    \(name) := \(value);")
                 }
             }
         }
 
         var text: [String] = []
-        if isMacro { text.append("@macro") } else if isMain { text.append("@main") }
-        text.append("struct \(structName) {")
-        text.append(contentsOf: declarations)
+        text.append("\(isMacro ? "FUNCTION_BLOCK" : "PROGRAM") \(structName)")
+        if !inputDeclarations.isEmpty {
+            text.append("VAR_INPUT")
+            text.append(contentsOf: inputDeclarations)
+            text.append("END_VAR")
+        }
+        if !outputDeclarations.isEmpty {
+            text.append("VAR_OUTPUT")
+            text.append(contentsOf: outputDeclarations)
+            text.append("END_VAR")
+        }
+        if !variableDeclarations.isEmpty {
+            text.append("VAR")
+            text.append(contentsOf: variableDeclarations)
+            text.append("END_VAR")
+        }
         text.append("")
-        text.append("    func scan() {")
-        var body = lets
-        if !sets.isEmpty {
-            if !body.isEmpty { body.append("") }
-            body.append(contentsOf: sets)
+        if !calls.isEmpty {
+            text.append(contentsOf: calls)
+            text.append("")
         }
         if !conditionals.isEmpty {
-            if !body.isEmpty { body.append("") }
-            body.append(contentsOf: conditionals)
+            text.append(contentsOf: conditionals)
+            text.append("")
         }
-        text.append(contentsOf: body)
-        if !body.isEmpty && !assignments.isEmpty { text.append("") }
         text.append(contentsOf: assignments)
-        text.append("    }")
         if hasConditionals {
-            text.append("    // Conditional blocks (If / Else / EndIf) are not recovered yet.")
+            text.append("(* Conditional blocks (IF/ELSE/END_IF) are not recovered yet. *)")
         }
         if !unsupported.isEmpty {
-            text.append("    // Not recovered: \(unsupported.joined(separator: ", "))")
+            text.append("(* Not recovered: \(unsupported.joined(separator: ", ")) *)")
         }
-        text.append("}")
+        text.append("\(isMacro ? "END_FUNCTION_BLOCK" : "END_PROGRAM")")
         return text.joined(separator: "\n")
+    }
+
+    /// `name : Type;` — a catalogued block's instance declaration.
+    private func blockDeclaration(_ module: PCCModule) -> String? {
+        guard let name = blockNames[module.id],
+              let rawType = BlockLabels.sourceName(for: module.guid) else { return nil }
+        let type = Identifier.type(rawType)
+        let params = BlockLabels.paramLabels(for: module.guid)
+        let paramTypes = BlockLabels.paramTypes(for: module.guid)
+        // A parameter the source cannot name would be lost; leave the block listed instead.
+        guard module.paramPins.count <= params.count else { return nil }
+        for (index, pin) in module.paramPins.enumerated() {
+            let type = paramTypes.indices.contains(index) ? paramTypes[index] : ""
+            if literal(pin.value, type: type) == nil { return nil }
+        }
+        let inputs = BlockLabels.inputTypes(for: module.guid, totalPins: module.inPins.count)
+        for pin in module.inPins.indices where wires[module.id]?[pin] == nil {
+            let type = inputs.indices.contains(pin) ? inputs[pin] : ""
+            if literal(module.inPins[pin].value, type: type) == nil { return nil }
+        }
+        return "    \(name) : \(type);"
+    }
+
+    /// `name(input := value, Parameter := 2);` — the call that wires a catalogued block's pins.
+    private func blockCall(_ module: PCCModule, name: String) -> String {
+        var arguments: [String] = []
+        let labels = BlockLabels.inputLabels(for: module.guid, totalPins: module.inPins.count)
+        for pin in module.inPins.indices {
+            guard let value = expression(module: module.id, pin: pin, depth: 0) else {
+                unsupported.append("\(module.name) input \(pin)")
+                continue
+            }
+            arguments.append("\(labels[pin]) := \(value)")
+        }
+        let params = BlockLabels.paramLabels(for: module.guid)
+        let paramTypes = BlockLabels.paramTypes(for: module.guid)
+        for (index, pin) in module.paramPins.enumerated() {
+            guard index < params.count else {
+                unsupported.append("\(module.name) parameter pin \(index)")
+                continue
+            }
+            let type = paramTypes.indices.contains(index) ? paramTypes[index] : ""
+            guard let text = literal(pin.value, type: type) else {
+                unsupported.append("\(module.name) parameter \(params[index])")
+                continue
+            }
+            arguments.append("\(params[index]) := \(text)")
+        }
+        return "    \(name)(\(arguments.joined(separator: ", ")));"
+    }
+
+    /// `name(input := value);` — the call that wires a function-block instance's inputs. Unwired inputs keep their
+    /// defaults and stay out of the call.
+    private func macroCall(_ module: PCCModule) -> String? {
+        let macro = module.rawAttributes["MACRO_NAME"] ?? "Macro"
+        guard let macroPage = macroPageByCallName[macro], let interface = interfaces[macroPage] else { return nil }
+        var arguments: [String] = []
+        for (index, pin) in interface.inputs.enumerated() where wires[module.id]?[index] != nil {
+            guard let value = booleanValue(module: module.id, pin: index) else { return nil }
+            arguments.append("\(pin) := \(value)")
+        }
+        let name = callNames[module.id] ?? "call"
+        return "    \(name)(\(arguments.joined(separator: ", ")));"
     }
 
     /// A `let name = Macro(...)` statement, or nil when an argument cannot be expressed yet.
@@ -359,7 +433,8 @@ private final class PageReader {
     /// The block's creation, with its parameters: its inputs are wired later by `set`.
     private func blockStatement(_ module: PCCModule) -> String? {
         guard let name = blockNames[module.id],
-              let type = BlockLabels.sourceName(for: module.guid) else { return nil }
+              let rawType = BlockLabels.sourceName(for: module.guid) else { return nil }
+        let type = Identifier.type(rawType)
         var arguments: [String] = []
         let params = BlockLabels.paramLabels(for: module.guid)
         let paramTypes = BlockLabels.paramTypes(for: module.guid)
@@ -385,17 +460,53 @@ private final class PageReader {
         }
     }
 
+    /// The hardware channels an 8xDI/8xDO exposes, in pin order. A masked or counted block selects channels by
+    /// attribute (`PIN_MASK`, `PIN_COUNT`, `HIDDEN_PIN_MASK`), so its pin 0 is not necessarily channel 0.
+    private func ioChannels(_ module: PCCModule) -> [Int] {
+        switch module.guid {
+        case EightDIBlock.guid:
+            let mask = integerAttribute(module.rawAttributes["PIN_MASK"]) ?? 0xFF
+            return (0..<16).filter { mask & (1 << $0) != 0 }
+        case EightDOBlock.guid:
+            let count = Int(module.rawAttributes["PIN_COUNT"] ?? "") ?? 8
+            let hidden = integerAttribute(module.rawAttributes["HIDDEN_PIN_MASK"]) ?? 0
+            return (0..<max(0, count)).filter { hidden & (1 << $0) == 0 }
+        default:
+            return []
+        }
+    }
+
+    private func integerAttribute(_ raw: String?) -> Int? {
+        guard let text = raw?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
+        if text.hasPrefix("$") { return Int(text.dropFirst(), radix: 16) }
+        if text.lowercased().hasPrefix("0x") { return Int(text.dropFirst(2), radix: 16) }
+        return Int(text)
+    }
+
     private func assignNames() {
         if !isMacro {
             for module in modules where module.id == primaryDI {
+                let channels = ioChannels(module)
                 for pin in module.outPins.indices where usedOutputs[module.id]?.contains(pin) == true {
-                    diNames[pin] = names.unique("di\(pin)")
+                    guard channels.indices.contains(pin), (0...7).contains(channels[pin]) else {
+                        unsupported.append("\(module.name) out pin \(pin) (only channels 0–7 are expressible)")
+                        continue
+                    }
+                    diNames[pin] = names.unique("di\(channels[pin])")
+                    diChannels[pin] = channels[pin]
                 }
             }
             for module in modules where module.id == primaryDO {
+                let channels = ioChannels(module)
                 for pin in module.inPins.indices.dropFirst()
-                where (isDriven(module: module.id, pin: pin) || module.inPins[pin].value.asBool) && pin - 1 <= 7 {
-                    outputNames[pin - 1] = names.unique("do\(pin - 1)")
+                where (isDriven(module: module.id, pin: pin) || module.inPins[pin].value.asBool) && pin - 1 <= 15 {
+                    let position = pin - 1
+                    guard channels.indices.contains(position), (0...7).contains(channels[position]) else {
+                        unsupported.append("\(module.name) input \(position) (only channels 0–7 are expressible)")
+                        continue
+                    }
+                    outputNames[position] = names.unique("do\(channels[position])")
+                    outputChannels[position] = channels[position]
                 }
             }
         }
@@ -412,7 +523,15 @@ private final class PageReader {
 
     // MARK: Expressions
 
+    /// The value of a consumer's input pin, with the pin's inversion applied.
     private func expression(module: Int, pin: Int, depth: Int) -> String? {
+        guard let value = expressionValue(module: module, pin: pin, depth: depth) else { return nil }
+        guard let consumer = modules.first(where: { $0.id == module }),
+              consumer.inPins.indices.contains(pin), consumer.inPins[pin].inverted else { return value }
+        return "NOT (\(value))"
+    }
+
+    private func expressionValue(module: Int, pin: Int, depth: Int) -> String? {
         guard depth < 24 else { return nil }
         guard let source = wires[module]?[pin] else {
             guard let producer = modules.first(where: { $0.id == module }),
@@ -428,7 +547,7 @@ private final class PageReader {
 
         switch producer.guid {
         case EightDIBlock.guid:
-            if producer.id == primaryDI { return diNames[source.pin] ?? "false" }
+            if producer.id == primaryDI { return diNames[source.pin] }
             return blockOutput(producer, source.pin)
         case BoolVarBlock.guid:
             return variableNames[producer.id]
@@ -443,20 +562,15 @@ private final class PageReader {
             let outputs = macroPage.flatMap { interfaces[$0]?.outputs } ?? []
             guard outputs.indices.contains(source.pin) else { return nil }
             return "\(call).\(outputs[source.pin])"
-        case PulseGenBlock.guid:
-            // A macro page cannot start a timer in this subset.
-            guard !isMacro, producer.paramPins.count >= 2 else { return nil }
-            let cycles = producer.paramPins[0].value.asInt + producer.paramPins[1].value.asInt
-            return "pulse(ms: \(max(interval, cycles * interval)))"
         case NotBlock.guid:
             guard let value = expression(module: producer.id, pin: 1, depth: depth + 1) else { return nil }
-            return "!\(parenthesise(value))"
+            return "NOT \(parenthesise(value))"
         case AndBlock.guid:
-            return binary(producer, "&&", depth)
+            return binary(producer, "AND", depth)
         case OrBlock.guid:
-            return binary(producer, "||", depth)
+            return binary(producer, "OR", depth)
         case XorBlock.guid:
-            return binary(producer, "!=", depth)
+            return binary(producer, "XOR", depth)
         default:
             return blockOutput(producer, source.pin)
         }
@@ -582,39 +696,56 @@ private final class PageReader {
 /// Makes valid, unique Swift identifiers out of block and pin names.
 private struct NameSet {
     private var used: Set<String> = []
-    private static let reserved: Set<String> = ["true", "false", "var", "let", "func", "struct", "if", "else", "import",
-                                               "return", "scan", "in", "for", "while"]
 
-    mutating func unique(_ candidate: String) -> String {
-        var name = candidate
-        if NameSet.reserved.contains(name) { name += "_" }
-        if name.isEmpty { name = "value" }
+    /// ST is case-insensitive, so `On` and `on` are the same name.
+    mutating func unique(_ name: String) -> String {
+        var candidate = name
         var suffix = 2
-        while used.contains(name) {
-            name = "\(candidate)\(suffix)"
+        while used.contains(candidate.lowercased()) {
+            candidate = "\(name)\(suffix)"
             suffix += 1
         }
-        used.insert(name)
-        return name
+        used.insert(candidate.lowercased())
+        return candidate
     }
 }
 
 private enum Identifier {
+    /// A name that is a keyword cannot be a variable.
+    static let keywords: Set<String> = [
+        "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK",
+        "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
+        "IF", "THEN", "ELSIF", "ELSE", "END_IF",
+        "AND", "OR", "XOR", "NOT", "MOD", "AT", "TRUE", "FALSE",
+        "BOOL", "INT", "REAL", "LREAL", "WORD",
+    ]
+
+    /// Unit and variable names avoid keywords *and* the catalogued type names: a function block named `IAdd` would
+    /// shadow the block type in its own calls.
+    static var reserved: Set<String> {
+        var words = keywords
+        for name in BlockLabels.sourceNames.keys { words.insert(name.uppercased()) }
+        return words
+    }
+
+    /// A unit or variable name.
     static func of(_ raw: String, fallback: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        var scalars: [Character] = []
-        for scalar in trimmed.unicodeScalars {
-            if CharacterSet.alphanumerics.contains(scalar) || scalar == "_" {
-                scalars.append(Character(scalar))
-            } else {
-                scalars.append("_")
-            }
-        }
-        var name = String(scalars)
-        while name.contains("__") { name = name.replacingOccurrences(of: "__", with: "_") }
-        name = name.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-        if name.isEmpty { return fallback }
-        if let first = name.first, first.isNumber { name = "_" + name }
+        escaped(sanitise(raw, fallback: fallback), against: reserved)
+    }
+
+    /// A catalogued type name: already a valid identifier, escaped only when it is a keyword (`Not` -> `Not_`).
+    static func type(_ raw: String) -> String {
+        escaped(sanitise(raw, fallback: "Block"), against: keywords)
+    }
+
+    private static func sanitise(_ raw: String, fallback: String) -> String {
+        var name = raw.map { $0.isLetter || $0.isNumber || $0 == "_" ? String($0) : "_" }.joined()
+        while let first = name.first, first.isNumber { name = "_" + name }
+        if name.isEmpty || name == "_" { name = fallback }
         return name
+    }
+
+    private static func escaped(_ name: String, against words: Set<String>) -> String {
+        words.contains(name.uppercased()) ? name + "_" : name
     }
 }

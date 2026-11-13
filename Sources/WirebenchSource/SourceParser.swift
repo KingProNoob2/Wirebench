@@ -1,9 +1,7 @@
 import Foundation
-import SwiftParser
-import SwiftSyntax
 
-/// A diagnostic from the source compiler, with the position it happened at.
-public struct SwiftSourceError: Error, Equatable, CustomStringConvertible {
+/// A diagnostic from the Structured Text compiler, with the position it happened at.
+public struct SourceError: Error, Equatable, CustomStringConvertible {
     public var line: Int
     public var column: Int
     public var message: String
@@ -21,16 +19,14 @@ public struct SwiftSourceError: Error, Equatable, CustomStringConvertible {
 
 // MARK: - The syntax tree
 
-/// One expression of the subset. Positions are kept so a diagnostic can point at the line that caused it.
+/// One expression of the subset.
 public struct SourceExpr: Equatable, Sendable {
     public indirect enum Kind: Equatable, Sendable {
         case boolean(Bool)
         case integer(Int)
         case name(String)
-        /// `t.result`: a property of a macro call instance.
+        /// `t.result`: one of a function-block instance's outputs.
         case member(SourceExpr, String)
-        /// A call: `pulse(ms: 500)` or a macro `Toggle(value: button)`.
-        case call(String, [SourceArgument])
         case unary(String, SourceExpr)
         case binary(String, SourceExpr, SourceExpr)
     }
@@ -45,10 +41,10 @@ public struct SourceExpr: Equatable, Sendable {
 }
 
 public struct SourceArgument: Equatable, Sendable {
-    public var label: String?
+    public var label: String
     public var value: SourceExpr
 
-    public init(label: String? = nil, value: SourceExpr) {
+    public init(label: String, value: SourceExpr) {
         self.label = label
         self.value = value
     }
@@ -56,13 +52,10 @@ public struct SourceArgument: Equatable, Sendable {
 
 public struct SourceStmt: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
-        case bind(String, SourceExpr)
         case assign(String, SourceExpr)
+        /// `t(value := x);`: calls a function-block or block instance with named arguments.
+        case call(String, [SourceArgument])
         case ifThen(SourceExpr, [SourceStmt], [SourceStmt]?)
-        /// `name.set(pin, value)`: wires one input of a block created earlier, which is what lets a feedback loop be
-        /// written down at all.
-        case blockSet(String, Int, SourceExpr)
-        case returnVoid
     }
 
     public var kind: Kind
@@ -74,7 +67,7 @@ public struct SourceStmt: Equatable, Sendable {
     }
 }
 
-/// A property the struct declares as a pin: `@DI(0)`/`@DO(4)` on a page, `@Input(0)`/`@Output(1)` in a macro.
+/// A program's hardware pin: `lamp AT %QX0 : BOOL;`. `AT %IX0` reads a digital input, `AT %QX0` drives an output.
 public struct SourcePin: Equatable, Sendable {
     public enum Direction: Equatable, Sendable { case input, output }
 
@@ -91,7 +84,7 @@ public struct SourcePin: Equatable, Sendable {
     }
 }
 
-/// A stored property: `var lamp: Bool = false`. This is the program's state, one `BoolVar` and one `Set` per name.
+/// A stored `BOOL`: the program's state, one `BoolVar` and one `Set` per name.
 public struct SourceVariable: Equatable, Sendable {
     public var name: String
     public var initial: Bool
@@ -104,480 +97,604 @@ public struct SourceVariable: Equatable, Sendable {
     }
 }
 
-public struct SourceFunction: Equatable, Sendable {
+/// `running : TON;` — a declared instance of a function block or of a block from the catalogue.
+public struct SourceInstance: Equatable, Sendable {
     public var name: String
-    public var body: [SourceStmt]
+    public var typeName: String
     public var line: Int
 
-    public init(name: String, body: [SourceStmt], line: Int) {
+    public init(name: String, typeName: String, line: Int) {
         self.name = name
-        self.body = body
+        self.typeName = typeName
         self.line = line
     }
 }
 
-/// A struct: a page of the project, or — marked `@macro` — a macro page.
+/// A `PROGRAM` (a page) or a `FUNCTION_BLOCK` (a macro page).
 public struct SourceUnit: Equatable, Sendable {
-    public enum Kind: Equatable, Sendable { case page, macro }
+    public enum Kind: Equatable, Sendable { case program, functionBlock }
 
     public var name: String
     public var kind: Kind
-    /// The page the document opens on.
-    public var isMain: Bool
     public var pins: [SourcePin]
     public var variables: [SourceVariable]
-    public var scan: SourceFunction?
+    public var instances: [SourceInstance]
+    public var body: [SourceStmt]
     public var line: Int
 
-    public init(name: String, kind: Kind, isMain: Bool = false, pins: [SourcePin] = [],
-                variables: [SourceVariable] = [], scan: SourceFunction? = nil, line: Int) {
+    public init(name: String, kind: Kind, pins: [SourcePin] = [], variables: [SourceVariable] = [],
+                instances: [SourceInstance] = [], body: [SourceStmt] = [], line: Int) {
         self.name = name
         self.kind = kind
-        self.isMain = isMain
         self.pins = pins
         self.variables = variables
-        self.scan = scan
+        self.instances = instances
+        self.body = body
         self.line = line
     }
 
-    /// The inputs in declaration order, which is the order of the macro's pins.
     public var inputs: [SourcePin] { pins.filter { $0.direction == .input }.sorted { $0.index < $1.index } }
     public var outputs: [SourcePin] { pins.filter { $0.direction == .output }.sorted { $0.index < $1.index } }
     /// The Dirigo caption: a macro is a `*` sheet, a page keeps its name.
-    public var caption: String { kind == .macro ? "*\(name)" : name }
+    public var caption: String { kind == .functionBlock ? "*\(name)" : name }
 }
 
 public struct SourceProgram: Equatable, Sendable {
     public var units: [SourceUnit]
-    public var imports: [String]
 
-    public init(units: [SourceUnit] = [], imports: [String] = []) {
+    public init(units: [SourceUnit] = []) {
         self.units = units
-        self.imports = imports
     }
 
-    public var main: SourceUnit? {
-        units.first { $0.isMain && $0.kind == .page } ?? units.first { $0.kind == .page }
-    }
-
-    public var macros: [SourceUnit] { units.filter { $0.kind == .macro } }
+    /// The page the document opens on: the first `PROGRAM`.
+    public var main: SourceUnit? { units.first { $0.kind == .program } }
+    public var macros: [SourceUnit] { units.filter { $0.kind == .functionBlock } }
 }
 
 // MARK: - Parser
 
-/// Reads PLC Swift with Swift's own parser, then checks it against the subset.
+/// Reads IEC 61131-3 Structured Text, the subset the compiler lowers to blocks.
 ///
-/// The syntax is real Swift — `swift-syntax` builds the tree — so the IDE can use the same parse for highlighting and
-/// positions. Each `struct` is a page; `@macro` makes it a macro page, called with `let t = Name(...)` and read with
-/// `t.output`. Everything outside the subset is refused with a line and a reason.
+/// One file holds `PROGRAM`s (pages) and `FUNCTION_BLOCK`s (macro pages). A program's hardware pins are declared with
+/// `AT %IXn` / `AT %QXn`; `VAR` holds state and instances of function blocks or catalogued blocks; `IF`/`ELSIF`/`ELSE`
+/// and `:=` are the statements. Everything outside that subset is refused with a line and a reason.
 public struct SourceParser {
-    public static func parse(_ source: String) throws -> SourceProgram {
-        let tree = Parser.parse(source: source)
-        let converter = SourceLocationConverter(fileName: "source.swift", tree: tree)
-        var builder = Builder(converter: converter)
-        return try builder.build(tree)
+    private var tokens: [STToken]
+    private var index = 0
+
+    public init(_ source: String) throws {
+        tokens = try STLexer.tokenize(source)
     }
 
-    private struct Builder {
-        let converter: SourceLocationConverter
+    public static func parse(_ source: String) throws -> SourceProgram {
+        var parser = try SourceParser(source)
+        return try parser.program()
+    }
 
-        func line(_ node: some SyntaxProtocol) -> Int {
-            converter.location(for: node.positionAfterSkippingLeadingTrivia).line
+    private var current: STToken { tokens[index] }
+    private func peek(_ offset: Int = 1) -> STToken {
+        let i = index + offset
+        return i < tokens.count ? tokens[i] : tokens[tokens.count - 1]
+    }
+    private var isAtEnd: Bool { current.kind == .endOfFile }
+
+    private mutating func advance() -> STToken {
+        let token = current
+        if index < tokens.count - 1 { index += 1 }
+        return token
+    }
+
+    private func isKeyword(_ word: String) -> Bool {
+        current.kind == .keyword && current.text.uppercased() == word
+    }
+
+    private func isSymbol(_ text: String) -> Bool { current.kind == .symbol && current.text == text }
+
+    private mutating func expectKeyword(_ word: String) throws {
+        guard isKeyword(word) else {
+            throw error("expected \(word) but found \(describe(current))")
         }
+        _ = advance()
+    }
 
-        func failure(_ node: some SyntaxProtocol, _ message: String) -> SwiftSourceError {
-            let position = converter.location(for: node.positionAfterSkippingLeadingTrivia)
-            return SwiftSourceError(line: position.line, column: position.column, message: message)
+    private mutating func expectSymbol(_ text: String) throws {
+        guard isSymbol(text) else {
+            throw error("expected '\(text)' but found \(describe(current))")
         }
+        _ = advance()
+    }
 
-        // MARK: File
-
-        mutating func build(_ file: SourceFileSyntax) throws -> SourceProgram {
-            var program = SourceProgram()
-            for item in file.statements {
-                guard let declaration = item.item.as(DeclSyntax.self) else {
-                    throw failure(item, "statements belong inside a struct")
-                }
-                if let importDecl = declaration.as(ImportDeclSyntax.self) {
-                    program.imports.append(importDecl.path.trimmedDescription)
-                } else if let structDecl = declaration.as(StructDeclSyntax.self) {
-                    program.units.append(try unit(structDecl))
-                } else {
-                    throw failure(declaration, "expected a struct; each struct is a page")
-                }
-            }
-            guard program.main != nil else {
-                throw SwiftSourceError(line: 1, message: "the file declares no page; write 'struct Main { func scan() { ... } }'")
-            }
-            if program.units.filter({ $0.isMain }).count > 1 {
-                throw SwiftSourceError(line: 1, message: "only one struct is '@main'")
-            }
-            let names = program.units.map { $0.name.lowercased() }
-            if Set(names).count != names.count {
-                throw SwiftSourceError(line: 1, message: "two structs have the same name")
-            }
-            return program
+    private mutating func expectIdentifier(_ what: String) throws -> STToken {
+        guard current.kind == .identifier else {
+            throw error("expected \(what) but found \(describe(current))")
         }
+        return advance()
+    }
 
-        mutating func unit(_ decl: StructDeclSyntax) throws -> SourceUnit {
-            if decl.memberBlock.rightBrace.presence == .missing {
-                throw failure(decl, "the struct is not closed with '}'")
-            }
-            var kind = SourceUnit.Kind.page
-            var isMain = false
-            var sawKind = false
-            for attribute in decl.attributes {
-                guard let attr = attribute.as(AttributeSyntax.self) else { continue }
-                switch attr.attributeName.trimmedDescription {
-                case "main": isMain = true
-                case "macro":
-                    if sawKind { throw failure(attr, "a struct is either '@main' or '@macro', not both") }
-                    kind = .macro; sawKind = true
-                default:
-                    throw failure(attr, "unknown attribute '@\(attr.attributeName.trimmedDescription)'; this subset has @main and @macro")
-                }
-            }
-            if kind == .macro && isMain {
-                throw failure(decl, "a macro cannot be '@main'")
-            }
+    private func error(_ message: String, at token: STToken? = nil) -> SourceError {
+        let token = token ?? current
+        return SourceError(line: token.line, column: token.column, message: message)
+    }
 
-            var unit = SourceUnit(name: decl.name.text, kind: kind, isMain: isMain, line: line(decl))
-            for member in decl.memberBlock.members {
-                if let variable = member.decl.as(VariableDeclSyntax.self) {
-                    try property(variable, into: &unit)
-                } else if let functionDecl = member.decl.as(FunctionDeclSyntax.self) {
-                    guard functionDecl.name.text == "scan" else {
-                        throw failure(functionDecl, "a struct's function is 'scan'; '\\(functionDecl.name.text)' has no meaning here")
-                    }
-                    if unit.scan != nil { throw failure(functionDecl, "'scan' is already declared") }
-                    unit.scan = try function(functionDecl)
-                } else {
-                    throw failure(member.decl, "expected 'scan' or a property in the struct")
-                }
-            }
-            guard unit.scan != nil else {
-                throw failure(decl, "'\\(decl.name.text)' has no 'scan'")
-            }
-            return unit
+    private func describe(_ token: STToken) -> String {
+        switch token.kind {
+        case .endOfFile: return "the end of the file"
+        case .integer: return "the number \(token.text)"
+        default: return "'\(token.text)'"
         }
+    }
 
-        mutating func property(_ decl: VariableDeclSyntax, into unit: inout SourceUnit) throws {
-            guard decl.bindings.count == 1, let binding = decl.bindings.first else {
-                throw failure(decl, "one name per property")
-            }
-            guard let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
-                throw failure(binding.pattern, "expected a plain name")
-            }
-            let name = pattern.identifier.text
-            if let type = binding.typeAnnotation?.type.trimmedDescription, type != "Bool" {
-                throw failure(binding.typeAnnotation!, "only 'Bool' is supported for now, not '\\(type)'")
-            }
-            let initial = binding.initializer.map { $0.value }
-            var declared: (SourcePin.Direction, Int)?
+    // MARK: Units
 
-            for attribute in decl.attributes {
-                guard let attr = attribute.as(AttributeSyntax.self) else { continue }
-                let attributeName = attr.attributeName.trimmedDescription
-                let direction: SourcePin.Direction
-                switch attributeName {
-                case "DI", "Input":
-                    guard unit.kind == .page && attributeName == "DI" || unit.kind == .macro && attributeName == "Input" else {
-                        throw failure(attr, unit.kind == .page
-                                      ? "a page's pins are '@DI' and '@DO'; '@\(attributeName)' belongs in a macro"
-                                      : "a macro's pins are '@Input' and '@Output'; '@\(attributeName)' belongs on a page")
-                    }
-                    direction = .input
-                case "DO", "Output":
-                    guard unit.kind == .page && attributeName == "DO" || unit.kind == .macro && attributeName == "Output" else {
-                        throw failure(attr, unit.kind == .page
-                                      ? "a page's pins are '@DI' and '@DO'; '@\(attributeName)' belongs in a macro"
-                                      : "a macro's pins are '@Input' and '@Output'; '@\(attributeName)' belongs on a page")
-                    }
-                    direction = .output
-                default:
-                    throw failure(attr, "unknown attribute '@\(attributeName)' on a property")
-                }
-                guard let index = integerArgument(attr) else {
-                    throw failure(attr, "'@\(attributeName)' takes an index, as in '@\\(attributeName)(0)'")
-                }
-                if unit.kind == .page {
-                    guard (0...7).contains(index) else {
-                        throw failure(attr, "pin \(index) does not exist; there are pins 0 to 7")
-                    }
-                }
-                if unit.pins.contains(where: { $0.direction == direction && $0.index == index }) {
-                    throw failure(decl, "\\(attributeName)\\(index) is declared twice")
-                }
-                declared = (direction, index)
-            }
-
-            if let (direction, index) = declared {
-                guard decl.bindingSpecifier.text == "var" else {
-                    throw failure(decl, "a pin is a 'var'")
-                }
-                if initial != nil { throw failure(decl, "a pin takes its value from the outside; it has no initial value") }
-                unit.pins.append(SourcePin(direction: direction, index: index, name: name, line: line(decl)))
+    private mutating func program() throws -> SourceProgram {
+        var units: [SourceUnit] = []
+        while !isAtEnd {
+            if isKeyword("PROGRAM") {
+                units.append(try unit(.program))
+            } else if isKeyword("FUNCTION_BLOCK") {
+                units.append(try unit(.functionBlock))
             } else {
-                guard decl.bindingSpecifier.text == "var" else {
-                    throw failure(decl, "a stored property is a 'var'; 'let' is a constant and belongs inside 'scan'")
+                throw error("expected PROGRAM or FUNCTION_BLOCK but found \(describe(current))")
+            }
+        }
+        guard units.contains(where: { $0.kind == .program }) else {
+            throw SourceError(line: 1, message: "the file declares no PROGRAM; write 'PROGRAM Main ... END_PROGRAM'")
+        }
+        let names = units.map { $0.name.lowercased() }
+        if Set(names).count != names.count {
+            throw SourceError(line: 1, message: "two programs or function blocks have the same name")
+        }
+        return SourceProgram(units: units)
+    }
+
+    private mutating func unit(_ kind: SourceUnit.Kind) throws -> SourceUnit {
+        let keyword = advance()
+        let name = try expectIdentifier("a name after \(kind == .program ? "PROGRAM" : "FUNCTION_BLOCK")").text
+        var unit = SourceUnit(name: name, kind: kind, line: keyword.line)
+        var sawStatement = false
+        while !isAtEnd {
+            if kind == .program && isKeyword("END_PROGRAM") { advance(); return unit }
+            if kind == .functionBlock && isKeyword("END_FUNCTION_BLOCK") { advance(); return unit }
+            if isKeyword("VAR") || isKeyword("VAR_INPUT") || isKeyword("VAR_OUTPUT") {
+                if sawStatement { throw error("declare every variable before the first statement") }
+                try variableBlock(into: &unit)
+                continue
+            }
+            sawStatement = true
+            unit.body.append(contentsOf: try statements(until: { block in
+                kind == .program ? block == "END_PROGRAM" : block == "END_FUNCTION_BLOCK"
+            }))
+        }
+        throw error("the \(kind == .program ? "PROGRAM" : "FUNCTION_BLOCK") is not closed")
+    }
+
+    private mutating func variableBlock(into unit: inout SourceUnit) throws {
+        let header = advance()   // VAR / VAR_INPUT / VAR_OUTPUT
+        let region = header.text.uppercased()
+        // `VAR CONSTANT`/`VAR RETAIN` are accepted and treated as plain variables.
+        if isKeyword("CONSTANT") || isKeyword("RETAIN") { advance() }
+        while !isKeyword("END_VAR") {
+            if isAtEnd { throw error("the VAR block is not closed with END_VAR") }
+            let nameToken = try expectIdentifier("a variable name")
+            let name = nameToken.text
+            var address: (SourcePin.Direction, Int)?
+            if isKeyword("AT") {
+                advance()
+                address = try addressPin()
+            }
+            try expectSymbol(":")
+            let type = try typeName()
+            var initial = false
+            if isSymbol(":=") {
+                advance()
+                initial = try booleanLiteral(required: true)
+            }
+            try expectSymbol(";")
+
+            if region == "VAR_INPUT" || region == "VAR_OUTPUT" {
+                guard unit.kind == .functionBlock else {
+                    throw error("a PROGRAM's pins are declared AT %IXn / AT %QXn")
                 }
-                var value = false
-                if let initial {
-                    guard let literal = booleanLiteral(initial) else {
-                        throw failure(initial, "a variable's initial value is 'true' or 'false' for now")
+                guard address == nil else { throw error("a FUNCTION_BLOCK pin takes no address") }
+                guard !initial else { throw error("a pin takes no initial value") }
+                guard type == "BOOL" else { throw error("only BOOL pins are supported, not \(type)") }
+                let direction: SourcePin.Direction = region == "VAR_INPUT" ? .input : .output
+                if isNameTaken(name, in: unit) { throw error("'\(name)' is declared twice") }
+                let index = unit.pins.filter { $0.direction == direction }.count
+                unit.pins.append(SourcePin(direction: direction, index: index, name: name, line: nameToken.line))
+            } else if let (direction, index) = address {
+                guard region == "VAR" else {
+                    throw error("AT %… belongs in a plain VAR block")
+                }
+                guard !initial else { throw error("a pin takes no initial value") }
+                guard type == "BOOL" else { throw error("a pin is BOOL, not \(type)") }
+                if unit.pins.contains(where: { $0.direction == direction && $0.index == index }) {
+                    throw error("\(direction == .input ? "I" : "Q")\(index) is declared twice")
+                }
+                if isNameTaken(name, in: unit) { throw error("'\(name)' is declared twice") }
+                unit.pins.append(SourcePin(direction: direction, index: index, name: name, line: nameToken.line))
+            } else if type == "BOOL" {
+                guard initial == false || region == "VAR" else {
+                    throw error("only an internal variable takes an initial value")
+                }
+                if isNameTaken(name, in: unit) { throw error("'\(name)' is declared twice") }
+                unit.variables.append(SourceVariable(name: name, initial: initial, line: nameToken.line))
+            } else {
+                if initial { throw error("an instance takes no initial value") }
+                guard !isNameTaken(name, in: unit) else { throw error("'\(name)' is declared twice") }
+                unit.instances.append(SourceInstance(name: name, typeName: type, line: nameToken.line))
+            }
+        }
+        advance()   // END_VAR
+    }
+
+    /// ST names are case-insensitive, so `On` and `on` are the same declaration.
+    private func isNameTaken(_ name: String, in unit: SourceUnit) -> Bool {
+        let folded = name.lowercased()
+        return unit.variables.contains { $0.name.lowercased() == folded }
+            || unit.instances.contains { $0.name.lowercased() == folded }
+            || unit.pins.contains { $0.name.lowercased() == folded }
+    }
+
+    /// `AT %IX0` / `AT %QX0` — input and output bits, 0 to 7.
+    private mutating func addressPin() throws -> (SourcePin.Direction, Int) {
+        try expectSymbol("%")
+        guard current.kind == .identifier else {
+            throw error("expected an address after '%', as in %IX0")
+        }
+        let text = advance().text.uppercased()
+        let direction: SourcePin.Direction
+        var digits = text
+        if digits.hasPrefix("IX") {
+            direction = .input
+            digits = String(digits.dropFirst(2))
+        } else if digits.hasPrefix("QX") {
+            direction = .output
+            digits = String(digits.dropFirst(2))
+        } else {
+            throw error("unknown address %\(text); use %IX0…%IX7 or %QX0…%QX7")
+        }
+        guard let index = Int(digits), (0...7).contains(index) else {
+            throw error("address %\(text) is not a digital pin; there are pins 0 to 7")
+        }
+        return (direction, index)
+    }
+
+    /// A declared type: `BOOL`, `INT`, `REAL`, or the name of a function block / catalogued block.
+    private mutating func typeName() throws -> String {
+        if current.kind == .keyword, current.text.uppercased() == "BOOL" {
+            let token = advance()
+            return token.text.uppercased()
+        }
+        if current.kind == .keyword, ["INT", "REAL", "LREAL", "WORD"].contains(current.text.uppercased()) {
+            throw error("only BOOL is supported; this subset is Boolean")
+        }
+        guard current.kind == .identifier else {
+            throw error("expected a type but found \(describe(current))")
+        }
+        return advance().text
+    }
+
+    private mutating func booleanLiteral(required: Bool) throws -> Bool {
+        if isKeyword("TRUE") { advance(); return true }
+        if isKeyword("FALSE") { advance(); return false }
+        throw error("expected TRUE or FALSE")
+    }
+
+    // MARK: Statements
+
+    private mutating func statements(until end: (String) -> Bool) throws -> [SourceStmt] {
+        var statements: [SourceStmt] = []
+        while !isAtEnd, !end(current.text.uppercased()) {
+            if isSymbol(";") { advance(); continue }
+            statements.append(try statement())
+        }
+        return statements
+    }
+
+    private mutating func statement() throws -> SourceStmt {
+        if isKeyword("IF") { return try ifStatement() }
+        guard current.kind == .identifier else {
+            throw error("expected a statement but found \(describe(current))")
+        }
+        let name = advance()
+        if isSymbol("(") {
+            let arguments = try argumentList()
+            try expectSymbol(";")
+            return SourceStmt(.call(name.text, arguments), line: name.line)
+        }
+        try expectSymbol(":=")
+        let value = try expression()
+        try expectSymbol(";")
+        return SourceStmt(.assign(name.text, value), line: name.line)
+    }
+
+    private mutating func ifStatement() throws -> SourceStmt {
+        let keyword = advance()   // IF
+        let condition = try expression()
+        try expectKeyword("THEN")
+        let thenBody = try statements { $0 == "ELSIF" || $0 == "ELSE" || $0 == "END_IF" }
+        var elseBody: [SourceStmt]?
+        if isKeyword("ELSIF") {
+            // `ELSIF c THEN …` is an `ELSE IF c THEN … END_IF` in the tree. The chain does not consume the closing
+            // END_IF; it is the outer IF's.
+            elseBody = [try elsifClause()]
+        } else if isKeyword("ELSE") {
+            advance()
+            elseBody = try statements { $0 == "END_IF" }
+        }
+        try expectKeyword("END_IF")
+        try expectSymbol(";")
+        return SourceStmt(.ifThen(condition, thenBody, elseBody), line: keyword.line)
+    }
+
+    /// One `ELSIF` arm, positioned on `ELSIF`; stops before the outer `END_IF`.
+    private mutating func elsifClause() throws -> SourceStmt {
+        let at = advance()   // ELSIF
+        let condition = try expression()
+        try expectKeyword("THEN")
+        let thenBody = try statements { $0 == "ELSIF" || $0 == "ELSE" || $0 == "END_IF" }
+        var elseBody: [SourceStmt]?
+        if isKeyword("ELSIF") {
+            elseBody = [try elsifClause()]
+        } else if isKeyword("ELSE") {
+            advance()
+            elseBody = try statements { $0 == "END_IF" }
+        }
+        return SourceStmt(.ifThen(condition, thenBody, elseBody), line: at.line)
+    }
+
+    private mutating func argumentList() throws -> [SourceArgument] {
+        try expectSymbol("(")
+        var arguments: [SourceArgument] = []
+        if isSymbol(")") { advance(); return arguments }
+        var seen: Set<String> = []
+        while true {
+            guard current.kind == .identifier, peek().kind == .symbol, peek().text == ":=" else {
+                throw error("an argument is 'name := value'")
+            }
+            let label = advance().text
+            advance()   // :=
+            if !seen.insert(label.lowercased()).inserted {
+                throw error("'\(label)' is given twice")
+            }
+            arguments.append(SourceArgument(label: label, value: try expression()))
+            if isSymbol(",") { advance(); continue }
+            break
+        }
+        try expectSymbol(")")
+        return arguments
+    }
+
+    // MARK: Expressions
+
+    private mutating func expression() throws -> SourceExpr { try orExpression() }
+
+    private mutating func orExpression() throws -> SourceExpr {
+        var left = try xorExpression()
+        while isKeyword("OR") {
+            let token = advance()
+            left = SourceExpr(.binary("||", left, try xorExpression()), line: token.line)
+        }
+        return left
+    }
+
+    private mutating func xorExpression() throws -> SourceExpr {
+        var left = try andExpression()
+        while isKeyword("XOR") {
+            let token = advance()
+            left = SourceExpr(.binary("xor", left, try andExpression()), line: token.line)
+        }
+        return left
+    }
+
+    private mutating func andExpression() throws -> SourceExpr {
+        var left = try notExpression()
+        while isKeyword("AND") {
+            let token = advance()
+            left = SourceExpr(.binary("&&", left, try notExpression()), line: token.line)
+        }
+        return left
+    }
+
+    private mutating func notExpression() throws -> SourceExpr {
+        if isKeyword("NOT") {
+            let token = advance()
+            return SourceExpr(.unary("!", try notExpression()), line: token.line)
+        }
+        return try comparisonExpression()
+    }
+
+    private mutating func comparisonExpression() throws -> SourceExpr {
+        var left = try additiveExpression()
+        while isSymbol("=") || isSymbol("<>") || isSymbol("<") || isSymbol(">")
+                || isSymbol("<=") || isSymbol(">=") {
+            let token = advance()
+            let op: String
+            switch token.text {
+            case "=": op = "=="
+            case "<>": op = "!="
+            default: op = token.text
+            }
+            left = SourceExpr(.binary(op, left, try notExpression()), line: token.line)
+        }
+        return left
+    }
+
+    private mutating func additiveExpression() throws -> SourceExpr {
+        var left = try multiplicativeExpression()
+        while isSymbol("+") || isSymbol("-") {
+            let token = advance()
+            left = SourceExpr(.binary(token.text, left, try multiplicativeExpression()), line: token.line)
+        }
+        return left
+    }
+
+    private mutating func multiplicativeExpression() throws -> SourceExpr {
+        var left = try unaryExpression()
+        while isSymbol("*") || isSymbol("/") || isKeyword("MOD") {
+            let token = advance()
+            left = SourceExpr(.binary(token.text.uppercased() == "MOD" ? "%" : token.text,
+                                      left, try unaryExpression()), line: token.line)
+        }
+        return left
+    }
+
+    private mutating func unaryExpression() throws -> SourceExpr {
+        if isSymbol("-") {
+            let token = advance()
+            return SourceExpr(.unary("-", try unaryExpression()), line: token.line)
+        }
+        return try primaryExpression()
+    }
+
+    private mutating func primaryExpression() throws -> SourceExpr {
+        let token = current
+        if token.kind == .integer {
+            advance()
+            guard let value = Int(token.text) else {
+                throw error("the number \(token.text) is too large", at: token)
+            }
+            return SourceExpr(.integer(value), line: token.line)
+        }
+        if isKeyword("TRUE") || isKeyword("FALSE") {
+            advance()
+            return SourceExpr(.boolean(token.text.uppercased() == "TRUE"), line: token.line)
+        }
+        if isSymbol("(") {
+            advance()
+            let inner = try expression()
+            try expectSymbol(")")
+            return inner
+        }
+        if token.kind == .identifier {
+            advance()
+            var base = SourceExpr(.name(token.text), line: token.line)
+            while isSymbol(".") {
+                advance()
+                guard current.kind == .identifier else {
+                    throw error("expected an output name after '.'")
+                }
+                let member = advance()
+                base = SourceExpr(.member(base, member.text), line: member.line)
+            }
+            return base
+        }
+        throw error("expected an expression but found \(describe(token))")
+    }
+}
+
+// MARK: - Tokens
+
+struct STToken: Equatable {
+    enum Kind: Equatable { case identifier, integer, keyword, symbol, endOfFile }
+    var kind: Kind
+    var text: String
+    var line: Int
+    var column: Int
+}
+
+/// The lexer: identifiers and keywords (case-insensitive), integers, the operators of the subset, `(* … *)` and `//`
+/// comments.
+struct STLexer {
+    private let scalars: [Character]
+    private var index = 0
+    private var line = 1
+    private var column = 1
+
+    static let keywords: Set<String> = [
+        "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK",
+        "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
+        "IF", "THEN", "ELSIF", "ELSE", "END_IF",
+        "AND", "OR", "XOR", "NOT", "MOD", "AT",
+        "TRUE", "FALSE",
+        "BOOL", "INT", "REAL", "LREAL", "WORD",
+    ]
+
+    static let symbols = [":=", "<=", ">=", "<>", ";", ":", ",", "(", ")", ".", "%",
+                          "*", "/", "+", "-", "=", "<", ">"]
+
+    init(_ source: String) { scalars = Array(source) }
+
+    static func tokenize(_ source: String) throws -> [STToken] {
+        var lexer = STLexer(source)
+        return try lexer.run()
+    }
+
+    private var current: Character? { index < scalars.count ? scalars[index] : nil }
+    private func peek(_ offset: Int) -> Character? {
+        let i = index + offset
+        return i < scalars.count ? scalars[i] : nil
+    }
+    private mutating func advance() -> Character? {
+        guard index < scalars.count else { return nil }
+        let c = scalars[index]
+        index += 1
+        if c == "\n" { line += 1; column = 1 } else { column += 1 }
+        return c
+    }
+
+    private mutating func run() throws -> [STToken] {
+        var tokens: [STToken] = []
+        while true {
+            try skipTrivia()
+            guard let c = current else { break }
+            let startLine = line, startColumn = column
+            if c.isLetter || c == "_" {
+                var text = ""
+                while let d = current, d.isLetter || d.isNumber || d == "_" { text.append(advance()!) }
+                let upper = text.uppercased()
+                tokens.append(STToken(kind: Self.keywords.contains(upper) ? .keyword : .identifier,
+                                      text: Self.keywords.contains(upper) ? upper : text,
+                                      line: startLine, column: startColumn))
+            } else if c.isNumber {
+                var text = ""
+                while let d = current, d.isNumber { text.append(advance()!) }
+                tokens.append(STToken(kind: .integer, text: text, line: startLine, column: startColumn))
+            } else if let symbol = Self.symbols.first(where: { symbol in
+                var i = index
+                for ch in symbol {
+                    guard i < scalars.count, scalars[i] == ch else { return false }
+                    i += 1
+                }
+                return true
+            }) {
+                for _ in symbol { _ = advance() }
+                tokens.append(STToken(kind: .symbol, text: symbol, line: startLine, column: startColumn))
+            } else {
+                throw SourceError(line: line, column: column, message: "unexpected character '\(c)'")
+            }
+        }
+        tokens.append(STToken(kind: .endOfFile, text: "", line: line, column: column))
+        return tokens
+    }
+
+    private mutating func skipTrivia() throws {
+        while let c = current {
+            if c == " " || c == "\t" || c.isNewline {
+                _ = advance()
+            } else if c == "/" && peek(1) == "/" {
+                while let d = current, !d.isNewline { _ = advance() }
+            } else if c == "(" && peek(1) == "*" {
+                let startLine = line
+                _ = advance(); _ = advance()
+                var depth = 1
+                while let d = current {
+                    if d == "(" && peek(1) == "*" {
+                        _ = advance(); _ = advance()
+                        depth += 1
+                    } else if d == "*" && peek(1) == ")" {
+                        _ = advance(); _ = advance()
+                        depth -= 1
+                        if depth == 0 { break }
+                    } else {
+                        _ = advance()
                     }
-                    value = literal
                 }
-                if unit.variables.contains(where: { $0.name == name }) || unit.pins.contains(where: { $0.name == name }) {
-                    throw failure(decl, "'\\(name)' is declared twice")
-                }
-                unit.variables.append(SourceVariable(name: name, initial: value, line: line(decl)))
+                if depth > 0 { throw SourceError(line: startLine, message: "an unterminated (* comment") }
+            } else {
+                return
             }
-        }
-
-        func integerArgument(_ attr: AttributeSyntax) -> Int? {
-            guard case .argumentList(let arguments) = attr.arguments,
-                  let first = arguments.first,
-                  let literal = first.expression.as(IntegerLiteralExprSyntax.self) else { return nil }
-            return Int(literal.literal.text)
-        }
-
-        func booleanLiteral(_ expr: ExprSyntax) -> Bool? {
-            guard let literal = expr.as(BooleanLiteralExprSyntax.self) else { return nil }
-            return literal.literal.text == "true"
-        }
-
-        // MARK: Functions and statements
-
-        mutating func function(_ decl: FunctionDeclSyntax) throws -> SourceFunction {
-            guard decl.signature.parameterClause.parameters.isEmpty else {
-                throw failure(decl, "a function takes no parameters in this subset; a macro's values are its properties")
-            }
-            if let returnClause = decl.signature.returnClause {
-                throw failure(returnClause, "a function returns nothing in this subset")
-            }
-            guard let body = decl.body else {
-                throw failure(decl, "'\\(decl.name.text)' has no body")
-            }
-            if body.rightBrace.presence == .missing {
-                throw failure(decl, "'\\(decl.name.text)' is not closed with '}'")
-            }
-            return SourceFunction(name: decl.name.text, body: try statements(body.statements), line: line(decl))
-        }
-
-        mutating func statements(_ list: CodeBlockItemListSyntax) throws -> [SourceStmt] {
-            var statements: [SourceStmt] = []
-            for item in list {
-                if let decl = item.item.as(DeclSyntax.self) {
-                    guard let variable = decl.as(VariableDeclSyntax.self) else {
-                        throw failure(decl, "only 'let' belongs inside 'scan'")
-                    }
-                    statements.append(try letBinding(variable))
-                } else if let expr = item.item.as(ExprSyntax.self) {
-                    statements.append(try expressionStatement(expr))
-                } else if let stmt = item.item.as(StmtSyntax.self) {
-                    statements.append(try statement(stmt))
-                } else {
-                    throw failure(item, "this statement is not supported")
-                }
-            }
-            return statements
-        }
-
-        mutating func letBinding(_ decl: VariableDeclSyntax) throws -> SourceStmt {
-            guard decl.bindingSpecifier.text == "let" else {
-                throw failure(decl, "a local 'var' is not a block yet: use 'let', or a stored property for state")
-            }
-            guard decl.bindings.count == 1, let binding = decl.bindings.first,
-                  let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
-                  let initializer = binding.initializer else {
-                throw failure(decl, "expected 'let name = value'")
-            }
-            return SourceStmt(.bind(pattern.identifier.text, try expression(initializer.value)), line: line(decl))
-        }
-
-        /// An expression used as a statement: an assignment, or an `if` (which is an expression in Swift's grammar).
-        mutating func expressionStatement(_ expr: ExprSyntax) throws -> SourceStmt {
-            if let seq = expr.as(SequenceExprSyntax.self) {
-                let elements = Array(seq.elements)
-                // `beep = enable && pulse(ms: 500)` is one operator sequence: [beep, =, enable, &&, pulse]. The right
-                // side is every element after the `=`, folded like any other expression.
-                if elements.count >= 3, elements[1].is(AssignmentExprSyntax.self) {
-                    guard let target = elements[0].as(DeclReferenceExprSyntax.self) else {
-                        throw failure(seq, "the left side of an assignment has to be a name")
-                    }
-                    let value = try fold(elements: Array(elements[2...]))
-                    return SourceStmt(.assign(target.baseName.text, value), line: line(seq))
-                }
-                throw failure(expr, "an expression on its own does nothing; assign it to a name")
-            }
-            if let ifExpr = expr.as(IfExprSyntax.self) {
-                return try ifStatement(ifExpr)
-            }
-            if let call = expr.as(FunctionCallExprSyntax.self),
-               let member = call.calledExpression.as(MemberAccessExprSyntax.self),
-               member.declName.baseName.text == "set",
-               let baseExpr = member.base,
-               let base = baseExpr.as(DeclReferenceExprSyntax.self) {
-                let arguments = Array(call.arguments)
-                guard arguments.count == 2,
-                      let pinLiteral = arguments[0].expression.as(IntegerLiteralExprSyntax.self),
-                      let pin = Int(pinLiteral.literal.text) else {
-                    throw failure(call, "set takes a pin number and a value: set(0, true)")
-                }
-                return SourceStmt(.blockSet(base.baseName.text, pin, try expression(arguments[1].expression)), line: line(call))
-            }
-            throw failure(expr, "an expression on its own does nothing; assign it to a name")
-        }
-
-        mutating func ifStatement(_ ifExpr: IfExprSyntax) throws -> SourceStmt {
-            guard ifExpr.conditions.count == 1, let element = ifExpr.conditions.first,
-                  case .expression(let conditionSyntax) = element.condition else {
-                throw failure(ifExpr, "the condition must be one Boolean expression, without 'let' or 'case'")
-            }
-            let condition = try expression(conditionSyntax)
-            let thenBody = try statements(ifExpr.body.statements)
-            var elseBody: [SourceStmt]?
-            if let elseBodySyntax = ifExpr.elseBody {
-                switch elseBodySyntax {
-                case .codeBlock(let block): elseBody = try statements(block.statements)
-                case .ifExpr(let nested): elseBody = [try ifStatement(nested)]
-                }
-            }
-            return SourceStmt(.ifThen(condition, thenBody, elseBody), line: line(ifExpr))
-        }
-
-        mutating func statement(_ stmt: StmtSyntax) throws -> SourceStmt {
-            if let ret = stmt.as(ReturnStmtSyntax.self) {
-                if ret.expression != nil {
-                    throw failure(ret, "a function returns nothing; drop the value after 'return'")
-                }
-                return SourceStmt(.returnVoid, line: line(ret))
-            }
-            if let exprStmt = stmt.as(ExpressionStmtSyntax.self) {
-                return try expressionStatement(exprStmt.expression)
-            }
-            if let ifExpr = stmt.as(IfExprSyntax.self) {
-                return try ifStatement(ifExpr)
-            }
-            throw failure(stmt, "this statement is not supported")
-        }
-
-        func isAssignment(_ seq: SequenceExprSyntax) -> Bool {
-            let elements = Array(seq.elements)
-            return elements.count == 3 && elements[1].is(AssignmentExprSyntax.self)
-        }
-
-        // MARK: Expressions
-
-        mutating func expression(_ expr: ExprSyntax) throws -> SourceExpr {
-            if let seq = expr.as(SequenceExprSyntax.self) {
-                return try fold(seq)
-            }
-            if let decl = expr.as(DeclReferenceExprSyntax.self) {
-                return SourceExpr(.name(decl.baseName.text), line: line(decl))
-            }
-            if let literal = expr.as(IntegerLiteralExprSyntax.self) {
-                guard let value = Int(literal.literal.text) else {
-                    throw failure(literal, "the number \(literal.literal.text) is too large")
-                }
-                return SourceExpr(.integer(value), line: line(literal))
-            }
-            if let literal = expr.as(BooleanLiteralExprSyntax.self) {
-                return SourceExpr(.boolean(literal.literal.text == "true"), line: line(literal))
-            }
-            if let prefix = expr.as(PrefixOperatorExprSyntax.self) {
-                return SourceExpr(.unary(prefix.operator.text, try expression(prefix.expression)), line: line(prefix))
-            }
-            if let member = expr.as(MemberAccessExprSyntax.self) {
-                guard let base = member.base else {
-                    throw failure(member, "expected a name before '.\\(member.declName.baseName.text)'")
-                }
-                let name = member.declName.baseName.text
-                guard name == "result" || !name.isEmpty else {
-                    throw failure(member, "unknown property '\\(name)'")
-                }
-                return SourceExpr(.member(try expression(base), name), line: line(member))
-            }
-            if let call = expr.as(FunctionCallExprSyntax.self) {
-                // `Block.IAdd(...)`: the library of block constructors. The name flattens to "Block.IAdd".
-                var name: String?
-                if let called = call.calledExpression.as(DeclReferenceExprSyntax.self) {
-                    name = called.baseName.text
-                } else if let member = call.calledExpression.as(MemberAccessExprSyntax.self),
-                          let baseExpr = member.base,
-                          let base = baseExpr.as(DeclReferenceExprSyntax.self), base.baseName.text == "Block" {
-                    name = "Block.\(member.declName.baseName.text)"
-                }
-                guard let name else { throw failure(call, "only plain calls and 'Block.<Type>(...)' are understood") }
-                var arguments: [SourceArgument] = []
-                for argument in call.arguments {
-                    arguments.append(SourceArgument(label: argument.label?.text,
-                                                    value: try expression(argument.expression)))
-                }
-                return SourceExpr(.call(name, arguments), line: line(call))
-            }
-            if let tuple = expr.as(TupleExprSyntax.self), tuple.elements.count == 1,
-               let only = tuple.elements.first {
-                return try expression(only.expression)
-            }
-            throw failure(expr, "'\(expr.trimmedDescription)' is not an expression this subset understands")
-        }
-
-        /// Folds a chain of operators (`a && b || c`) into a tree by precedence, left-associatively.
-        mutating func fold(_ seq: SequenceExprSyntax) throws -> SourceExpr {
-            try fold(elements: Array(seq.elements))
-        }
-
-        mutating func fold(elements: [ExprSyntax]) throws -> SourceExpr {
-            let seq = elements.first ?? ExprSyntax(DeclReferenceExprSyntax(baseName: .identifier("")))
-            var operands: [ExprSyntax] = []
-            var operators: [(text: String, line: Int)] = []
-            for element in elements {
-                if let op = element.as(BinaryOperatorExprSyntax.self) {
-                    operators.append((op.operator.text, line(op)))
-                } else if element.is(AssignmentExprSyntax.self) {
-                    throw failure(element, "an assignment is a statement, not an expression")
-                } else {
-                    operands.append(element)
-                }
-            }
-            guard operands.count == operators.count + 1 else {
-                throw failure(seq, "could not read this expression")
-            }
-            var nextOperand = 0
-            var nextOperator = 0
-
-            func precedence(_ text: String) -> Int? {
-                switch text {
-                case "||": return 1
-                case "&&": return 2
-                case "==", "!=": return 3
-                case "<", ">", "<=", ">=": return 4
-                case "+", "-": return 5
-                case "*", "/", "%": return 6
-                default: return nil
-                }
-            }
-
-            func parse(minimum: Int) throws -> SourceExpr {
-                var left = try expression(operands[nextOperand])
-                nextOperand += 1
-                while nextOperator < operators.count {
-                    let (text, opLine) = operators[nextOperator]
-                    guard let prec = precedence(text), prec >= minimum else { break }
-                    nextOperator += 1
-                    let right = try parse(minimum: prec + 1)
-                    left = SourceExpr(.binary(text, left, right), line: opLine)
-                }
-                return left
-            }
-
-            let result = try parse(minimum: 0)
-            guard nextOperand == operands.count else {
-                throw failure(seq, "could not read this expression")
-            }
-            return result
         }
     }
 }

@@ -251,14 +251,17 @@ public final class CxxSimulationCore {
                 // traps on a value that does not fit, which turns a hand-edited project into a crash on open.
                 id: Int32(clamping: mod.id),
                 order: Int32(clamping: mod.order),
-                threadId: Int32(clamping: mod.threadId),
+                // The compiler drops non-macro thread-0 blocks; so does the simulator, or the two disagree.
+                // Macro sheets stay on thread 0: that is where the simulator runs their bodies.
+                threadId: Int32(clamping: (mod.threadId == 0 && !mod.page.hasPrefix("*")) ? -1 : mod.threadId),
                 kind: Int32(kind.rawValue),
                 inCount: Int32(block.inPins.count),
                 paramCount: Int32(block.paramPins.count),
                 outCount: Int32(block.outPins.count),
                 initialOut: nil, initialIn: nil,
                 variant: setup.variant,
-                config: (config[0], config[1], config[2], config[3])))
+                config: (config[0], config[1], config[2], config[3]),
+                hasEnable: BlockLabels.hasEnablePin(for: mod.guid) ? 1 : 0))
         }
 
         let inFlat = UnsafeMutablePointer<WirebenchValue>.allocate(capacity: max(1, totalIn))
@@ -420,12 +423,13 @@ public final class CxxSimulationCore {
         wirebench_sim_thread_interval_ms(sim, Int32(clamping: threadId))
     }
 
-    /// Module ids on a thread, in the order the core runs them: ascending `ORDER`, ties in runtime order.
+    /// Module ids on a thread, in the order the core runs them: ascending `ORDER`, then descending module id — the
+    /// tie-break the hardware compiler uses, so a sheet with two blocks on the same ORDER simulates and builds alike.
     public func executionOrder(forThread threadId: Int) -> [Int] {
-        runtimeModules.enumerated()
-            .filter { $0.element.threadId == threadId }
-            .sorted { ($0.element.order, $0.offset) < ($1.element.order, $1.offset) }
-            .map(\.element.id)
+        runtimeModules
+            .filter { $0.threadId == threadId }
+            .sorted { ($0.order, -$0.id) < ($1.order, -$1.id) }
+            .map(\.id)
     }
 
     /// The caller/subpage interfaces of every macro in a project, in the shape the core expects.

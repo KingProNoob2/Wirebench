@@ -134,7 +134,7 @@ public final class AppModel: @unchecked Sendable {
         isRestoringUndo = false
         engine = installEngine(project: snapshot.project)
         refreshSnapshots()
-        isDocumentEdited = true
+        isDocumentEdited = hasSignificantChanges
     }
     public var selectedPage: String = "main"
     public var selectedModuleId: Int? {
@@ -580,8 +580,13 @@ public final class AppModel: @unchecked Sendable {
         case newProject
         case open
         case openURL(URL)
+        /// Replace the document with a compiled project (the editor's Open in Wirebench).
+        case adopt
         case quit
     }
+
+    /// The project a pending Open in Wirebench will install once the save question is answered.
+    private var pendingAdoptProject: PCCProject?
 
     /// The answer to the save question.
     public enum UnsavedChoice: Equatable, Sendable {
@@ -639,6 +644,8 @@ public final class AppModel: @unchecked Sendable {
 
     private func performNewProject() {
         pause()
+        swiftSource = ""
+
         let newProj = PCCProject(
             name: "Untitled",
             profile: Self.newProjectProfile,
@@ -652,6 +659,8 @@ public final class AppModel: @unchecked Sendable {
         self.currentFileURL = nil
         self.selectedPage = "main"
         self.selectedModuleId = nil
+        selectedWire = nil
+        configuringModuleId = nil
         clearAnnotationSelection()
         clearedPinValues = [:]
         self.engine = installEngine(project: newProj)
@@ -677,6 +686,8 @@ public final class AppModel: @unchecked Sendable {
         self.currentFileURL = nil
         self.selectedPage = compiled.pages.first?.caption ?? "main"
         self.selectedModuleId = nil
+        selectedWire = nil
+        configuringModuleId = nil
         clearAnnotationSelection()
         clearedPinValues = [:]
         self.engine = installEngine(project: compiled)
@@ -695,6 +706,12 @@ public final class AppModel: @unchecked Sendable {
             let parser = PCCParser()
             // A `SystemCmd` block that is only configuration becomes an entry of the PLC configuration; one in the circuit stays a block.
             let proj = PLCConfiguration.extracting(try parser.parse(fileAt: url))
+            if !proj.profile.isEmpty, ProfileRegistry.builtIn.profile(named: proj.profile) == nil {
+                presentMessage(title: "Unknown profile",
+                               message: "This project asks for the profile '\(proj.profile)', which this build does not know. "
+                                   + "Its threads and periods fall back to the default profile.",
+                               kind: .warning)
+            }
             isRestoringUndo = true
             self.project = proj
             // A new document means new meanings for the same module ids, and `ModulePinCatalog`
@@ -706,6 +723,9 @@ public final class AppModel: @unchecked Sendable {
             self.currentFileURL = url
             self.selectedPage = proj.pages.first?.caption ?? "main"
             self.selectedModuleId = nil
+            selectedWire = nil
+            configuringModuleId = nil
+            swiftSource = ""
             clearAnnotationSelection()
             // Module ids mean other blocks in another document.
             clearedPinValues = [:]
@@ -760,6 +780,7 @@ public final class AppModel: @unchecked Sendable {
         case .discard:
             continueAfter(intent)
         case .cancel:
+            pendingAdoptProject = nil
             finishQuit(intent, terminate: false)
         case .save:
             if let url = currentFileURL {
@@ -782,9 +803,18 @@ public final class AppModel: @unchecked Sendable {
     /// The save panel was dismissed without a destination: the intent it was carrying is abandoned.
     @MainActor
     public func savePanelWasCancelled() {
+        pendingAdoptProject = nil
         guard let intent = intentAwaitingSave else { return }
         intentAwaitingSave = nil
         finishQuit(intent, terminate: false)
+    }
+
+    /// Replaces the document with a compiled project, asking first when there is unsaved work — the same question New
+    /// and Open ask, and the same undo history reset once the answer is discard or save.
+    @MainActor
+    public func requestAdopt(_ project: PCCProject) {
+        pendingAdoptProject = project
+        requestProjectReplacement(.adopt)
     }
 
     /// Asks first when there is something to lose.
@@ -804,6 +834,11 @@ public final class AppModel: @unchecked Sendable {
         case .newProject: performNewProject()
         case .open: pendingFilePanel = .open
         case .openURL(let url): loadProject(url: url)
+        case .adopt:
+            if let project = pendingAdoptProject {
+                pendingAdoptProject = nil
+                adoptCompiledProject(project)
+            }
         case .quit: finishQuit(intent, terminate: true)
         }
     }
@@ -1023,6 +1058,9 @@ public final class AppModel: @unchecked Sendable {
         for id in onPage { _ = project.deleteModule(id: id) }
         // One edit and one engine rebuild for the whole group, not one per block.
         self.project = project
+        if let key = selectedWire, onPage.contains(key.outModule) || onPage.contains(key.inModule) {
+            selectedWire = nil
+        }
         self.selectedModuleId = nil
         if let configuringModuleId, onPage.contains(configuringModuleId) { self.configuringModuleId = nil }
         self.engine = installEngine(project: project)
@@ -1185,7 +1223,10 @@ public final class AppModel: @unchecked Sendable {
         let serializer = PCCSerializer()
         let xmlString = serializer.serialize(project: project)
         try xmlString.write(to: url, atomically: true, encoding: .utf8)
+        // The path changed, and the project setter would record that as an edit; a save is not an undo step.
+        isRestoringUndo = true
         self.project = project
+        isRestoringUndo = false
         self.currentFileURL = url
         self.isDocumentEdited = false
         savedContent = Self.content(of: project)
@@ -1488,12 +1529,12 @@ public final class AppModel: @unchecked Sendable {
     }
 
     /// Light, dark or follow the system. Remembered between launches.
-    /// The PLC Swift editor's buffer. It lives here, not in the window's state, so closing the window and opening it
+    /// The Structured Text editor's buffer. It lives here, not in the window's state, so closing the window and opening it
     /// again brings back what was written instead of the template; it is kept across launches like the editor's settings.
-    public var swiftSource: String = UserDefaults.standard.string(forKey: "swiftSource") ?? "" {
+    public var swiftSource: String = UserDefaults.standard.string(forKey: "structuredTextSource") ?? "" {
         didSet {
             guard swiftSource != oldValue else { return }
-            UserDefaults.standard.set(swiftSource, forKey: "swiftSource")
+            UserDefaults.standard.set(swiftSource, forKey: "structuredTextSource")
         }
     }
 
@@ -2053,6 +2094,10 @@ public final class AppModel: @unchecked Sendable {
         project.graphics.removeAll { $0.page == caption }
         project.pages.remove(at: index)
         self.project = project
+        if let key = selectedWire, project.modules.first(where: { $0.id == key.outModule }) == nil
+            || project.modules.first(where: { $0.id == key.inModule }) == nil {
+            selectedWire = nil
+        }
 
         if selectedPage == caption {
             selectedPage = project.pages.first?.caption ?? "main"
