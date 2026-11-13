@@ -601,6 +601,12 @@ struct StructuredTextTests {
              END_PROGRAM
              """, "read an element"),
             ("""
+             PROGRAM P
+             VAR a : ARRAY[0..3] OF INT; n : INT := 0; END_VAR
+                 n := a[4];
+             END_PROGRAM
+             """, "outside a[0..3]"),
+            ("""
              FUNCTION_BLOCK F
              VAR_INPUT x : BOOL; END_VAR
              VAR a : ARRAY[0..3] OF INT; END_VAR

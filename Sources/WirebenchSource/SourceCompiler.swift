@@ -874,6 +874,20 @@ struct Lowering {
         }
     }
 
+    /// A literal index is checked against the declaration; a computed one is left to the block's runtime range check.
+    private func checkArrayBounds(_ index: NumExpr, array: SourceArray, line: Int) throws {
+        let value: Int?
+        switch index {
+        case .constant(.int32(let constant)): value = Int(constant)
+        case .constant(.int64(let constant)): value = Int(constant)
+        default: value = nil
+        }
+        if let value, value < array.lower || value > array.upper {
+            throw SourceError(line: line,
+                              message: "index \(value) is outside \(array.name)[\(array.lower)..\(array.upper)]")
+        }
+    }
+
     /// The array blocks are 0-based; an `ARRAY[5..7]` element at `5` is slot 0.
     private func offsetArrayIndex(_ index: NumExpr, by array: SourceArray, type: NumType) -> NumExpr {
         guard array.lower != 0 else { return index }
@@ -990,6 +1004,7 @@ struct Lowering {
                 if array.type == .long, valueType == .real {
                     throw SourceError(line: statement.line, message: "'\(name)' is a LONG array; a REAL cannot be stored in it")
                 }
+                try checkArrayBounds(index, array: array, line: statement.line)
                 scan.arrayWrites.append(ArrayWrite(array: name, index: offsetArrayIndex(index, by: array, type: indexType),
                                                    value: value, line: statement.line))
             case .block(let body):
@@ -1138,6 +1153,7 @@ struct Lowering {
             guard indexType != .real else {
                 throw SourceError(line: expression.line, message: "an array index is an integer, not REAL")
             }
+            try checkArrayBounds(index, array: array, line: expression.line)
             let type: NumType = array.type == .int ? .int : .long
             return .number(.arrayRead(arrayName, offsetArrayIndex(index, by: array, type: indexType), type), type)
         case .unary(let op, let operand):

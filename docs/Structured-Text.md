@@ -31,9 +31,10 @@ END_PROGRAM
   and one `8xDO`; a variable is read at the scan's start.
 - **Arrays.** `a : ARRAY[0..15] OF INT;` declares an array in the PLC data area (INT or LONG; there is no
   `CreateFloatArray` block). `a[3] := 5;` writes a slot and `x := a[3];` reads one; the declared lower bound is
-  subtracted because the array blocks are 0-based. A read sees the value the scan began with; writes happen after the
-  scan's other work, in source order. At most 16 arrays (the PLC's Id range 0–15), and only in a `PROGRAM`: a function
-  block's array would share those Ids with the rest of the PLC data area.
+  subtracted because the array blocks are 0-based. A literal index outside the declaration is a compile error; a
+  computed one is range-checked by the block at run time. A read sees the value the scan began with; writes happen
+  after the scan's other work, in source order. At most 16 arrays (the PLC's Id range 0–15), and only in a
+  `PROGRAM`: a function block's array would share those Ids with the rest of the PLC data area.
 - **State.** A value declared in `VAR` without an address is a stored variable — a `BoolVar`/`IntVar`/`LongVar`/
   `FloatVar` plus the `Set` that writes it. It becomes visible from the next scan, exactly like Dirigo's own clocked
   behaviour. An initialiser (`:= 5`) is the variable's configured value (`INIT_VALUE`).
@@ -48,7 +49,8 @@ END_PROGRAM
   `CASE selector OF 1: … 2, 3: … 5..7: … ELSE … END_CASE;`, and
   `FOR i := 1 TO n [BY step] DO … END_FOR;`. FOR bounds and step must be whole-number literals and the body is
   unrolled at compile time (at most 256 iterations); the index is a compile-time binding, not a runtime variable after
-  the loop. Reads of variables assigned unconditionally earlier in the unrolled body are substituted with those
+  the loop (a read of `i` after `END_FOR` yields its value at the start of the scan, not the final index). Reads of
+  variables assigned unconditionally earlier in the unrolled body are substituted with those
   expressions, so `n := n + 1` counts correctly; a conditional write is not substituted (it falls back to the
   variable's value at the start of the scan). `WHILE` and `REPEAT` are refused: a loop over a live condition cannot be
   expressed as dataflow — use FOR with constant bounds or a counter.

@@ -422,6 +422,9 @@ public struct SourceParser {
             throw error("only INT and LONG arrays are supported (there is no CreateFloatArray block)")
         }
         guard lower <= upper else { throw error("an ARRAY range must count upwards") }
+        guard abs(lower) <= 1_000_000, abs(upper) <= 1_000_000 else {
+            throw error("an ARRAY bound is too large; keep it within ±1,000,000")
+        }
         guard upper - lower + 1 <= 4096 else { throw error("an ARRAY of \(upper - lower + 1) elements is too large") }
         return SourceArray(name: name, lower: lower, upper: upper, type: type, line: line)
     }
