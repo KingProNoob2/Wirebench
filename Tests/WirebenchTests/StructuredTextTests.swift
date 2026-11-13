@@ -172,6 +172,18 @@ struct StructuredTextTests {
         #expect(!core.inPins(moduleId: out.id)[1].asBool, "the macro inverts")
     }
 
+    @Test("The editor colours the whole ST vocabulary, not only the subset the compiler lowers")
+    func highlightVocabulary() {
+        let source = "CASE x OF\n  FOR i := 1 TO 10 DO\n"
+        let text = source as NSString
+        let words = SourceHighlighter.spans(in: source)
+            .filter { $0.kind == .keyword }
+            .map { text.substring(with: NSRange(location: $0.location, length: $0.length)) }
+        for word in ["CASE", "OF", "FOR", "TO", "DO"] {
+            #expect(words.contains(word), "\(word) should be coloured")
+        }
+    }
+
     @Test("A program is a .pcc that survives a save, and the hardware compiler accepts it")
     func emittedProjectIsReal() throws {
         let compiled = try SourceCompiler().compile(Self.gate)

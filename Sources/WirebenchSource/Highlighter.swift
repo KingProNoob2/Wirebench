@@ -33,12 +33,20 @@ public struct SyntaxSpan: Sendable, Equatable {
 /// accented identifier cannot shift a colour onto the wrong characters.
 public enum SourceHighlighter {
     private static let keywords: Set<String> = [
-        "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK",
-        "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
-        "IF", "THEN", "ELSIF", "ELSE", "END_IF",
+        "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK", "FUNCTION", "END_FUNCTION",
+        "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "VAR_IN_OUT", "VAR_TEMP", "VAR_STAT",
+        "VAR_EXTERNAL", "CONSTANT", "RETAIN", "NON_RETAIN", "PERSISTENT",
+        "IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE",
+        "FOR", "TO", "BY", "DO", "END_FOR", "WHILE", "END_WHILE", "REPEAT", "UNTIL", "END_REPEAT",
+        "RETURN", "EXIT", "CONTINUE", "TYPE", "END_TYPE", "STRUCT", "END_STRUCT", "ARRAY",
         "AND", "OR", "XOR", "NOT", "MOD", "AT", "TRUE", "FALSE",
+        "INTERFACE", "END_INTERFACE", "METHOD", "END_METHOD",
     ]
-    private static let types: Set<String> = ["BOOL", "INT", "REAL", "LREAL", "WORD"]
+    private static let types: Set<String> = [
+        "BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT", "ULINT",
+        "REAL", "LREAL", "BYTE", "WORD", "DWORD", "LWORD", "TIME", "DATE", "TOD", "DT",
+        "STRING", "WSTRING", "CHAR", "WCHAR",
+    ]
 
     public static func spans(in source: String) -> [SyntaxSpan] {
         let characters = Array(source)

@@ -10,6 +10,8 @@ struct SourceEditor: NSViewRepresentable {
     @Binding var text: String
     var spans: [SyntaxSpan]
     var selectedLine: Int?
+    /// Lines a diagnostic points at; they get a red mark in the text, not only a row in the report.
+    var errorLines: [Int] = []
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -65,6 +67,9 @@ struct SourceEditor: NSViewRepresentable {
         if spans != context.coordinator.applied {
             context.coordinator.apply(spans: spans)
         }
+        if errorLines != context.coordinator.appliedErrors {
+            context.coordinator.applyErrors(lines: errorLines)
+        }
         context.coordinator.ruler?.needsDisplay = true
         if let line = selectedLine, line != context.coordinator.selectedLine {
             context.coordinator.selectedLine = line
@@ -80,6 +85,7 @@ struct SourceEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         weak var ruler: LineNumberRuler?
         var applied: [SyntaxSpan] = []
+        var appliedErrors: [Int] = []
         var selectedLine: Int?
         private var isApplying = false
 
@@ -91,6 +97,40 @@ struct SourceEditor: NSViewRepresentable {
             guard !isApplying, let textView else { return }
             parent.text = textView.string
             ruler?.needsDisplay = true
+        }
+
+        /// Marks each error line: a pale red band and a red underline, so the report and the text agree.
+        func applyErrors(lines: [Int]) {
+            guard let textView, let layoutManager = textView.layoutManager else { return }
+            let string = textView.string as NSString
+            for line in Set(appliedErrors) {
+                guard line > 0 else { continue }
+                var index = 0, number = 1
+                while number < line && index < string.length {
+                    index = NSMaxRange(string.lineRange(for: NSRange(location: index, length: 0)))
+                    number += 1
+                }
+                guard index < string.length || (string.length == 0 && line == 1) else { continue }
+                let range = string.lineRange(for: NSRange(location: min(index, string.length), length: 0))
+                layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
+                layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: range)
+                layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: range)
+            }
+            appliedErrors = lines
+            for line in Set(lines) where line > 0 {
+                var index = 0, number = 1
+                while number < line && index < string.length {
+                    index = NSMaxRange(string.lineRange(for: NSRange(location: index, length: 0)))
+                    number += 1
+                }
+                guard index < string.length || (string.length == 0 && line == 1) else { continue }
+                let range = string.lineRange(for: NSRange(location: min(index, string.length), length: 0))
+                layoutManager.addTemporaryAttributes([
+                    .backgroundColor: NSColor.systemRed.withAlphaComponent(0.10),
+                    .underlineColor: NSColor.systemRed.withAlphaComponent(0.7),
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                ], forCharacterRange: range)
+            }
         }
 
         func apply(spans: [SyntaxSpan]) {

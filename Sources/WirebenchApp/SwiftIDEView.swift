@@ -58,7 +58,8 @@ struct SwiftIDEView: View {
 
     private var editorPane: some View {
         VStack(spacing: 0) {
-            SourceEditor(text: $model.swiftSource, spans: spans, selectedLine: jumpLine)
+            SourceEditor(text: $model.swiftSource, spans: spans, selectedLine: jumpLine,
+                         errorLines: diagnostics.map(\.line))
             Divider()
             HStack(spacing: 8) {
                 Circle()
