@@ -24,6 +24,8 @@ public struct MaraflowImporter {
         var outputs: [Int: Int] = [:]
         /// Outputs whose logical value is inverted (Nand, Nor, Xnor, Ne, Ge, Le).
         var invertedOutputs: Set<Int> = []
+        /// Target inputs that Maraflow has no pin for but which must be live for the block to run (PulseGen's Act).
+        var inputConstants: [Int: PinValue] = [:]
         var note: String?
 
         static func identity(_ target: String, note: String? = nil) -> Mapping {
@@ -205,6 +207,9 @@ public struct MaraflowImporter {
         if mapping.invertedOutputs.isEmpty == false {
             approximated["\(block.typeName) (inverted output)", default: 0] += 1
         }
+        for (index, value) in mapping.inputConstants where module.inPins.indices.contains(index) {
+            module.inPins[index].value = value
+        }
         if let note = mapping.note { approximated[note, default: 0] += 1 }
         return module
     }
@@ -295,6 +300,27 @@ public struct MaraflowImporter {
         add("IO.DO", Mapping(target: "8xDO", inputs: [0: 0, 1: 1], outputs: [0: 0]))
         add("IO.AI", Mapping(target: "8xAI", outputs: [0: 0]))
 
+        add("Main.Timers.Timer", Mapping(target: "Timer", inputs: [0: 0, 1: 1], params: [2: 0],
+                                         outputs: [0: 0, 1: 1],
+                                         note: "Timer PT mapped to Dly; Q/ET to the timer outputs"))
+        add("Main.Timers.SinglePulse", Mapping(target: "SinglePulse", inputs: [0: 0, 1: 1], outputs: [0: 1],
+                                               note: "SinglePulse In mapped to Tr; TOn defaults to one cycle"))
+        add("Main.Timers.PulseGen", Mapping(target: "PulseGen", inputs: [0: 0], params: [1: 0, 2: 1],
+                                            outputs: [0: 1], inputConstants: [1: .bool(true)],
+                                            note: "PulseGen runs with Act held true; THi/TLo to TOn/TOff"))
+        add("Main.Filters.Debounce", Mapping(target: "DelayFilter", inputs: [0: 0, 1: 1], params: [2: 0],
+                                             outputs: [0: 1],
+                                             note: "Debounce mapped to DelayFilter (Tms counts cycles)"))
+        add("Main.Timers.DecodeDate", Mapping(target: "DecodeDate", inputs: [0: 0, 1: 1],
+                                              outputs: [0: 2, 1: 1, 2: 0],
+                                              note: "DecodeDate keeps date fields; hour/minute/second are dropped"))
+        add("Main.Timers.EncodeDate", Mapping(target: "EncodeDate", inputs: [0: 0, 1: 3, 2: 2, 3: 1],
+                                              outputs: [0: 0],
+                                              note: "EncodeDate keeps date fields; time fields are dropped"))
+        add("IO.AO", Mapping(target: "2xAO", inputs: [0: 0, 1: 1], outputs: [0: 0],
+                             note: "AO drives channel 0 of 2xAO; its Ok output is dropped"))
+        add("IO.Encoder", Mapping(target: "IRC", inputs: [0: 0, 1: 1], outputs: [0: 0, 1: 1],
+                                  note: "Encoder mapped to IRC; Vel lands on Null"))
         add("Visual.Segment", .identity("Segment"))
         add("Visual.Value", Mapping(target: "Value", inputs: [0: 0]))
         add("Visual.Vars.BoolVar", Mapping(target: "BoolVar", outputs: [0: 0]))

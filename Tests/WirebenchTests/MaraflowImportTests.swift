@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import WirebenchCore
 @testable import WirebenchLibrary
+@testable import WirebenchEngine
 @testable import WirebenchModel
 
 /// Opening a Maraflow `.mfl`: Java properties XML, its block definitions and wires.
@@ -78,25 +79,25 @@ struct MaraflowImportTests {
             ("page.0.graphicCount", "0"),
             ("page.0.rungCount", "0"),
         ]
-        entries += block("page.0.block.0.", id: "a", definition: "Bool.And", type: "And", name: "And1",
+        entries += Self.block("page.0.block.0.", id: "a", definition: "Bool.And", type: "And", name: "And1",
                          gridX: 2, gridY: 3, order: 10,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("X1", "Input 1", "BOOL", "1"),
                                   ("X2", "Input 2", "BOOL", "0")],
                          outputs: [("Y", "Logical Output", "BOOL", "0")])
-        entries += block("page.0.block.1.", id: "b", definition: "Bool.Not", type: "Not", name: "Not1",
+        entries += Self.block("page.0.block.1.", id: "b", definition: "Bool.Not", type: "Not", name: "Not1",
                          gridX: 8, gridY: 3, order: 20,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("X", "Input", "BOOL", "0")],
                          outputs: [("Y", "Inverted Output", "BOOL", "0")])
-        entries += block("page.0.block.2.", id: "c", definition: "IO.8xDO", type: "8x DO", name: "8xDO1",
+        entries += Self.block("page.0.block.2.", id: "c", definition: "IO.8xDO", type: "8x DO", name: "8xDO1",
                          gridX: 16, gridY: 3, order: 30,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("DO0", "Digital Output 0", "BOOL", "0"),
                                   ("DO1", "Digital Output 1", "BOOL", "0"),
                                   ("DO2", "Digital Output 2", "BOOL", "0")],
                          outputs: [("Ok", "Port Write Status", "BOOL", "1")])
-        entries += block("page.0.block.3.", id: "d", definition: "Math.PID", type: "PID", name: "PID1",
+        entries += Self.block("page.0.block.3.", id: "d", definition: "Math.PID", type: "PID", name: "PID1",
                          gridX: 24, gridY: 3, order: 40,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("PV", "Process Variable", "FLOAT", "0"),
@@ -106,7 +107,7 @@ struct MaraflowImportTests {
                                   ("Kd", "Derivative Gain", "FLOAT", "0"),
                                   ("Rst", "Reset Integrator", "BOOL", "0")],
                          outputs: [("Out", "Controller Output", "FLOAT", "0")])
-        entries += block("page.0.block.4.", id: "e", definition: "Bool.Nand", type: "Nand", name: "Nand1",
+        entries += Self.block("page.0.block.4.", id: "e", definition: "Bool.Nand", type: "Nand", name: "Nand1",
                          gridX: 2, gridY: 9, order: 50,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("X1", "Input 1", "BOOL", "1"),
@@ -185,6 +186,92 @@ struct MaraflowImportTests {
         let reopened = AppModel()
         reopened.loadProject(url: saved)
         #expect(reopened.project?.modules.count == 5)
+    }
+
+    static func timerProject() -> Data {
+        var entries: [(String, String)] = [
+            ("project.name", "Timers"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "3"),
+            ("page.0.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "t", definition: "Main.Timers.Timer", type: "Timer", name: "Timer1",
+                         gridX: 2, gridY: 2, order: 10,
+                         inputs: [("En", "Enable Execution", "BOOL", "1"),
+                                  ("In", "Timer Start Input", "BOOL", "1"),
+                                  ("PT", "Preset Time (ms)", "INT", "2")],
+                         outputs: [("Q", "Timer Output", "BOOL", "0"),
+                                   ("ET", "Elapsed Time (ms)", "INT", "0")])
+        entries += Self.block("page.0.block.1.", id: "p", definition: "Main.Timers.PulseGen", type: "PulseGen", name: "PulseGen1",
+                         gridX: 10, gridY: 2, order: 20,
+                         inputs: [("En", "Enable Execution", "BOOL", "1"),
+                                  ("THi", "High Duration (ms)", "INT", "1"),
+                                  ("TLo", "Low Duration (ms)", "INT", "1")],
+                         outputs: [("Q", "Pulse Output", "BOOL", "0")])
+        entries += Self.block("page.0.block.2.", id: "s", definition: "Main.Timers.SinglePulse", type: "SinglePulse", name: "SinglePulse1",
+                         gridX: 18, gridY: 2, order: 30,
+                         inputs: [("En", "Enable Execution", "BOOL", "1"),
+                                  ("In", "Edge Trigger Input", "BOOL", "1")],
+                         outputs: [("Q", "Single-Cycle Pulse Output", "BOOL", "0")])
+        return propertiesXML(entries)
+    }
+
+    @Test("Timer, PulseGen and SinglePulse map onto blocks that run")
+    func timerBlocksRun() throws {
+        let outcome = try MaraflowImporter.importProject(data: Self.timerProject(), filename: "timers")
+        let timer = try #require(outcome.project.modules.first { $0.name == "Timer1" })
+        let pulse = try #require(outcome.project.modules.first { $0.name == "PulseGen1" })
+        let single = try #require(outcome.project.modules.first { $0.name == "SinglePulse1" })
+        #expect(timer.guid == BlockTypeCatalog.info(forBlockName: "Timer")?.guid)
+        #expect(pulse.guid == BlockTypeCatalog.info(forBlockName: "PulseGen")?.guid)
+        #expect(single.guid == BlockTypeCatalog.info(forBlockName: "SinglePulse")?.guid)
+        #expect(timer.paramPins.first?.value.asInt == 2)
+        #expect(pulse.paramPins.map(\.value.asInt) == [1, 1])
+
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: pulse.id)[1].asBool, "PulseGen is high in its first on-cycle")
+        #expect(core.outPins(moduleId: single.id)[1].asBool, "SinglePulse fires on the rising trigger")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: timer.id)[0].asBool, "Timer Q after its two-cycle preset")
+        #expect(core.outPins(moduleId: timer.id)[1].asInt >= 2)
+    }
+
+    @Test("DecodeDate and EncodeDate keep their date fields")
+    func dateBlocksMap() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "Dates"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "2"),
+            ("page.0.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "d", definition: "Main.Timers.DecodeDate", type: "DecodeDate", name: "DecodeDate1",
+                         gridX: 2, gridY: 2, order: 10,
+                         inputs: [("En", "Enable Execution", "BOOL", "1"),
+                                  ("Ts", "Unix Timestamp (s)", "LONG", "0")],
+                         outputs: [("Yr", "Year", "INT", "1970"), ("Mon", "Month", "INT", "1"),
+                                   ("Day", "Day", "INT", "1"), ("Hr", "Hour", "INT", "0"),
+                                   ("Min", "Minute", "INT", "0"), ("Sec", "Second", "INT", "0")])
+        entries += Self.block("page.0.block.1.", id: "e", definition: "Main.Timers.EncodeDate", type: "EncodeDate", name: "EncodeDate1",
+                         gridX: 10, gridY: 2, order: 20,
+                         inputs: [("En", "Enable Execution", "BOOL", "1"),
+                                  ("Yr", "Year", "INT", "2026"), ("Mon", "Month", "INT", "1"),
+                                  ("Day", "Day", "INT", "1"), ("Hr", "Hour", "INT", "0"),
+                                  ("Min", "Minute", "INT", "0"), ("Sec", "Second", "INT", "0")],
+                         outputs: [("Ts", "Unix Timestamp", "LONG", "0")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "dates")
+        let decode = try #require(outcome.project.modules.first { $0.name == "DecodeDate1" })
+        let encode = try #require(outcome.project.modules.first { $0.name == "EncodeDate1" })
+        #expect(decode.guid == BlockTypeCatalog.info(forBlockName: "DecodeDate")?.guid)
+        #expect(decode.outPins[2].name == "Yr", "Year maps to the third output")
+        #expect(encode.guid == BlockTypeCatalog.info(forBlockName: "EncodeDate")?.guid)
+        #expect(encode.inPins[3].name == "Yr", "Year maps to the fourth input")
+        #expect(encode.inPins[3].value.asInt == 2026)
     }
 
     @Test("ST, ladder and macro pages are kept with their limits reported")

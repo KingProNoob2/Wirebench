@@ -40,9 +40,12 @@ table for the definitions with a close Wirebench counterpart:
   (`AGtB`, `AEqB`, `ALtB`) is picked and inverted where needed. `InRange` becomes `InRange` with Min/Max on its
   Low/High parameters.
 - **Conversion:** `PackBits`→`Bits2Int`, `UnpackBits`→`Int2Bits` (the latter drops `En`).
+- **Timers:** `Timer`→`Timer` (PT to Dly, Q/ET to its outputs), `SinglePulse`→`SinglePulse`, `PulseGen`→`PulseGen`
+  (Act held true); `DecodeDate`/`EncodeDate` map their date fields (time fields are dropped).
+- **Filters:** `Debounce`→`DelayFilter` (Tms counts cycles).
 - **Switches:** `Sel`→`ISwitch`, `Demux`→`IDemux`.
 - **I/O:** `IO.8xDI`/`IO.8xDO` map directly; single-channel `IO.DI`/`IO.DO`/`IO.AI` map to channel 0 of the
-  corresponding 8-channel block.
+  corresponding 8-channel block; `IO.AO` goes to `2xAO` channel 0 and `IO.Encoder` to `IRC`.
 - **Visual:** `Segment`, `Value`, `BoolVar`, `IntVar`, `LongVar` map directly.
 
 Everything else — PID, filters, timers and counters (their pin sets differ), communication, virtual registers,
@@ -110,9 +113,9 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `IO.8xDI` | `8xDI` |  |
 | `IO.8xDO` | `8xDO` |  |
 | `IO.AI` | `8xAI` | channel 0 |
-| `IO.AO` | inert |  |
+| `IO.AO` | `2xAO` | channel 0; Ok dropped |
 | `IO.PWM` | inert |  |
-| `IO.Encoder` | inert |  |
+| `IO.Encoder` | `IRC` | Vel lands on Null |
 | `Comm.ModbusRTU.MbRtuRead` | inert |  |
 | `Comm.ModbusRTU.MbRtuWrite` | inert |  |
 | `Comm.ModbusTCP.MbTcpRead` | inert |  |
@@ -141,17 +144,17 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Main.Safety.EStop` | inert |  |
 | `Main.Filters.MovingAvg` | inert |  |
 | `Main.Filters.LowPass` | inert |  |
-| `Main.Filters.Debounce` | inert |  |
+| `Main.Filters.Debounce` | `DelayFilter` | Tms counts cycles |
 | `Main.Switches.Sel` | `ISwitch` |  |
 | `Main.Switches.Mux` | inert |  |
 | `Main.Switches.Demux` | `IDemux` |  |
 | `Main.Timers.DateTime` | inert |  |
-| `Main.Timers.DecodeDate` | inert |  |
-| `Main.Timers.EncodeDate` | inert |  |
-| `Main.Timers.PulseGen` | inert |  |
+| `Main.Timers.DecodeDate` | `DecodeDate` | date fields kept; time dropped |
+| `Main.Timers.EncodeDate` | `EncodeDate` | date fields kept; time dropped |
+| `Main.Timers.PulseGen` | `PulseGen` | Act held true; THi/TLo to TOn/TOff |
 | `Main.Timers.PulseLen` | inert |  |
-| `Main.Timers.SinglePulse` | inert |  |
-| `Main.Timers.Timer` | inert |  |
+| `Main.Timers.SinglePulse` | `SinglePulse` | In to Tr; TOn defaults to one cycle |
+| `Main.Timers.Timer` | `Timer` | PT to Dly; Q/ET to outputs |
 | `Main.Timers.Counter` | inert |  |
 | `Macro.MacroIn` | inert |  |
 | `Macro.MacroOut` | inert |  |
@@ -174,4 +177,4 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Ladder.Coil.WRITE_REG` | inert |  |
 | `Ladder.Coil.ANALOG` | inert |  |
 
-Counts: \(sum(1 for _,t,_ in rows if t != 'inert')) mapped, \(sum(1 for _,t,_ in rows if t == 'inert')) inert placeholders.
+Counts: 47 mapped, 47 inert placeholders.
