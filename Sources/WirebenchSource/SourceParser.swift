@@ -451,6 +451,7 @@ public struct SourceParser {
 
     private mutating func statement() throws -> SourceStmt {
         if isKeyword("IF") { return try ifStatement() }
+        if isKeyword("CASE") { return try caseStatement() }
         guard current.kind == .identifier else {
             throw error("expected a statement but found \(describe(current))")
         }
@@ -499,6 +500,108 @@ public struct SourceParser {
             elseBody = try statements { $0 == "END_IF" }
         }
         return SourceStmt(.ifThen(condition, thenBody, elseBody), line: at.line)
+    }
+
+    /// `CASE selector OF <labels>: <body> … ELSE <body> END_CASE`. It is sugar for an `IF`/`ELSIF` chain over the
+    /// selector, which is why the merge rules, the numeric comparisons and the recovery all behave as they already do.
+    private mutating func caseStatement() throws -> SourceStmt {
+        let keyword = advance()   // CASE
+        let selector = try expression()
+        try expectKeyword("OF")
+        var arms: [(labels: [(lower: Int, upper: Int)], body: [SourceStmt], line: Int)] = []
+        var used: [(lower: Int, upper: Int)] = []
+        var elseBody: [SourceStmt]?
+        while !isAtEnd, !isKeyword("END_CASE"), !isKeyword("END_PROGRAM"), !isKeyword("END_FUNCTION_BLOCK") {
+            if isKeyword("ELSE") {
+                advance()
+                elseBody = try caseBody()
+                break
+            }
+            let armLine = current.line
+            let labels = try caseLabels()
+            for label in labels {
+                for taken in used where max(label.lower, taken.lower) <= min(label.upper, taken.upper) {
+                    throw error("CASE labels overlap: \(label.lower)..\(label.upper) and \(taken.lower)..\(taken.upper)")
+                }
+                used.append(label)
+            }
+            let body = try caseBody()
+            arms.append((labels, body, armLine))
+        }
+        try expectKeyword("END_CASE")
+        try expectSymbol(";")
+
+        var fallback = elseBody
+        for arm in arms.reversed() {
+            fallback = [SourceStmt(.ifThen(caseCondition(selector: selector, labels: arm.labels, line: arm.line),
+                                           arm.body, fallback), line: arm.line)]
+        }
+        if let only = fallback, only.count == 1 { return only[0] }
+        if let fallback { return SourceStmt(.ifThen(SourceExpr(.boolean(true), line: keyword.line), fallback, nil), line: keyword.line) }
+        return SourceStmt(.ifThen(SourceExpr(.boolean(false), line: keyword.line), [], nil), line: keyword.line)
+    }
+
+    /// Statements of one CASE arm or the ELSE arm: they end at the next label, `ELSE` or `END_CASE`.
+    private mutating func caseBody() throws -> [SourceStmt] {
+        var body: [SourceStmt] = []
+        while !isAtEnd, !isKeyword("ELSE"), !isKeyword("END_CASE"), !isKeyword("END_PROGRAM"),
+              !isKeyword("END_FUNCTION_BLOCK"), !isCaseLabelStart() {
+            if isSymbol(";") { advance(); continue }
+            body.append(try statement())
+        }
+        return body
+    }
+
+    private func isCaseLabelStart() -> Bool {
+        current.kind == .integer || (isSymbol("-") && peek().kind == .integer)
+    }
+
+    private mutating func caseLabels() throws -> [(lower: Int, upper: Int)] {
+        var labels: [(lower: Int, upper: Int)] = []
+        while true {
+            let lower = try signedInteger()
+            if isSymbol("..") {
+                advance()
+                let upper = try signedInteger()
+                guard lower <= upper else { throw error("a CASE range must count upwards") }
+                labels.append((lower, upper))
+            } else {
+                labels.append((lower, lower))
+            }
+            if isSymbol(",") { advance(); continue }
+            break
+        }
+        try expectSymbol(":")
+        return labels
+    }
+
+    private mutating func signedInteger() throws -> Int {
+        var negative = false
+        if isSymbol("-") { advance(); negative = true }
+        guard current.kind == .integer else { throw error("a CASE label is a whole number") }
+        let token = advance()
+        guard let value = Int(token.text) else { throw error("the number \(token.text) is too large", at: token) }
+        return negative ? -value : value
+    }
+
+    private func caseCondition(selector: SourceExpr, labels: [(lower: Int, upper: Int)], line: Int) -> SourceExpr {
+        var combined: SourceExpr?
+        for label in labels {
+            let test: SourceExpr
+            if label.lower == label.upper {
+                test = SourceExpr(.binary("==", selector, SourceExpr(.integer(label.lower), line: line)), line: line)
+            } else {
+                let lower = SourceExpr(.binary(">=", selector, SourceExpr(.integer(label.lower), line: line)), line: line)
+                let upper = SourceExpr(.binary("<=", selector, SourceExpr(.integer(label.upper), line: line)), line: line)
+                test = SourceExpr(.binary("&&", lower, upper), line: line)
+            }
+            if let existing = combined {
+                combined = SourceExpr(.binary("||", existing, test), line: line)
+            } else {
+                combined = test
+            }
+        }
+        return combined ?? SourceExpr(.boolean(false), line: line)
     }
 
     private mutating func argumentList() throws -> [SourceArgument] {
@@ -669,13 +772,13 @@ struct STLexer {
     static let keywords: Set<String> = [
         "PROGRAM", "END_PROGRAM", "FUNCTION_BLOCK", "END_FUNCTION_BLOCK",
         "VAR", "END_VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_GLOBAL", "CONSTANT", "RETAIN",
-        "IF", "THEN", "ELSIF", "ELSE", "END_IF",
+        "IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE",
         "AND", "OR", "XOR", "NOT", "MOD", "AT",
         "TRUE", "FALSE",
         "BOOL", "INT", "LONG", "REAL", "LREAL", "WORD",
     ]
 
-    static let symbols = [":=", "<=", ">=", "<>", ";", ":", ",", "(", ")", ".", "%",
+    static let symbols = [":=", "<=", ">=", "<>", "..", ";", ":", ",", "(", ")", ".", "%",
                           "*", "/", "+", "-", "=", "<", ">"]
 
     init(_ source: String) { scalars = Array(source) }

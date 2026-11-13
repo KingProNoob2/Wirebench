@@ -324,6 +324,84 @@ struct StructuredTextTests {
         }
     }
 
+    @Test("CASE selects an arm and simulates through comparisons")
+    func caseStatement() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            lamp AT %QX0 : BOOL;
+            n : INT := 2;
+        END_VAR
+            CASE n OF
+                0: lamp := FALSE;
+                1, 2: lamp := TRUE;
+                5..7: lamp := FALSE;
+            ELSE
+                lamp := FALSE;
+            END_CASE;
+        END_PROGRAM
+        """)
+        let out = try #require(compiled.project.modules.first { $0.guid == EightDOBlock.guid })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.inPins(moduleId: out.id)[1].asBool)
+    }
+
+    @Test("CASE handles a negative range")
+    func caseRange() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            lamp AT %QX0 : BOOL;
+            n : INT := -1;
+        END_VAR
+            CASE n OF
+                -1..1: lamp := TRUE;
+            ELSE
+                lamp := FALSE;
+            END_CASE;
+        END_PROGRAM
+        """)
+        let out = try #require(compiled.project.modules.first { $0.guid == EightDOBlock.guid })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.inPins(moduleId: out.id)[1].asBool)
+    }
+
+    @Test("CASE refusals: overlapping labels, a REAL selector, a missing END_CASE")
+    func caseRefusals() {
+        let cases: [(String, String)] = [
+            ("""
+             PROGRAM P
+             VAR n : INT := 1; END_VAR
+                 CASE n OF
+                     1: n := 1;
+                     1: n := 2;
+                 END_CASE;
+             END_PROGRAM
+             """, "overlap"),
+            ("""
+             PROGRAM P
+             VAR r : REAL := 1.0; b AT %QX0 : BOOL; END_VAR
+                 CASE r OF
+                     1: b := TRUE;
+                 END_CASE;
+             END_PROGRAM
+             """, "REAL comparison"),
+            ("""
+             PROGRAM P
+             VAR n : INT := 1; END_VAR
+                 CASE n OF
+                     1: n := 2;
+             END_PROGRAM
+             """, "expected END_CASE"),
+        ]
+        for (source, fragment) in cases {
+            let message = Self.error(source)
+            #expect(message?.contains(fragment) == true, "\(fragment): \(message ?? "compiled")")
+        }
+    }
+
     @Test("Completion offers keywords, block types, instance names and an instance's outputs")
     func completion() {
         let source = """

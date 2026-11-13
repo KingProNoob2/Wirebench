@@ -39,7 +39,10 @@ END_PROGRAM
   is refused; so are `LONG` multiply/divide and `INT` modulo, which have no block. Pins are still BOOL.
 - **Expressions.** `AND`, `OR`, `XOR`, `NOT`, `=`, `<>`, parentheses. `TRUE`/`FALSE` and integer literals. Numeric
   arithmetic is refused with a message; this subset is Boolean.
-- **Statements.** `name := expression;`, `instance(arguments);`, and `IF … THEN … ELSIF … ELSE … END_IF;`.
+- **Statements.** `name := expression;`, `instance(arguments);`, `IF … THEN … ELSIF … ELSE … END_IF;`, and
+  `CASE selector OF 1: … 2, 3: … 5..7: … ELSE … END_CASE;`. CASE labels are whole numbers or ranges and must not
+  overlap; the selector must be `INT`/`LONG` (a `REAL` selector needs a float comparator, which the catalogue lacks).
+  CASE is lowered to the same comparisons and merges as an IF chain.
 - **Function blocks.** `FUNCTION_BLOCK Name VAR_INPUT … VAR_OUTPUT … END_FUNCTION_BLOCK` is a macro page. Its inputs and
   outputs are the interface blocks; declaring `t : Name;` makes a `Macro` block, `t(value := x);` wires it, and
   `t.result` reads its output.
@@ -103,7 +106,8 @@ same compiler.
 
 - `BOOL` pins only: `AT %IXn`/`%QXn` and `VAR_INPUT`/`VAR_OUTPUT` are BOOL; typed values are internal variables.
 - `REAL` comparisons, `LONG` multiply/divide and `INT` modulo have no block and are refused. Arrays, structures,
-  `CASE`, `FOR`, `WHILE`, `REPEAT`, `VAR_GLOBAL` and direct addresses other than `%IX`/`%QX` are refused.
+  `FOR`, `WHILE`, `REPEAT`, `VAR_GLOBAL` and direct addresses other than `%IX`/`%QX` are refused.
+- `CASE` labels must be disjoint whole numbers or ranges; a `REAL` selector and overlapping labels are refused.
 - A block call cannot sit inside `IF` (its wiring has no condition); create the block before the branch.
 - A `%QX` output must be assigned before it is read, and an output written only inside `IF` must also be written before the
   `IF` or in both branches — otherwise the compiler refuses it rather than silently driving the pin.

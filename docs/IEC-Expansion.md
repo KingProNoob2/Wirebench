@@ -51,7 +51,11 @@ comparison driving a `%QX` output, widening (`INT + LONG`), an IF on a numeric v
 refusals: assigning REAL to INT, REAL comparison, writing a pin with a number, reading an output before assignment.
 Simulation through `CxxSimulationCore` and a `.pcc` round trip of the emitted project.
 
-## Stage 2: CASE
+## Stage 2: CASE (done)
+
+Implemented by parsing CASE into an IF/ELSIF chain of selector comparisons (equality for a single label, `>=`/`<=`
+for a range), so the existing merge/type rules apply. Overlapping labels, a REAL selector and a missing `END_CASE`
+are refused; labels may be negative; tests cover selection, ranges and the refusals.
 
 `CASE selector OF 1: ... 2, 3: ... ELSE ... END_CASE`. Selector is INT/LONG. Lower through `ISwitch`/`LSwitch`
 or comparison chains; each arm merges per the IF rules. Refuse REAL selectors and overlapping labels.
