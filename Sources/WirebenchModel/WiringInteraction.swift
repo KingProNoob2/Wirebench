@@ -76,8 +76,8 @@ public enum PinHitTest {
     /// band the drag itself uses. Qt's `pinAt(x, y, "in")` is this for a drag that started on an output, and its
     /// preview snaps the cable end onto the same point it would connect to.
     ///
-    /// The origin's own module is skipped, because `connectPins` refuses a module wired to itself — a ring there
-    /// would promise a connection that would not be made.
+    /// The origin's own module is **not** skipped: a block may feed its own input (a counter's output into its own
+    /// reset is the standard self-resetting counter), and the wire preview and the drop must offer that pin too.
     public static func target(at point: CGPoint, from origin: PinReference, in project: PCCProject,
                               pageModuleIds: Set<Int>) -> PinReference? {
         var best: (reference: PinReference, distance: CGFloat)?
@@ -89,7 +89,7 @@ public enum PinHitTest {
             if best == nil || distance < best!.distance { best = (reference, distance) }
         }
         let wanted: [PinSide] = origin.side == .output ? [.input, .param] : [.output]
-        for module in project.modules where pageModuleIds.contains(module.id) && module.id != origin.moduleId {
+        for module in project.modules where pageModuleIds.contains(module.id) {
             for side in wanted {
                 let count: Int
                 switch side {

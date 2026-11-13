@@ -74,9 +74,10 @@ struct WireSelectionTests {
         // Another output is not a target for a cable from an output.
         let otherOut = try #require(PinHitTest.anchor(for: PinReference(moduleId: 2, side: .output, index: 0), in: project))
         #expect(PinHitTest.target(at: otherOut, from: from, in: project, pageModuleIds: Self.ids) == nil)
-        // Nor is its own module (a module wired to itself is refused).
-        let ownInput = try #require(PinHitTest.anchor(for: PinReference(moduleId: 1, side: .input, index: 0), in: project))
-        #expect(PinHitTest.target(at: ownInput, from: from, in: project, pageModuleIds: Self.ids) == nil)
+        // Its own module's input is a target: a counter feeding its own reset is a self-wire, not a ring.
+        let ownInputRef = PinReference(moduleId: 1, side: .input, index: 0)
+        let ownInput = try #require(PinHitTest.anchor(for: ownInputRef, in: project))
+        #expect(PinHitTest.target(at: ownInput, from: from, in: project, pageModuleIds: Self.ids) == ownInputRef)
         // And nothing when the pointer is in open space.
         #expect(PinHitTest.target(at: CGPoint(x: 1_000, y: 1_000), from: from, in: project, pageModuleIds: Self.ids) == nil)
         // A drag from an input looks for an output, not another input.

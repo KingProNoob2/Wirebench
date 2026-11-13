@@ -85,6 +85,16 @@ struct SelfWiringTests {
         #expect(wire.inPinId == 2)
     }
 
+    @Test("The canvas offers the block's own input when a wire is dragged from its output")
+    func canvasOffersSelfWire() throws {
+        let (project, counter) = project()
+        let output = PinReference(moduleId: counter, side: .output, index: 0)
+        let input = PinReference(moduleId: counter, side: .input, index: 2)
+        let anchor = try #require(PinHitTest.anchor(for: input, in: project))
+        let target = PinHitTest.target(at: anchor, from: output, in: project, pageModuleIds: [counter])
+        #expect(target == input, "the hit-test skipped the block's own pins")
+    }
+
     @Test("A self-wire routes as a cable rather than failing to draw")
     func selfWireRoutes() throws {
         let (project, counter) = project()
