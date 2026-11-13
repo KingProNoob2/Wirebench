@@ -60,6 +60,21 @@ values. The topology is preserved, the block does not simulate, and the import r
 Wires are rebuilt from the source/target block ids and pin indices through the same mapping; their route points and
 buses are not imported (Wirebench routes its own elbows). Hidden wires become normal wires with a note.
 
+## Exporting back to Maraflow
+
+**File ▸ Export Maraflow .mfl…** (or `wirebench-cli export-mfl <project> [--out <file>]`, or the Qt build dialog's
+*Maraflow .mfl* button) writes the current project as a Java-properties `.mfl`.
+
+- The preserved `.mfl` table is the base, so tags, E-Stop rules, bus ids, route points, graphics and unknown keys keep
+  their values; project name/author/description and the current pages/blocks/wires are laid over it.
+- Native Maraflow blocks are written with their definition id, exact pins, constants and preserved properties;
+  macro calls and macro interfaces become `Macro.User.*`/`Macro.MacroIn`/`Macro.MacroOut`; ST pages keep their source.
+- Ladder pages re-use the preserved rung table (block/wire overlays do not apply to an LD page).
+- A Dirigo-only block or an edited/new graphic has no Maraflow counterpart: the block is skipped with a report note;
+  graphics remain the preserved base rather than being regenerated.
+- Native `.mfl` → `.wbp` → `.mfl` round trips are covered by `MaraflowExportTests`. Export requires a project that was
+  imported from Maraflow (a purely native project has no property table to export).
+
 ## What is visible
 
 - **Safety:** the imported E-Stop configuration supervises every thread scan. Rules sample their operand channels

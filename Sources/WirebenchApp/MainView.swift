@@ -199,6 +199,11 @@ public struct MainView: View {
                       contentType: .pccProject,
                       defaultFilename: model.exportDefaultName,
                       onCompletion: savedFile("Could not export the project") { model.finishExport(to: $0) })
+        .fileExporter(isPresented: panelBinding(.exportMaraflow),
+                      document: MaraflowSaveDocument(),
+                      contentType: .maraflowProject,
+                      defaultFilename: model.maraflowExportDefaultName,
+                      onCompletion: savedFile("Could not export the Maraflow project") { model.finishMaraflowExport(to: $0) })
         // The build's three save panels. The build report has its own copy (see `buildReportSheet`).
         .buildExportPanels(model, inReport: false)
         .fileImporter(isPresented: panelBinding(.importBuildTemplate),

@@ -11,7 +11,8 @@ There are two front ends on one Swift model: a macOS SwiftUI app and a Qt Quick 
 - **Projects.** Saves the editor's own `.wbp` format — a versioned JSON document — and opens legacy Dirigo `.pcc`
   and Maraflow `.mfl` files for import; the attributes and sections the model does not understand survive either way.
   Maraflow FBD blocks map onto the catalogue where they have an equivalent and become inert placeholders otherwise;
-  the import report names both. See [`docs/Maraflow-Import.md`](docs/Maraflow-Import.md). The legacy export
+  the import report names both. Imported projects can be exported back to `.mfl` (preserved fields plus current
+  pages/blocks/wires). See [`docs/Maraflow-Import.md`](docs/Maraflow-Import.md). The legacy export
   writes `.pcc` and every project in the test corpus is written back byte for byte; the format is described in
   [`docs/Project-Format.md`](docs/Project-Format.md).
 - **Simulation.** Runs a program on a C++ core. 144 of the 147 catalogued block types run on it; the exceptions

@@ -621,6 +621,7 @@ ApplicationWindow {
             else if (id === "save") window.save()
             else if (id === "saveAs") saveDialog.open()
             else if (id === "exportPcc") buildDialog.exportAs("pcc", ".pcc", "-dirigo")
+            else if (id === "exportMfl") buildDialog.exportAs("mfl", ".mfl")
             else if (id === "rect") window.addGraphic("addShape", {kind: "rectangle"})
             else if (id === "ellipse") window.addGraphic("addShape", {kind: "ellipse"})
             else if (id === "text") window.addGraphic("addText", {text: "Text"})

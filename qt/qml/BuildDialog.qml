@@ -138,6 +138,7 @@ Popup {
                     IconButton { label: "Symbols .csv"; onClicked: dialog.exportAs("csv", ".csv") }
                     IconButton { label: "Variables .dbf"; onClicked: dialog.exportAs("dbf", ".dbf") }
                     IconButton { label: "Dirigo .pcc"; onClicked: dialog.exportAs("pcc", ".pcc") }
+                    IconButton { label: "Maraflow .mfl"; onClicked: dialog.exportAs("mfl", ".mfl") }
                     IconButton { label: "Template…"; onClicked: templateDialog.open() }
                 }
             }

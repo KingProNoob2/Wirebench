@@ -1164,6 +1164,48 @@ public final class AppModel: @unchecked Sendable {
         pendingFilePanel = .export
     }
 
+    /// Writes the imported project back as a Maraflow `.mfl`. The preserved property table is the base, so fields the
+    /// native model does not interpret survive; current pages, native blocks and wires are laid over it.
+    @MainActor
+    public func exportMaraflow() {
+        guard let project else { return }
+        guard project.maraflow != nil else {
+            presentMessage(title: "Nothing to export",
+                           message: "This project was not imported from Maraflow, so it has no Maraflow fields to export.",
+                           kind: .info)
+            return
+        }
+        do {
+            let result = try MaraflowExporter.export(project)
+            preparedMaraflowExport = result.data
+            preparedMaraflowNotes = result.notes
+            pendingFilePanel = .exportMaraflow
+        } catch {
+            presentError("Could not prepare the Maraflow export", detail: error.localizedDescription)
+        }
+    }
+
+    public var maraflowExportDefaultName: String {
+        currentFileURL?.deletingPathExtension().lastPathComponent ?? (project?.name ?? "project")
+    }
+
+    @MainActor
+    public func finishMaraflowExport(to url: URL) {
+        guard let data = preparedMaraflowExport else { return }
+        preparedMaraflowExport = nil
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            presentError("Could not write \(url.lastPathComponent)", detail: error.localizedDescription)
+            return
+        }
+        let notes = preparedMaraflowNotes
+        preparedMaraflowNotes = []
+        presentMessage(title: "Exported \(url.lastPathComponent)",
+                       message: notes.isEmpty ? "The Maraflow project was written." : notes.joined(separator: "\n\n"),
+                       kind: notes.isEmpty ? .info : .warning)
+    }
+
     /// What the export panel should suggest as a name — without the extension, which the panel adds.
     ///
     /// `.pcc` and `.pbd` are not types macOS knows, so a panel cannot tell that a suggested `x.pcc` already
@@ -1774,10 +1816,13 @@ public final class AppModel: @unchecked Sendable {
 
     /// The export prepared while the user picks a destination.
     private var preparedExport: DirigoExport?
+    /// Bytes prepared by `exportMaraflow()` for the save panel.
+    private var preparedMaraflowExport: Data?
+    private var preparedMaraflowNotes: [String] = []
 
     /// A file panel the user has asked for, for the same reason.
     public enum FilePanel: Equatable {
-        case open, saveAs, export
+        case open, saveAs, export, exportMaraflow
         /// The build's exports, and the template it can read.
         case exportProgramBinary, exportSymbolTable, exportProgramVariables, importBuildTemplate
     }

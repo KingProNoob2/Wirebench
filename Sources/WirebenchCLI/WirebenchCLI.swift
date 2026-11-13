@@ -80,6 +80,14 @@ struct WirebenchCLI {
             }
             printSymbolTable(path: args[2])
 
+        case "export-mfl":
+            guard args.count >= 3 else {
+                print("Error: Missing file path. Usage: wirebench-cli export-mfl <project> [--out <file>]")
+                return
+            }
+            let output = args.count >= 5 && args[3] == "--out" ? args[4] : nil
+            exportMaraflow(path: args[2], output: output)
+
         case "st":
             guard args.count >= 3 else {
                 print("Error: Missing file path. Usage: wirebench-cli st <program.st> [--out <dir>] [--name <name>]")
@@ -112,6 +120,7 @@ struct WirebenchCLI {
           wirebench-cli blocks <project.wbp>       Show how each module resolves to a block type
           wirebench-cli profile <project.wbp>
                                                 Show the hardware profile and SystemCmd catalogue
+          wirebench-cli export-mfl <project> [--out <file>]  Write a Maraflow .mfl project
           wirebench-cli st <program.st> [--out <dir>] [--name <name>]
                                                 Compile IEC 61131-3 Structured Text to <name>.wbp.
           wirebench-cli build <project.wbp> [--out <dir>] [--template <program.pbd>] [--quiet]
@@ -449,6 +458,26 @@ struct WirebenchCLI {
             if target == url { print("  the original is \(url.path).bak") }
         } catch {
             print("Failed: \(error)")
+            exit(1)
+        }
+    }
+
+    /// Writes an imported project back as a Maraflow `.mfl`.
+    static func exportMaraflow(path: String, output: String?) {
+        do {
+            let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
+            guard loaded.project.maraflow != nil else {
+                print("This project was not imported from Maraflow.")
+                exit(1)
+            }
+            let result = try MaraflowExporter.export(loaded.project)
+            let target = output.map { URL(fileURLWithPath: $0) }
+                ?? URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("mfl")
+            try result.data.write(to: target, options: .atomic)
+            for note in result.notes { print("  Note: \(note)") }
+            print("Wrote \(target.path)")
+        } catch {
+            print("Export failed: \(error)")
             exit(1)
         }
     }

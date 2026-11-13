@@ -42,6 +42,20 @@ struct WirebenchSaveDocument: FileDocument {
     }
 }
 
+/// The save panel for a Maraflow export.
+struct MaraflowSaveDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.maraflowProject] }
+    static var writableContentTypes: [UTType] { [.maraflowProject] }
+
+    init() {}
+
+    init(configuration: ReadConfiguration) throws {}
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data())
+    }
+}
+
 /// The save panel for the legacy export. Its bytes are written by the model too, for the same reason; a `.pcc`
 /// records its own path in `PROJECT_PATH`, which is only known once the panel returns.
 struct LegacySaveDocument: FileDocument {

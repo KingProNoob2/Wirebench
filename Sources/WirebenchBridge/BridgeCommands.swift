@@ -301,12 +301,17 @@ enum BridgeCommands {
             // What a build can be written as: the program binary, the symbol table, the variables, or the legacy project.
             guard let path = arguments["path"] as? String else { return ["ok": false, "error": "no path"] }
             let url = URL(fileURLWithPath: path)
-            if model.buildReport == nil, (arguments["kind"] as? String) != "pcc" { _ = model.compileProject() }
+            let exportKind = arguments["kind"] as? String ?? ""
+            if model.buildReport == nil, exportKind != "pcc", exportKind != "mfl" { _ = model.compileProject() }
             switch arguments["kind"] as? String ?? "" {
             case "pbd": model.finishProgramBinaryExport(to: url)
             case "csv": model.finishSymbolTableExport(to: url)
             case "dbf": model.finishProgramVariablesExport(to: url)
             case "pcc": model.exportForDirigo(); model.finishExport(to: url); model.pendingFilePanel = nil
+            case "mfl":
+                model.exportMaraflow()
+                model.finishMaraflowExport(to: url)
+                model.pendingFilePanel = nil
             default: return ["ok": false, "error": "unknown export"]
             }
         case "refreshPorts": model.refreshPorts()

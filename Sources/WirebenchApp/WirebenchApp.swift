@@ -199,6 +199,12 @@ struct WirebenchApp: App {
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
+
+                Button("Export Maraflow .mfl\u{2026}") {
+                    model.exportMaraflow()
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(model.project?.maraflow == nil)
             }
         }
     }
