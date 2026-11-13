@@ -397,6 +397,28 @@ public final class CxxSimulationCore {
                 }
             }
         }
+        // Names for dotted operand references (`Block.Pin`). Every module gets its name and pin short names; the
+        // ladder/ST operand lookup uses them when it sees a dotted name.
+        for (position, mod) in project.modules.enumerated() {
+            func push(_ key: String, _ value: String) {
+                key.withCString { keyCString in
+                    value.withCString { valueCString in
+                        wirebench_sim_set_string(created, Int32(position), keyCString, valueCString)
+                    }
+                }
+            }
+            push("Name", mod.name)
+            let inLabels = BlockLabels.inputLabels(for: mod.guid, totalPins: mod.inPins.count)
+            let outLabels = BlockLabels.outputLabels(for: mod.guid)
+            let inNames = mod.inPins.enumerated().map { index, pin in
+                pin.name?.isEmpty == false ? pin.name! : (inLabels.indices.contains(index) ? inLabels[index] : "X\(index)")
+            }
+            let outNames = mod.outPins.enumerated().map { index, pin in
+                pin.name?.isEmpty == false ? pin.name! : (outLabels.indices.contains(index) ? outLabels[index] : "Y\(index)")
+            }
+            push("InNames", inNames.joined(separator: "|"))
+            push("OutNames", outNames.joined(separator: "|"))
+        }
         // Thread periods from the hardware profile.
         for threadId in Set(project.modules.map(\.threadId)) {
             if let thread = profile?.thread(id: threadId), thread.intervalMs > 0 {

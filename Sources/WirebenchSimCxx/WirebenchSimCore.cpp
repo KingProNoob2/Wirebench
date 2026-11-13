@@ -178,11 +178,17 @@ inline WirebenchValue undefinedValue() {
     return v;
 }
 
+struct Module;
+
 struct LdElement {
     std::string kind;
     std::string operand;
     std::string source;
     bool previous = false;   /* per-element edge memory, like Maraflow's prevEdgeInput */
+    /* Embedded ladder function block. The block keeps its own state between scans. */
+    std::shared_ptr<Module> fbModule;
+    std::vector<std::string> fbInputOperands;
+    std::vector<std::string> fbOutputBindings;
 };
 
 struct LdBranch {
@@ -309,6 +315,8 @@ double intervalMs(const WirebenchSim *sim, int32_t threadId) {
     return std::max(1.0, sim->cycleDelayMs);
 }
 
+void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const WirebenchWallClock &clock);
+
 inline std::string ldUpper(std::string value) {
     for (auto &c : value) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return value;
@@ -320,6 +328,40 @@ double ldOperand(WirebenchSim *sim, const std::string &raw) {
     while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(name.begin());
     while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
     if (name.empty()) return 0.0;
+    const auto dot = name.find('.');
+    if (dot != std::string::npos) {
+        const std::string blockName = ldUpper(name.substr(0, dot));
+        const std::string pinName = ldUpper(name.substr(dot + 1));
+        for (const Module &module : sim->modules) {
+            auto moduleName = module.strings.find("Name");
+            if (moduleName == module.strings.end() || ldUpper(moduleName->second) != blockName) continue;
+            auto names = [&](const char *key, const std::vector<WirebenchValue> &pins,
+                             double &value) -> bool {
+                auto foundNames = module.strings.find(key);
+                if (foundNames == module.strings.end()) return false;
+                std::string current;
+                size_t index = 0;
+                for (size_t i = 0; i <= foundNames->second.size(); ++i) {
+                    if (i == foundNames->second.size() || foundNames->second[i] == '|') {
+                        if (ldUpper(current) == pinName && index < pins.size()) {
+                            value = asFloat(pins[index]);
+                            return true;
+                        }
+                        current.clear();
+                        ++index;
+                    } else {
+                        current.push_back(foundNames->second[i]);
+                    }
+                }
+                return false;
+            };
+            double value = 0.0;
+            if (names("OutNames", module.outPins, value)) return value;
+            if (names("InNames", module.inPins, value)) return value;
+            return 0.0;
+        }
+        return 0.0;
+    }
     auto found = sim->operands.find(name);
     if (found != sim->operands.end()) return found->second;
     found = sim->operands.find(ldUpper(name));
@@ -338,8 +380,26 @@ void ldWrite(WirebenchSim *sim, const std::string &name, double value) {
     sim->operands[ldUpper(name)] = value;
 }
 
-bool ldSeries(WirebenchSim *sim, LdElement &element, bool powerIn) {
-    if (element.kind == "FUNCTION_BLOCK") return false;   /* embedded FBs are a later stage */
+bool ldSeries(WirebenchSim *sim, LdElement &element, bool powerIn, const Sample &sample,
+              const WirebenchWallClock &clock) {
+    if (element.kind == "FUNCTION_BLOCK") {
+        if (!element.fbModule) return false;
+        Module &block = *element.fbModule;
+        if (!block.inPins.empty()) block.inPins[0] = boolean(powerIn);
+        for (size_t i = 1; i < block.inPins.size(); ++i) {
+            const std::string operand = i < element.fbInputOperands.size() ? element.fbInputOperands[i] : "";
+            block.inPins[i] = maraflowNumber(ldOperand(sim, operand), block.inPins[i]);
+        }
+        processModule(sim, block, sample, clock);
+        for (size_t i = 0; i < block.outPins.size(); ++i) {
+            const std::string binding = i < element.fbOutputBindings.size() ? element.fbOutputBindings[i] : "";
+            if (!binding.empty() && binding != "0") ldWrite(sim, binding, asFloat(block.outPins[i]));
+        }
+        bool output = powerIn;
+        if (!block.outPins.empty() && block.outPins[0].kind == WIREBENCH_VALUE_BOOL)
+            output = powerIn && asBool(block.outPins[0]);
+        return output;
+    }
     const bool raw = ldOperand(sim, element.operand) != 0.0;
     const bool previous = element.previous;
     element.previous = raw;
@@ -376,6 +436,7 @@ std::shared_ptr<LdProgram> parseLadder(const std::string &text) {
     if (text.empty()) return program;
     std::istringstream stream(text);
     std::string line;
+    LdElement *lastElement = nullptr;
     while (std::getline(stream, line)) {
         if (line.empty()) continue;
         std::vector<std::string> fields;
@@ -388,6 +449,7 @@ std::shared_ptr<LdProgram> parseLadder(const std::string &text) {
         if (fields.size() < 2) continue;
         const std::string tag = fields[0];
         if (tag == "R") {
+            lastElement = nullptr;
             program->rungs.push_back(LdRung{});
             if (fields.size() > 1) program->rungs.back().order = std::atoi(fields[1].c_str());
         } else if (!program->rungs.empty()) {
@@ -399,7 +461,7 @@ std::shared_ptr<LdProgram> parseLadder(const std::string &text) {
                 if (fields.size() > 3) e.source = fields[3];
                 return e;
             };
-            if (tag == "M") rung.main.push_back(element());
+            if (tag == "M") { rung.main.push_back(element()); lastElement = &rung.main.back(); }
             else if (tag == "B") {
                 LdBranch branch;
                 if (fields.size() > 1) branch.start = std::atoi(fields[1].c_str());
@@ -407,8 +469,40 @@ std::shared_ptr<LdProgram> parseLadder(const std::string &text) {
                 rung.branches.push_back(branch);
             } else if (tag == "E" && !rung.branches.empty()) {
                 rung.branches.back().elements.push_back(element());
+                lastElement = &rung.branches.back().elements.back();
             } else if (tag == "C") {
                 rung.coils.push_back(element());
+                lastElement = &rung.coils.back();
+            } else if (tag == "F" && lastElement) {
+                auto block = std::make_shared<Module>();
+                block->kind = WIREBENCH_BLOCK_MARAFLOW;
+                if (fields.size() > 1) block->variant = std::atoi(fields[1].c_str());
+                const int inputs = fields.size() > 2 ? std::atoi(fields[2].c_str()) : 0;
+                const int outputs = fields.size() > 3 ? std::atoi(fields[3].c_str()) : 0;
+                block->hasEnable = fields.size() > 4 ? std::atoi(fields[4].c_str()) != 0 : true;
+                block->inPins.assign(static_cast<size_t>(std::max(0, inputs)), boolean(false));
+                block->outPins.assign(static_cast<size_t>(std::max(0, outputs)), boolean(false));
+                lastElement->fbModule = block;
+            } else if (tag == "I" && lastElement && lastElement->fbModule) {
+                const int type = fields.size() > 1 ? std::atoi(fields[1].c_str()) : 0;
+                const size_t index = lastElement->fbInputOperands.size();
+                if (index < lastElement->fbModule->inPins.size()) {
+                    WirebenchValue prototype{};
+                    prototype.kind = type == 0 ? WIREBENCH_VALUE_BOOL : type == 2 ? WIREBENCH_VALUE_INT64
+                        : type == 3 ? WIREBENCH_VALUE_FLOAT : WIREBENCH_VALUE_INT32;
+                    lastElement->fbModule->inPins[index] = maraflowNumber(0, prototype);
+                }
+                lastElement->fbInputOperands.push_back(fields.size() > 2 ? fields[2] : "");
+            } else if (tag == "O" && lastElement && lastElement->fbModule) {
+                const int type = fields.size() > 1 ? std::atoi(fields[1].c_str()) : 0;
+                const size_t index = lastElement->fbOutputBindings.size();
+                if (index < lastElement->fbModule->outPins.size()) {
+                    WirebenchValue prototype{};
+                    prototype.kind = type == 0 ? WIREBENCH_VALUE_BOOL : type == 2 ? WIREBENCH_VALUE_INT64
+                        : type == 3 ? WIREBENCH_VALUE_FLOAT : WIREBENCH_VALUE_INT32;
+                    lastElement->fbModule->outPins[index] = maraflowNumber(0, prototype);
+                }
+                lastElement->fbOutputBindings.push_back(fields.size() > 2 ? fields[2] : "");
             }
         }
     }
@@ -425,10 +519,21 @@ void resetLadder(LdProgram &program) {
             for (auto &element : branch.elements) element.previous = false;
         }
         for (auto &coil : rung.coils) coil.previous = false;
+        auto resetBlock = [](LdElement &element) {
+            if (!element.fbModule) return;
+            Module &block = *element.fbModule;
+            block.flagA = false;
+            block.flagB = false;
+            block.s[0] = block.s[1] = block.s[2] = 0;
+            std::fill(block.outPins.begin(), block.outPins.end(), boolean(false));
+        };
+        for (auto &element : rung.main) resetBlock(element);
+        for (auto &branch : rung.branches) for (auto &element : branch.elements) resetBlock(element);
     }
 }
 
-void runLadder(WirebenchSim *sim, LdProgram &program) {
+void runLadder(WirebenchSim *sim, LdProgram &program, const Sample &sample,
+               const WirebenchWallClock &clock) {
     for (auto &rung : program.rungs) {
         const int count = static_cast<int>(rung.main.size());
         std::vector<bool> power(static_cast<size_t>(count) + 1, false);
@@ -443,19 +548,19 @@ void runLadder(WirebenchSim *sim, LdProgram &program) {
             for (auto &branch : rung.branches) {
                 if (branch.start == col) {
                     bool branchPower = power[static_cast<size_t>(col)];
-                    for (auto &element : branch.elements) branchPower = ldSeries(sim, element, branchPower);
+                    for (auto &element : branch.elements) branchPower = ldSeries(sim, element, branchPower, sample, clock);
                     branch.output = branchPower;
                 }
             }
             power[static_cast<size_t>(col) + 1] = ldSeries(sim, rung.main[static_cast<size_t>(col)],
-                                                          power[static_cast<size_t>(col)]);
+                                                          power[static_cast<size_t>(col)], sample, clock);
         }
         bool finalPower = power[static_cast<size_t>(count)];
         for (auto &branch : rung.branches) {
             if (branch.end >= count - 1) {
                 if (count == 0) {
                     bool branchPower = true;
-                    for (auto &element : branch.elements) branchPower = ldSeries(sim, element, branchPower);
+                    for (auto &element : branch.elements) branchPower = ldSeries(sim, element, branchPower, sample, clock);
                     branch.output = branchPower;
                 }
                 finalPower = finalPower || branch.output;
@@ -471,7 +576,7 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
     if (m.kind == WIREBENCH_BLOCK_MARAFLOW_LD) {
         if (!sim) return;
         if (!m.ldProgram) m.ldProgram = parseLadder(m.strings.count("LDRungs") ? m.strings["LDRungs"] : "");
-        runLadder(sim, *m.ldProgram);
+        runLadder(sim, *m.ldProgram, sample, clock);
         return;
     }
     if (m.kind == WIREBENCH_BLOCK_MARAFLOW_ST) {
@@ -486,14 +591,7 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
             if (!m.stCompiled) m.stError = (line > 0 ? "line " + std::to_string(line) + ": " : "") + error;
         }
         if (!m.stCompiled) return;
-        auto read = [sim](const std::string &name) -> double {
-            auto exact = sim->operands.find(name);
-            if (exact != sim->operands.end()) return exact->second;
-            std::string upper = name;
-            for (auto &c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            auto found = sim->operands.find(upper);
-            return found == sim->operands.end() ? 0.0 : found->second;
-        };
+        auto read = [sim](const std::string &name) -> double { return ldOperand(sim, name); };
         auto write = [sim](const std::string &name, double value) { sim->operands[name] = value; };
         m.stInterpreter->execute(read, write, m.stVariables);
         return;

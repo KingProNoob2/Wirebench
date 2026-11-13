@@ -63,9 +63,11 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 ## Limits
 
 - **Ladder pages** run through a native evaluator: series NO/NC/edge contacts, parallel branches with their
-  start/end columns, normal/negated/set/reset/edge coils and analog moves, immediate operand writes and per-element
-  edge memory. Rungs are grouped by thread so scheduler order matches Maraflow. **Not yet:** function-block elements
-  embedded in a rung and dotted `Block.Pin` operands (the evaluator works on plain operands).
+  start/end columns, normal/negated/set/reset/edge coils, analog moves, immediate operand writes and per-element
+  edge memory. Rungs are grouped by thread so scheduler order matches Maraflow. **Function-block elements** execute
+  too: `En` comes from rung power, every other input is resolved from its operand/literal, outputs are written to
+  their bound operands, the first BOOL output gates power onward, and the block keeps its state between scans.
+  Operands may be plain names, literals or dotted `Block.Pin` references.
 
 ## Where it lives
 

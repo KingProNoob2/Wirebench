@@ -291,20 +291,44 @@ public struct MaraflowImporter {
             value.replacingOccurrences(of: "\u{1F}", with: " ")
                 .replacingOccurrences(of: "\n", with: " ")
         }
+        func typeCode(_ type: String) -> Int {
+            switch type.uppercased() {
+            case "BOOL", "BOOLEAN", "BIT": return 0
+            case "LONG", "LINT", "INT64": return 2
+            case "FLOAT", "REAL": return 3
+            default: return 1
+            }
+        }
+        func elementLine(_ tag: String, _ element: MaraflowLadderElement) -> String {
+            var line = "\(tag)\u{1F}\(clean(element.kind))\u{1F}\(clean(element.operand))\u{1F}\(clean(element.sourceOperand))\n"
+            guard element.kind == "FUNCTION_BLOCK", let block = element.block,
+                  let definition = MaraflowCatalog.byId[block.definitionId],
+                  let variant = MaraflowCatalog.all.firstIndex(where: { $0.id == definition.id })
+            else { return line }
+            let hasEnable = block.inputs.first?.short.lowercased() == "en"
+            line += "F\u{1F}\(variant)\u{1F}\(block.inputs.count)\u{1F}\(block.outputs.count)\u{1F}\(hasEnable ? 1 : 0)\n"
+            for pin in block.inputs {
+                line += "I\u{1F}\(typeCode(pin.type))\u{1F}\(clean(pin.constant))\n"
+            }
+            for pin in block.outputs {
+                line += "O\u{1F}\(typeCode(pin.type))\u{1F}\(clean(pin.constant))\n"
+            }
+            return line
+        }
         var text = ""
         for rung in rungs.sorted(by: { $0.order < $1.order }) {
             text += "R\u{1F}\(rung.order)\n"
             for element in rung.main {
-                text += "M\u{1F}\(clean(element.kind))\u{1F}\(clean(element.operand))\u{1F}\(clean(element.sourceOperand))\n"
+                text += elementLine("M", element)
             }
             for branch in rung.branches {
                 text += "B\u{1F}\(branch.start)\u{1F}\(branch.end)\n"
                 for element in branch.elements {
-                    text += "E\u{1F}\(clean(element.kind))\u{1F}\(clean(element.operand))\u{1F}\(clean(element.sourceOperand))\n"
+                    text += elementLine("E", element)
                 }
             }
             for coil in rung.coils {
-                text += "C\u{1F}\(clean(coil.kind))\u{1F}\(clean(coil.operand))\u{1F}\(clean(coil.sourceOperand))\n"
+                text += elementLine("C", coil)
             }
         }
         return PCCModule(id: id, guid: MaraflowLdPage.guid, name: "LD \(caption) T\(thread)",

@@ -100,6 +100,7 @@ struct MaraflowLadderElement {
     var kind: String
     var operand: String
     var sourceOperand: String
+    var block: MaraflowBlock?
 }
 
 struct MaraflowLadderBranch {
@@ -235,9 +236,12 @@ struct MaraflowProject {
     }
 
     private static func readLadderElement(_ document: MaraflowDocument, prefix: String) -> MaraflowLadderElement {
-        MaraflowLadderElement(kind: document.string(prefix + "kind", "NO_CONTACT"),
-                              operand: document.string(prefix + "operand"),
-                              sourceOperand: document.string(prefix + "srcOperand"))
+        let kind = document.string(prefix + "kind", "NO_CONTACT")
+        let block = kind == "FUNCTION_BLOCK" ? readBlock(document, prefix: prefix + "fb.", index: 0) : nil
+        return MaraflowLadderElement(kind: kind,
+                                     operand: document.string(prefix + "operand"),
+                                     sourceOperand: document.string(prefix + "srcOperand"),
+                                     block: block)
     }
 
     private static func readBlock(_ document: MaraflowDocument, prefix: String, index: Int) -> MaraflowBlock {

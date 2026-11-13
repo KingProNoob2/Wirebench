@@ -819,6 +819,93 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: modules["ReadDO6"]!)[0].asInt == 0, "edge contact clears")
     }
 
+    @Test("Ladder operands can read another block's pin")
+    func ladderDottedOperand() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "LadderDotted"),
+            ("project.pageCount", "3"),
+            ("page.0.name", "Source"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "1"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "Ladder"),
+            ("page.1.language", "LD"),
+            ("page.1.rungCount", "1"),
+            ("page.1.rung.0.threadId", "2"),
+            ("page.1.rung.0.order", "10"),
+            ("page.1.rung.0.mainCount", "1"),
+            ("page.1.rung.0.main.0.kind", "NO_CONTACT"),
+            ("page.1.rung.0.main.0.operand", "Source.Out"),
+            ("page.1.rung.0.coilCount", "1"),
+            ("page.1.rung.0.coil.0.kind", "NORMAL_COIL"),
+            ("page.1.rung.0.coil.0.operand", "DO7"),
+            ("page.2.name", "Read"),
+            ("page.2.language", "FBD"),
+            ("page.2.blockCount", "1"),
+            ("page.2.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "source", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "Source", gridX: 2, gridY: 2, order: -100,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "7")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "SCRATCH")])
+        entries += Self.block("page.2.block.0.", id: "reader", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read7", gridX: 2, gridY: 2, order: 100,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "DO7")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "lddotted")
+        let reader = try #require(outcome.project.modules.first { $0.name == "Read7" })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: reader.id)[0].asInt == 1)
+    }
+
+    @Test("A function block embedded in a ladder rung executes")
+    func ladderFunctionBlock() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "LadderFB"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Ladder"),
+            ("page.0.language", "LD"),
+            ("page.0.rungCount", "1"),
+            ("page.0.rung.0.threadId", "2"),
+            ("page.0.rung.0.order", "10"),
+            ("page.0.rung.0.mainCount", "1"),
+            ("page.0.rung.0.main.0.kind", "FUNCTION_BLOCK"),
+            ("page.0.rung.0.main.0.operand", "Add1"),
+            ("page.0.rung.0.coilCount", "1"),
+            ("page.0.rung.0.coil.0.kind", "NORMAL_COIL"),
+            ("page.0.rung.0.coil.0.operand", "DO0"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "2"),
+            ("page.1.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.rung.0.main.0.fb.", id: "add", definition: "Math.Add", type: "Add", name: "Add1",
+                              gridX: 0, gridY: 0, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("X1", "Operand 1", "INT", "5"),
+                                       ("X2", "Operand 2", "INT", "2")],
+                              outputs: [("Y", "Result", "INT", "REG_5")])
+        entries += Self.block("page.1.block.0.", id: "r5", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read5", gridX: 2, gridY: 2, order: 100,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_5")])
+        entries += Self.block("page.1.block.1.", id: "r0", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "ReadDO0", gridX: 10, gridY: 2, order: 110,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "DO0")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "ldfb")
+        let read5 = try #require(outcome.project.modules.first { $0.name == "Read5" })
+        let readDO = try #require(outcome.project.modules.first { $0.name == "ReadDO0" })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: read5.id)[0].asInt == 7, "Add(5,2) through the rung")
+        #expect(core.outPins(moduleId: readDO.id)[0].asInt == 1, "an Int FB's power continues through the rung")
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [
