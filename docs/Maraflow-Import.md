@@ -72,3 +72,106 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
   inverted outputs, wires, the app's import/Save As flow, and a non-project file.
 
 Open one with **File ▸ Open**, `wirebench-cli info project.mfl`, or any other CLI command that takes a project.
+
+## Definition reference
+
+Every definition in Maraflow's `BlockCatalog` and what the importer does with it. `inert` means an Unresolved placeholder with the original pins and constants: the topology is kept, simulation is not.
+
+| Maraflow definition | Wirebench | Note |
+|---|---|---|
+| `Bool.And` | `And` |  |
+| `Bool.Nand` | `And` | output inverted at the consumer |
+| `Bool.Or` | `Or` |  |
+| `Bool.Nor` | `Or` | output inverted |
+| `Bool.Xor` | `Xor` |  |
+| `Bool.Xnor` | `Xor` | output inverted |
+| `Bool.Not` | `Not` |  |
+| `Bool.RS` | `RS` |  |
+| `Bool.SR` | `RS` | reset-dominant difference noted |
+| `Math.Add` | `IAdd` |  |
+| `Math.Sub` | `ISub` |  |
+| `Math.Mul` | `IMul` |  |
+| `Math.Div` | `Div` | Err output dropped |
+| `Math.Min` | inert |  |
+| `Math.Max` | inert |  |
+| `Math.Mod` | inert |  |
+| `Math.Pow` | inert |  |
+| `Math.Abs` | `IAbs` |  |
+| `Math.Neg` | `INeg` |  |
+| `Math.Sqrt` | `FSqrt` |  |
+| `Math.Sin` | `FSin` |  |
+| `Math.Cos` | `FCos` |  |
+| `Math.Clamp` | inert |  |
+| `Math.Random` | inert |  |
+| `Math.Scale` | inert |  |
+| `Math.PID` | inert |  |
+| `IO.DI` | `8xDI` | channel 0 |
+| `IO.DO` | `8xDO` | channel 0 |
+| `IO.8xDI` | `8xDI` |  |
+| `IO.8xDO` | `8xDO` |  |
+| `IO.AI` | `8xAI` | channel 0 |
+| `IO.AO` | inert |  |
+| `IO.PWM` | inert |  |
+| `IO.Encoder` | inert |  |
+| `Comm.ModbusRTU.MbRtuRead` | inert |  |
+| `Comm.ModbusRTU.MbRtuWrite` | inert |  |
+| `Comm.ModbusTCP.MbTcpRead` | inert |  |
+| `Comm.ModbusTCP.MbTcpWrite` | inert |  |
+| `Comm.REST.RestGet` | inert |  |
+| `Comm.REST.RestPost` | inert |  |
+| `Comm.DS18B20.DS18B20Read` | inert |  |
+| `Comm.I2C.I2CRead` | inert |  |
+| `Comm.I2C.I2CWrite` | inert |  |
+| `Comm.SPI.SPITransfer` | inert |  |
+| `Main.Arrays.ArrayRead` | inert |  |
+| `Main.Arrays.ArrayWrite` | inert |  |
+| `Main.Comparators.EQ` | `Comparator` | AEqB |
+| `Main.Comparators.NE` | `Comparator` | AEqB inverted |
+| `Main.Comparators.GT` | `Comparator` | AGtB |
+| `Main.Comparators.GE` | `Comparator` | ALtB inverted |
+| `Main.Comparators.LT` | `Comparator` | ALtB |
+| `Main.Comparators.LE` | `Comparator` | AGtB inverted |
+| `Main.Comparators.InRange` | `InRange` | Min/Max to Low/High parameters |
+| `Main.Comparators.Hysteresis` | inert |  |
+| `Main.Conversion.PackBits` | `Bits2Int` |  |
+| `Main.Conversion.UnpackBits` | `Int2Bits` | En dropped |
+| `Main.Execution.ReadReg` | inert |  |
+| `Main.Execution.WriteReg` | inert |  |
+| `Main.Execution.Interrupt` | inert |  |
+| `Main.Safety.EStop` | inert |  |
+| `Main.Filters.MovingAvg` | inert |  |
+| `Main.Filters.LowPass` | inert |  |
+| `Main.Filters.Debounce` | inert |  |
+| `Main.Switches.Sel` | `ISwitch` |  |
+| `Main.Switches.Mux` | inert |  |
+| `Main.Switches.Demux` | `IDemux` |  |
+| `Main.Timers.DateTime` | inert |  |
+| `Main.Timers.DecodeDate` | inert |  |
+| `Main.Timers.EncodeDate` | inert |  |
+| `Main.Timers.PulseGen` | inert |  |
+| `Main.Timers.PulseLen` | inert |  |
+| `Main.Timers.SinglePulse` | inert |  |
+| `Main.Timers.Timer` | inert |  |
+| `Main.Timers.Counter` | inert |  |
+| `Macro.MacroIn` | inert |  |
+| `Macro.MacroOut` | inert |  |
+| `Macro.User.*` | inert | macro calls |
+| `Visual.Segment` | `Segment` |  |
+| `Visual.Value` | `Value` |  |
+| `Visual.Vars.BoolVar` | `BoolVar` |  |
+| `Visual.Vars.IntVar` | `IntVar` |  |
+| `Visual.Vars.LongVar` | `LongVar` |  |
+| `Ladder.Contact.NO` | inert |  |
+| `Ladder.Contact.NC` | inert |  |
+| `Ladder.Contact.POS` | inert |  |
+| `Ladder.Contact.NEG` | inert |  |
+| `Ladder.Coil.NORMAL` | inert |  |
+| `Ladder.Coil.NEGATED` | inert |  |
+| `Ladder.Coil.SET` | inert |  |
+| `Ladder.Coil.RESET` | inert |  |
+| `Ladder.Coil.POS` | inert |  |
+| `Ladder.Coil.NEG` | inert |  |
+| `Ladder.Coil.WRITE_REG` | inert |  |
+| `Ladder.Coil.ANALOG` | inert |  |
+
+Counts: \(sum(1 for _,t,_ in rows if t != 'inert')) mapped, \(sum(1 for _,t,_ in rows if t == 'inert')) inert placeholders.

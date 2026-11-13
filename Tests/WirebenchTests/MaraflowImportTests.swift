@@ -187,6 +187,37 @@ struct MaraflowImportTests {
         #expect(reopened.project?.modules.count == 5)
     }
 
+    @Test("ST, ladder and macro pages are kept with their limits reported")
+    func nonFBDPages() throws {
+        let entries: [(String, String)] = [
+            ("project.name", "Mixed"),
+            ("project.pageCount", "3"),
+            ("page.0.name", "Code"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", "VAR x : BOOL; END_VAR x := TRUE;"),
+            ("page.0.stVarCount", "1"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "Relays"),
+            ("page.1.language", "LD"),
+            ("page.1.rungCount", "2"),
+            ("page.1.blockCount", "0"),
+            ("page.1.wireCount", "0"),
+            ("page.2.name", "*Blink"),
+            ("page.2.language", "FBD"),
+            ("page.2.blockCount", "0"),
+            ("page.2.wireCount", "0"),
+        ]
+        let loaded = try ProjectFile.read(data: Self.propertiesXML(entries), filename: "mixed")
+        #expect(loaded.format == .maraflow)
+        #expect(loaded.project.pages.map(\.caption) == ["Code", "Relays", "Blink"])
+        let notes = loaded.notes.joined(separator: "\n")
+        #expect(notes.contains("Structured Text"))
+        #expect(notes.contains("ladder rung"))
+        #expect(notes.contains("Macro page"))
+        #expect(loaded.project.modules.isEmpty)
+    }
+
     @Test("A non-Maraflow XML file is not treated as one")
     func notMaraflow() throws {
         let data = Data("<not-a-project/>".utf8)
