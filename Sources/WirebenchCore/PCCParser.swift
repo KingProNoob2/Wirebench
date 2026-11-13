@@ -80,16 +80,21 @@ public final class PCCParser: @unchecked Sendable {
                 project.simOptions = parseSimOptions(elem)
             case PCCElement.pages:
                 project.pages = parsePages(elem)
+                project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: ["PAGE"])
             case PCCElement.modules:
                 project.modules = parseModules(elem)
+                project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: ["MODULE"])
             case PCCElement.connections:
                 let (inConns, paramConns) = parseConnections(elem)
                 project.inConnections = inConns
                 project.paramConnections = paramConns
+                project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: ["IN_CONNECTIONS", "PARAM_CONNECTIONS"])
             case PCCElement.projectGraphics:
                 project.graphics = parseGraphics(elem)
+                project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: ["GRAPHICS"])
             case PCCElement.plcConfiguration:
                 project.plcConfiguration = parseModules(elem)
+                project.rawSectionChildren[elemName] = unknownChildren(of: elem, known: ["MODULE"])
             default:
                 break
             }
@@ -118,6 +123,14 @@ public final class PCCParser: @unchecked Sendable {
             }
         }
         return spaced > tight
+    }
+
+    /// Children of a modelled section the model does not understand, kept verbatim.
+    private func unknownChildren(of elem: XMLElement, known: Set<String>) -> [RawXMLNode] {
+        (elem.children ?? []).compactMap { child in
+            guard let element = child as? XMLElement, let name = element.name, !known.contains(name) else { return nil }
+            return RawXMLNode(element)
+        }
     }
 
     private func parseCommunication(_ elem: XMLElement) -> CommunicationConfig {

@@ -58,6 +58,14 @@ public final class PCCSerializer: @unchecked Sendable {
         if !project.projectPath.isEmpty { a.str("PROJECT_PATH", project.projectPath) }
         if !project.origProjectPath.isEmpty { a.str("ORIG_PROJECT_PATH", project.origProjectPath) }
 
+        // A modelled section can still hold children this model does not know (a note a person added, a future
+        // Dirigo element); they were read into `rawSectionChildren` and are put back inside their section here.
+        func withSectionChildren(_ node: XMLOut, _ name: String) -> XMLOut {
+            guard let extras = project.rawSectionChildren[name], !extras.isEmpty,
+                  case .node(let section, let attrs, let kids) = node else { return node }
+            return .node(name: section, attrs: attrs, children: kids + extras.map { resolve($0) })
+        }
+
         var children: [XMLOut] = []
         for name in emissionOrder(for: project) {
             switch name {
@@ -68,16 +76,20 @@ public final class PCCSerializer: @unchecked Sendable {
             case PCCElement.simOptions:
                 children.append(simOptionsElement(project.simOptions))
             case PCCElement.pages:
-                children.append(pagesElement(project.pages))
+                children.append(withSectionChildren(pagesElement(project.pages), name))
             case PCCElement.modules:
-                children.append(modulesElement(project.modules))
+                children.append(withSectionChildren(modulesElement(project.modules), name))
             case PCCElement.connections:
-                children.append(connectionsElement(project))
+                children.append(withSectionChildren(connectionsElement(project), name))
             case PCCElement.projectGraphics:
-                children.append(graphicsElement(project.graphics))
+                children.append(withSectionChildren(graphicsElement(project.graphics), name))
             case PCCElement.plcConfiguration:
                 if !project.plcConfiguration.isEmpty {
-                    children.append(.node(name: PCCElement.plcConfiguration, attrs: [:], children: project.plcConfiguration.map(moduleElement)))
+                    children.append(withSectionChildren(
+                        .node(name: PCCElement.plcConfiguration, attrs: [:],
+                              children: project.plcConfiguration.map(moduleElement)), name))
+                } else if let extras = project.rawSectionChildren[name], !extras.isEmpty {
+                    children.append(.node(name: name, attrs: [:], children: extras.map { resolve($0) }))
                 } else if project.sectionOrder.contains(PCCElement.plcConfiguration) {
                     // The file had the section (possibly empty); keep it, or the next save drops a section.
                     children.append(.leaf(name: PCCElement.plcConfiguration, attrs: [:]))

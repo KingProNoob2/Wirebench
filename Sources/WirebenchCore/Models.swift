@@ -478,6 +478,9 @@ public struct PCCProject: Sendable, Codable, Equatable {
     /// Top-level sections the object model does not understand (e.g. `CONSTANTS`), kept
     /// verbatim so they survive a save.
     public var rawSections: [RawXMLNode]
+    /// Children of a modelled section that this model does not understand, keyed by section name (`MODULES`, `PAGES`,
+    /// `CONNECTIONS`, `PROJECT_GRAPHICS`, `PLC_CONFIGURATION`): a save puts them back instead of dropping them.
+    public var rawSectionChildren: [String: [RawXMLNode]]
     /// Dirigo changed its XML writer at some point: older builds emit `<TAG ... />` and newer
     /// ones `<TAG .../>`. The style is uniform within a file, so it is detected once when the
     /// project is read and reproduced when it is written.
@@ -512,6 +515,7 @@ public struct PCCProject: Sendable, Codable, Equatable {
         rawAttributes: AttributeBag = [:],
         sectionOrder: [String] = PCCElement.defaultSectionOrder,
         rawSections: [RawXMLNode] = [],
+        rawSectionChildren: [String: [RawXMLNode]] = [:],
         selfClosingSpace: Bool = false,
         communication: CommunicationConfig = CommunicationConfig(),
         appOptions: AppOptions = AppOptions(),
@@ -539,6 +543,7 @@ public struct PCCProject: Sendable, Codable, Equatable {
         self.rawAttributes = rawAttributes
         self.sectionOrder = sectionOrder
         self.rawSections = rawSections
+        self.rawSectionChildren = rawSectionChildren
         self.selfClosingSpace = selfClosingSpace
         self.communication = communication
         self.appOptions = appOptions

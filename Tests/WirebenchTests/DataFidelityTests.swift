@@ -28,6 +28,20 @@ struct DataFidelityTests {
         #expect(wire.points.first?.x == 20)
     }
 
+    @Test("An unknown child of a modelled section survives a save")
+    func unknownSectionChild() throws {
+        var project = PCCProject(name: "P", profile: "Sybas Duino-E")
+        project.pages = [ProjectPage(caption: "main")]
+        project.modules = [BlockFactory.makeModule(guid: AndBlock.guid, id: 1, name: "And1", x: 0, y: 0,
+                                                 order: 10, threadId: 1, page: "main")]
+        let xml = PCCSerializer().serialize(project: project)
+        let injected = xml.replacingOccurrences(of: "</MODULES>", with: "<NOTE K=\"1\"/></MODULES>")
+        let read = try PCCParser().parse(xmlString: injected)
+        let again = PCCSerializer().serialize(project: read)
+        #expect(again.contains("NOTE"), "an unknown child of MODULES was dropped")
+        #expect(again.contains("K=\"1\""))
+    }
+
     @Test("A moved graphic node and a pen change reach the verbatim subtree")
     func graphicEditsReachTheFile() throws {
         let url = TestCorpus.directories[0].appendingPathComponent("rulkoshaddirigo.pcc")
