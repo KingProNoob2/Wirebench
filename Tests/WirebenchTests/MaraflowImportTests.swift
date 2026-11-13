@@ -203,7 +203,14 @@ struct MaraflowImportTests {
             ("page.0.graphicCount", "1"),
             ("page.0.graphic.0.kind", "RECTANGLE"),
             ("page.0.graphic.0.gridX", "4"),
+            ("page.0.graphic.0.gridY", "2"),
+            ("page.0.graphic.0.gridW", "6"),
+            ("page.0.graphic.0.gridH", "3"),
             ("page.0.graphic.0.text", "Pump"),
+            ("page.0.wireCount", "1"),
+            ("page.0.wire.0.netName", "PumpRun"),
+            ("page.0.wire.0.busId", "bus-A"),
+            ("page.0.wire.0.hidden", "true"),
         ]
         let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "extras")
         let extras = try #require(outcome.project.maraflow)
@@ -211,8 +218,18 @@ struct MaraflowImportTests {
         #expect(extras.properties["project.tag.0.name"] == "Speed")
         #expect(extras.properties["project.estop.enabled"] == "true")
         #expect(extras.properties["page.0.graphic.0.text"] == "Pump")
+        #expect(extras.tags.map(\.name) == ["Speed"])
+        #expect(extras.eStop.enabled)
+        #expect(extras.eStop.rules.first?.channel == "DI3")
+        #expect(extras.graphicCount == 1)
+        #expect(extras.busCount == 1)
+        #expect(extras.hiddenWireCount == 1)
+        #expect(extras.pageSummaries.first?.language == "FBD")
+        #expect(outcome.project.graphics.count == 1, "the graphic is visible on the canvas")
+        #expect(outcome.project.graphics.first?.text == "Pump")
         let decoded = try WirebenchDocument.decode(WirebenchDocument.encode(outcome.project))
         #expect(decoded.maraflow == extras)
+        #expect(decoded.graphics == outcome.project.graphics)
     }
 
     @Test("The app opens .mfl as an imported project and saves it as .wbp")

@@ -60,6 +60,16 @@ values. The topology is preserved, the block does not simulate, and the import r
 Wires are rebuilt from the source/target block ids and pin indices through the same mapping; their route points and
 buses are not imported (Wirebench routes its own elbows). Hidden wires become normal wires with a note.
 
+## What is visible
+
+- **Canvas:** graphic objects map to native shapes/text (rectangle, ellipse, line, text), scaled from Maraflow's grid
+  to 32-point cells. Other graphic kinds are drawn as rectangles; their exact kind stays in the preserved properties.
+- **Inspector:** with nothing selected, the inspector shows the Maraflow target/language, symbolic tags, E-Stop mode
+  and rules, per-page language/block/rung counts, graphics, bus bundles and hidden-wire counts.
+- **CLI:** `wirebench-cli info` prints the same metadata summary next to the module/page counts.
+- **Preserved but not rendered:** wire route points, net names, bus ids and hidden flags; the raw `.mfl` properties
+  remain the source of truth for a future `.mfl` exporter.
+
 ## Limits
 
 - **Ladder pages** run through a native evaluator: series NO/NC/edge contacts, parallel branches with their

@@ -149,6 +149,13 @@ struct WirebenchCLI {
             print("  In Connections  : \(project.inConnections.count)")
             print("  Param Conns     : \(project.paramConnections.count)")
             print("  Graphics shapes : \(project.graphics.count)")
+            if let maraflow = project.maraflow {
+                print("  Maraflow target : \(maraflow.targetPlatform)")
+                print("  Maraflow tags   : \(maraflow.tags.count)")
+                print("  Maraflow EStop  : \(maraflow.eStop.enabled ? "on" : "off") \(maraflow.eStop.mode)")
+                print("  Pages (mf)      : \(maraflow.pageSummaries.map(\.name).joined(separator: ", "))")
+                print("  Graphics (mf)   : \(maraflow.graphicCount), buses \(maraflow.busCount), hidden wires \(maraflow.hiddenWireCount)")
+            }
             print("-------------------------------------------------------------------")
 
             print("\nModules by Page:")

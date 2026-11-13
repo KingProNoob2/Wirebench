@@ -118,6 +118,25 @@ struct MaraflowRung {
     var coils: [MaraflowLadderElement]
 }
 
+struct MaraflowGraphic {
+    var kind: String
+    var gridX: Int
+    var gridY: Int
+    var gridW: Int
+    var gridH: Int
+    var strokeRgb: Int
+    var fillRgb: Int
+    var filled: Bool
+    var strokeWidth: Int
+    var dashed: Bool
+    var text: String
+    var fontSize: Int
+    var boundTargetPin: String
+    var toggleButton: Bool
+    var indicatorEnabled: Bool
+    var indicatorPin: String
+}
+
 struct MaraflowPage {
     var name: String
     var language: String
@@ -128,7 +147,7 @@ struct MaraflowPage {
     var stThreadID: Int
     var stOrder: Int
     var rungs: [MaraflowRung]
-    var graphicCount: Int
+    var graphics: [MaraflowGraphic]
 
     var isMacro: Bool { name.hasPrefix("*") }
     var cleanName: String {
@@ -181,6 +200,29 @@ struct MaraflowProject {
                 ))
             }
             let rungCount = max(0, min(document.int(prefix + "rungCount", 0), 10_000))
+            let graphicCount = max(0, min(document.int(prefix + "graphicCount", 0), 10_000))
+            var graphics: [MaraflowGraphic] = []
+            for graphicIndex in 0..<graphicCount {
+                let graphicPrefix = prefix + "graphic.\(graphicIndex)."
+                graphics.append(MaraflowGraphic(
+                    kind: document.string(graphicPrefix + "kind", "RECTANGLE"),
+                    gridX: document.int(graphicPrefix + "gridX", 5),
+                    gridY: document.int(graphicPrefix + "gridY", 5),
+                    gridW: document.int(graphicPrefix + "gridW", 6),
+                    gridH: document.int(graphicPrefix + "gridH", 4),
+                    strokeRgb: document.int(graphicPrefix + "strokeRgb", -13421773),
+                    fillRgb: document.int(graphicPrefix + "fillRgb", -984840),
+                    filled: document.bool(graphicPrefix + "filled", false),
+                    strokeWidth: document.int(graphicPrefix + "strokeWidth", 1),
+                    dashed: document.bool(graphicPrefix + "dashed", false),
+                    text: document.string(graphicPrefix + "text", ""),
+                    fontSize: document.int(graphicPrefix + "fontSize", 11),
+                    boundTargetPin: document.string(graphicPrefix + "boundTargetPin", ""),
+                    toggleButton: document.bool(graphicPrefix + "toggleButton", false),
+                    indicatorEnabled: document.bool(graphicPrefix + "indicatorEnabled", false),
+                    indicatorPin: document.string(graphicPrefix + "indicatorPin", "")
+                ))
+            }
             var rungs: [MaraflowRung] = []
             for rungIndex in 0..<rungCount {
                 let rungPrefix = prefix + "rung.\(rungIndex)."
@@ -219,12 +261,12 @@ struct MaraflowProject {
                 stThreadID: document.int(prefix + "stThreadId", 2),
                 stOrder: document.int(prefix + "stOrder", 10),
                 rungs: rungs,
-                graphicCount: document.int(prefix + "graphicCount", 0)
+                graphics: graphics
             ))
         }
         if pages.isEmpty { pages = [MaraflowPage(name: "Page 1", language: "FBD", blocks: [], wires: [],
                                                  stCode: "", stVariables: [], stThreadID: 2, stOrder: 10,
-                                                 rungs: [], graphicCount: 0)] }
+                                                 rungs: [], graphics: [])] }
         return MaraflowProject(
             name: document.string("project.name", filename),
             author: document.string("project.author"),

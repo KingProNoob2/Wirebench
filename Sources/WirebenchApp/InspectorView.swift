@@ -136,6 +136,8 @@ public struct InspectorView: View {
             }
         } else if let entry = selectedAnnotation {
             AnnotationInspector(model: model, index: entry.index)
+        } else if let extras = model.project?.maraflow {
+            MaraflowExtrasInspector(extras: extras)
         } else {
             ContentUnavailableView {
                 Label("No Selection", systemImage: "cursorarrow.click.2")
