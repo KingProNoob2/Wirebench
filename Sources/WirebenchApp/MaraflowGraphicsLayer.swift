@@ -7,6 +7,9 @@ import WirebenchModel
 /// from Dirigo's `ProjectGraphic` model, which has only rectangle/ellipse/line/text and no bindings.
 struct MaraflowGraphicsLayer: View {
     @Bindable var model: AppModel
+    /// Changes whenever the simulation values do. Passing it as a value makes the canvas redraw even though the
+    /// indicator lookups happen inside the `Canvas` closure.
+    let version: UInt64
 
     private let grid: CGFloat = 32
 
@@ -19,26 +22,33 @@ struct MaraflowGraphicsLayer: View {
     }
 
     var body: some View {
-        // Reading the tick count keeps indicator fills live as the simulation runs.
-        let _ = model.tickCount
-        let graphics = graphics
-        ZStack(alignment: .topLeading) {
-            Canvas { context, _ in
-                for graphic in graphics where graphic.kind != "VISUAL_BUTTON" {
-                    draw(graphic, in: &context)
-                }
+        // The timeline is the backstop that keeps indicators moving while the simulation plays even if no other
+        // observed value happens to change in a frame; snapshots and `version` still drive paused edits.
+        TimelineView(.animation(minimumInterval: 0.1, paused: !model.isPlaying)) { _ in
+            let _ = version
+            let graphics = graphics
+            let isActive = graphics.map { graphic in
+                graphic.indicatorEnabled && !graphic.indicatorPin.isEmpty
+                    && model.maraflowBooleanValue(graphic.indicatorPin)
             }
-            .allowsHitTesting(false)
+            ZStack(alignment: .topLeading) {
+                Canvas { context, _ in
+                    for (index, graphic) in graphics.enumerated() where graphic.kind != "VISUAL_BUTTON" {
+                        draw(graphic, active: isActive[index], in: &context)
+                    }
+                }
+                .allowsHitTesting(false)
 
-            ForEach(Array(graphics.enumerated()), id: \.offset) { _, graphic in
-                if graphic.kind == "VISUAL_BUTTON" {
-                    MaraflowVisualButton(model: model, graphic: graphic, grid: grid)
+                ForEach(Array(graphics.enumerated()), id: \.offset) { _, graphic in
+                    if graphic.kind == "VISUAL_BUTTON" {
+                        MaraflowVisualButton(model: model, graphic: graphic, grid: grid)
+                    }
                 }
             }
         }
     }
 
-    private func draw(_ graphic: MaraflowExtras.Graphic, in context: inout GraphicsContext) {
+    private func draw(_ graphic: MaraflowExtras.Graphic, active: Bool, in context: inout GraphicsContext) {
         let rect = self.rect(for: graphic)
         let kind = graphic.kind.uppercased()
         if kind == "TEXT" {
@@ -58,7 +68,6 @@ struct MaraflowGraphicsLayer: View {
         }
 
         let indicatorConfigured = graphic.indicatorEnabled && !graphic.indicatorPin.isEmpty
-        let active = indicatorConfigured && model.maraflowBooleanValue(graphic.indicatorPin)
         let shouldFill = graphic.filled || indicatorConfigured
         let fill = color(indicatorConfigured
                          ? (active ? graphic.indicatorActiveColor : graphic.indicatorInactiveColor)

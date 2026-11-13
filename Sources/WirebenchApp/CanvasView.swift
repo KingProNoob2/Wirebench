@@ -256,7 +256,7 @@ public struct CanvasView: View {
         ZStack(alignment: .topLeading) {
             containerRegions(pageModules)
 
-            MaraflowGraphicsLayer(model: model)
+            MaraflowGraphicsLayer(model: model, version: model.simulationVersion)
                 .allowsHitTesting(true)
 
             // Both layers take plain values and are `Equatable`, so on a simulation tick SwiftUI

@@ -1602,10 +1602,14 @@ public final class AppModel: @unchecked Sendable {
         return nil
     }
 
-    /// The live boolean of a Maraflow indicator/output binding.
+    /// The live boolean of a Maraflow indicator/output binding. Published snapshots are read first: they are what the
+    /// canvas observes, so a redraw is guaranteed when the value moves.
     public func maraflowBooleanValue(_ target: String) -> Bool {
-        guard let binding = maraflowBinding(target, output: true),
-              let node = getNode(id: binding.moduleId),
+        guard let binding = maraflowBinding(target, output: true) else { return false }
+        if let snapshot = snapshots[binding.moduleId], binding.pinIndex < snapshot.outValues.count {
+            return snapshot.outValues[binding.pinIndex].asBool
+        }
+        guard let node = getNode(id: binding.moduleId),
               binding.pinIndex < node.block.outPins.count else { return false }
         return node.block.outPins[binding.pinIndex].asBool
     }
