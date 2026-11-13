@@ -610,6 +610,13 @@ public struct MainView: View {
 #endif
 
         ToolbarItem(placement: .primaryAction) {
+            Button { openWindow(id: "swift") } label: {
+                Label("Structured Text", systemImage: "text.alignleft")
+            }
+            .help("Structured Text Editor (⌥⌘E)")
+        }
+
+        ToolbarItem(placement: .primaryAction) {
             // The pane animates in and out; the button only starts it. A toggle, so it is drawn pressed — highlighted
             // — while the inspector is open.
             Toggle(isOn: Binding(get: { showInspector }, set: { _ in toggleInspector() })) {
