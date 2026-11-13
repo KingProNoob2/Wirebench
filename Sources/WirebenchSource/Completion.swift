@@ -15,6 +15,7 @@ public enum SourceCompletion {
                 words.insert(instance.name)
             }
             words.formUnion(unit.variables.map(\.name))
+            words.formUnion(unit.arrays.map(\.name))
             words.formUnion(unit.pins.map(\.name))
         }
         // `name.` asks for that instance's outputs (and, for a macro, its declared output pins).

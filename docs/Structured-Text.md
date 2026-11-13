@@ -32,7 +32,8 @@ END_PROGRAM
 - **Arrays.** `a : ARRAY[0..15] OF INT;` declares an array in the PLC data area (INT or LONG; there is no
   `CreateFloatArray` block). `a[3] := 5;` writes a slot and `x := a[3];` reads one; the declared lower bound is
   subtracted because the array blocks are 0-based. A read sees the value the scan began with; writes happen after the
-  scan's other work, in source order. At most 16 arrays (the PLC's Id range 0–15).
+  scan's other work, in source order. At most 16 arrays (the PLC's Id range 0–15), and only in a `PROGRAM`: a function
+  block's array would share those Ids with the rest of the PLC data area.
 - **State.** A value declared in `VAR` without an address is a stored variable — a `BoolVar`/`IntVar`/`LongVar`/
   `FloatVar` plus the `Set` that writes it. It becomes visible from the next scan, exactly like Dirigo's own clocked
   behaviour. An initialiser (`:= 5`) is the variable's configured value (`INIT_VALUE`).

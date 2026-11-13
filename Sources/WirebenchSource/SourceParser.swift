@@ -343,6 +343,9 @@ public struct SourceParser {
                 guard region == "VAR", address == nil else {
                     throw error("an ARRAY is declared in a plain VAR block")
                 }
+                guard unit.kind == .program else {
+                    throw error("an ARRAY is only supported in a PROGRAM; a function block's array would share the PLC's Ids")
+                }
                 let array = try arrayDeclaration(name: name, line: nameToken.line)
                 guard !isNameTaken(name, in: unit) else { throw error("'\(name)' is declared twice") }
                 guard unit.arrays.count < 16 else {

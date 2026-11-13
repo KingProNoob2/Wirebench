@@ -73,6 +73,7 @@ in `docs/Structured-Text.md`; tests must pin the semantics, including the iterat
 
 ## Stage 4: functions and arrays (INT/LONG arrays done; functions not started)
 
+Arrays are only accepted in a PROGRAM (a function block's array would collide on the PLC's Id range).
 Array declarations, element reads and writes are lowered to `Create…Array`/`Read…Array`/`Write…Array` with the
 lower bound subtracted, at most 16 arrays and no REAL arrays (no create block). Array writes are listed in recovery
 rather than recovered. FUNCTIONS are still not implemented: typed `FUNCTION` interfaces need typed macro pins first.

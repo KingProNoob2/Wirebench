@@ -600,6 +600,15 @@ struct StructuredTextTests {
                  n := a;
              END_PROGRAM
              """, "read an element"),
+            ("""
+             FUNCTION_BLOCK F
+             VAR_INPUT x : BOOL; END_VAR
+             VAR a : ARRAY[0..3] OF INT; END_VAR
+             END_FUNCTION_BLOCK
+             PROGRAM P
+             VAR b AT %IX0 : BOOL; END_VAR
+             END_PROGRAM
+             """, "only supported in a PROGRAM"),
         ]
         for (source, fragment) in cases {
             let message = Self.error(source)
