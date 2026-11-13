@@ -223,6 +223,8 @@ struct MaraflowImportTests {
         #expect(extras.eStop.rules.first?.channel == "DI3")
         #expect(extras.graphicCount == 1)
         #expect(extras.busCount == 1)
+        #expect(extras.buses.first?.id == "bus-A")
+        #expect(extras.buses.first?.wireCount == 1)
         #expect(extras.hiddenWireCount == 1)
         #expect(extras.pageSummaries.first?.language == "FBD")
         #expect(outcome.project.graphics.count == 1, "the graphic is visible on the canvas")
@@ -730,12 +732,12 @@ struct MaraflowImportTests {
             ("page.2.wireCount", "0"),
         ]
         entries += Self.block("page.1.block.0.", id: "d0", definition: "Main.Execution.WriteReg",
-                              type: "WriteReg", name: "Drive0", gridX: 2, gridY: 2, order: -100,
+                              type: "WriteReg", name: "Drive0", gridX: 2, gridY: 2, order: -1_000_100,
                               inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
                               outputs: [("Out", "Stored", "INT", "0")],
                               properties: [("RegisterName", "DI0")])
         entries += Self.block("page.1.block.1.", id: "d1", definition: "Main.Execution.WriteReg",
-                              type: "WriteReg", name: "Drive1", gridX: 10, gridY: 2, order: -90,
+                              type: "WriteReg", name: "Drive1", gridX: 10, gridY: 2, order: -1_000_090,
                               inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "0")],
                               outputs: [("Out", "Stored", "INT", "0")],
                               properties: [("RegisterName", "DI1")])
@@ -807,7 +809,7 @@ struct MaraflowImportTests {
         for (index, driver) in drivers.enumerated() {
             entries += Self.block("page.1.block.\(index).", id: "d\(index)", definition: "Main.Execution.WriteReg",
                                   type: "WriteReg", name: "Drive\(index)", gridX: index * 8, gridY: 2,
-                                  order: -200 + index * 10,
+                                  order: -1_000_200 + index * 10,
                                   inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", driver.1)],
                                   outputs: [("Out", "Stored", "INT", "0")],
                                   properties: [("RegisterName", driver.0)])
@@ -862,7 +864,7 @@ struct MaraflowImportTests {
             ("page.2.wireCount", "0"),
         ]
         entries += Self.block("page.0.block.0.", id: "source", definition: "Main.Execution.WriteReg",
-                              type: "WriteReg", name: "Source", gridX: 2, gridY: 2, order: -100,
+                              type: "WriteReg", name: "Source", gridX: 2, gridY: 2, order: -1_000_100,
                               inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "7")],
                               outputs: [("Out", "Stored", "INT", "0")],
                               properties: [("RegisterName", "SCRATCH")])
@@ -987,7 +989,7 @@ struct MaraflowImportTests {
             ("page.1.wireCount", "0"),
         ]
         entries += Self.block("page.0.block.0.", id: "di", definition: "Main.Execution.WriteReg",
-                              type: "WriteReg", name: "DriveDI", gridX: 2, gridY: 2, order: -100,
+                              type: "WriteReg", name: "DriveDI", gridX: 2, gridY: 2, order: -1_000_100,
                               inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
                               outputs: [("Out", "Stored", "INT", "0")],
                               properties: [("RegisterName", "DI0")])
@@ -1003,6 +1005,53 @@ struct MaraflowImportTests {
         #expect(core.operandValue("DO0") == 1, "before the rule trips the driver writes DO0")
         core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
         #expect(core.operandValue("DO0") == 0, "a tripped E-Stop forces hardware outputs to zero")
+    }
+
+    @Test("E-Stop mode 2 runs only the dedicated page and does not zero outputs")
+    func eStopDedicatedPage() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "SafetyPage"),
+            ("project.pageCount", "2"),
+            ("project.estop.enabled", "true"),
+            ("project.estop.mode", "DEDICATED_ESTOP_PAGE"),
+            ("project.estop.pageName", "!EStop"),
+            ("project.estop.manualReset", "true"),
+            ("project.estop.ruleCount", "1"),
+            ("project.estop.rule.0.channel", "DI0"),
+            ("project.estop.rule.0.activeLow", "false"),
+            ("project.estop.rule.0.enabled", "true"),
+            ("page.0.name", "Normal"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "2"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "!EStop"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "1"),
+            ("page.1.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "di", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "DriveDI", gridX: 2, gridY: 2, order: -1_000_100,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DI0")])
+        entries += Self.block("page.0.block.1.", id: "do", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "DriveDO", gridX: 10, gridY: 2, order: -90,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DO0")])
+        entries += Self.block("page.1.block.0.", id: "safe", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "SafeDO", gridX: 2, gridY: 2, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DO5")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "safetypage")
+        #expect(outcome.project.pages.map(\.caption) == ["Normal", "!EStop"])
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.operandValue("DO0") == 1)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.operandValue("DO0") == 1, "mode 2 does not force outputs; the normal page is skipped")
+        #expect(core.operandValue("DO5") == 1, "the dedicated E-Stop page still runs")
     }
 
     @Test("ST, ladder and macro pages are kept with their limits reported")

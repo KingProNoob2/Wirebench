@@ -34,6 +34,19 @@ struct MaraflowExtrasInspector: View {
                 }
             }
 
+            if !extras.buses.isEmpty {
+                InspectorCard(title: "Buses") {
+                    ForEach(Array(extras.buses.enumerated()), id: \.offset) { _, bus in
+                        LabeledContent(bus.id, value: "\(bus.wireCount) wires\(bus.hiddenCount > 0 ? " · \(bus.hiddenCount) hidden" : "")")
+                        if !bus.netNames.isEmpty {
+                            Text(bus.netNames.joined(separator: ", "))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
             let eStop = extras.eStop
             InspectorCard(title: "E-Stop") {
                 LabeledContent("Enabled", value: eStop.enabled ? "yes" : "no")

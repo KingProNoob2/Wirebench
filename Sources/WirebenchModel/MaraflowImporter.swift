@@ -65,7 +65,8 @@ public struct MaraflowImporter {
         var usedPageNames: Set<String> = []
 
         for (pageIndex, page) in maraflow.pages.enumerated() {
-            var caption = page.isMacro ? "*" + page.cleanName : page.cleanName
+            var caption = page.isMacro ? "*" + page.cleanName
+                : (page.name.hasPrefix("!") ? "!" + page.cleanName : page.cleanName)
             if usedPageNames.contains(caption.lowercased()) {
                 var suffix = 2
                 while usedPageNames.contains("\(caption) #\(suffix)".lowercased()) { suffix += 1 }
@@ -112,6 +113,7 @@ public struct MaraflowImporter {
                     }
                 }
                 project.modules.append(stPageModule(page, caption: caption, id: nextModuleId,
+                                                    order: -1_000_000 + pageIndex,
                                                     inputModule: inputModule, outputModule: outputModule,
                                                     inputNames: inputNames, outputNames: outputNames))
                 nextModuleId += 1
@@ -121,7 +123,7 @@ public struct MaraflowImporter {
                 let groups = Dictionary(grouping: page.rungs, by: \.threadID)
                 for thread in groups.keys.sorted() {
                     project.modules.append(ldPageModule(page, caption: caption, rungs: groups[thread]!,
-                                                        thread: thread, order: pageIndex,
+                                                        thread: thread, order: -1_000_000 + pageIndex,
                                                         id: nextModuleId))
                     nextModuleId += 1
                 }
@@ -429,7 +431,7 @@ public struct MaraflowImporter {
         }
     }
 
-    private static func stPageModule(_ page: MaraflowPage, caption: String, id: Int,
+    private static func stPageModule(_ page: MaraflowPage, caption: String, id: Int, order: Int,
                                      inputModule: Int? = nil, outputModule: Int? = nil,
                                      inputNames: [String] = [], outputNames: [String] = []) -> PCCModule {
         var code = page.stCode
@@ -445,7 +447,7 @@ public struct MaraflowImporter {
         if !inputNames.isEmpty { attributes["MARAFLOW_ST_INPUTS"] = inputNames.joined(separator: "|") }
         if !outputNames.isEmpty { attributes["MARAFLOW_ST_OUTPUTS"] = outputNames.joined(separator: "|") }
         return PCCModule(id: id, guid: MaraflowStPage.guid, name: "ST \(caption)",
-                         x: 32, y: 32, order: page.stOrder, threadId: page.stThreadID, page: caption,
+                         x: 32, y: 32, order: order, threadId: page.stThreadID, page: caption,
                          inPins: [], paramPins: [], outPins: [], rawAttributes: attributes)
     }
 

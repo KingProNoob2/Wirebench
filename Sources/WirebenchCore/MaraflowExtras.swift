@@ -37,6 +37,13 @@ public struct MaraflowExtras: Codable, Sendable, Equatable {
         public let rules: [EStopRule]
     }
 
+    public struct BusSummary: Sendable, Equatable {
+        public let id: String
+        public let wireCount: Int
+        public let hiddenCount: Int
+        public let netNames: [String]
+    }
+
     public struct PageSummary: Sendable, Equatable {
         public let name: String
         public let language: String
@@ -110,6 +117,28 @@ public struct MaraflowExtras: Codable, Sendable, Equatable {
             }
         }
         return buses.count
+    }
+
+    /// Wire bundles grouped by their Maraflow bus id, with their net labels and hidden count.
+    public var buses: [BusSummary] {
+        struct Group { var wires = 0; var hidden = 0; var names: [String] = [] }
+        var groups: [String: Group] = [:]
+        for page in 0..<max(0, integer("project.pageCount")) {
+            for wire in 0..<max(0, integer("page.\(page).wireCount")) {
+                let prefix = "page.\(page).wire.\(wire)."
+                guard let id = properties[prefix + "busId"], !id.isEmpty else { continue }
+                var group = groups[id] ?? Group()
+                group.wires += 1
+                if flag(prefix + "hidden") { group.hidden += 1 }
+                if let net = properties[prefix + "netName"], !net.isEmpty { group.names.append(net) }
+                groups[id] = group
+            }
+        }
+        return groups.keys.sorted().map { id in
+            let group = groups[id]!
+            return BusSummary(id: id, wireCount: group.wires, hiddenCount: group.hidden,
+                              netNames: Array(Set(group.names)).sorted())
+        }
     }
 
     public var hiddenWireCount: Int {
