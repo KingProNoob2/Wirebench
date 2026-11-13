@@ -72,8 +72,9 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 - Ladder pages re-use the preserved rung table (block/wire overlays do not apply to an LD page).
 - A Dirigo-only block or an edited/new graphic has no Maraflow counterpart: the block is skipped with a report note;
   graphics remain the preserved base rather than being regenerated.
-- Native `.mfl` → `.wbp` → `.mfl` round trips are covered by `MaraflowExportTests`. Export requires a project that was
-  imported from Maraflow (a purely native project has no property table to export).
+- Native `.mfl` → `.wbp` → `.mfl` round trips are covered by `MaraflowExportTests`. A project that was not imported
+  from Maraflow can still be exported: it gets a minimal Maraflow envelope and whatever Maraflow-native blocks it
+  holds, with every Dirigo-only block reported as skipped.
 
 ## What is visible
 

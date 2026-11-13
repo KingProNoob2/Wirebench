@@ -101,12 +101,18 @@ struct MaraflowExportTests {
         #expect(again.project.modules.count == model.project?.modules.count)
     }
 
-    @Test("A native project has nothing to export")
-    func nativeProjectRefused() {
+    @Test("A native project exports a minimal Maraflow envelope and reports skipped blocks")
+    func nativeProjectExports() throws {
         var project = PCCProject(name: "Native")
         project.pages = [ProjectPage(caption: "main")]
-        #expect(throws: MaraflowExportError.self) {
-            try MaraflowExporter.export(project)
-        }
+        project.modules = [BlockFactory.makeModule(guid: BlockTypeCatalog.info(forBlockName: "And")!.guid,
+                                                   id: 1, name: "And1", x: 0, y: 0, order: 10,
+                                                   threadId: 2, page: "main")]
+        let result = try MaraflowExporter.export(project)
+        #expect(result.notes.contains { $0.contains("And1") })
+        let again = try ProjectFile.read(data: result.data, filename: "native")
+        #expect(again.format == .maraflow)
+        #expect(again.project.pages.map(\.caption) == ["main"])
+        #expect(again.project.modules.isEmpty, "a Dirigo block has no Maraflow representation")
     }
 }

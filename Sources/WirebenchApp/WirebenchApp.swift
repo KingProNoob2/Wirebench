@@ -204,7 +204,7 @@ struct WirebenchApp: App {
                     model.exportMaraflow()
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
-                .disabled(model.project?.maraflow == nil)
+                .disabled(model.project == nil)
             }
         }
     }

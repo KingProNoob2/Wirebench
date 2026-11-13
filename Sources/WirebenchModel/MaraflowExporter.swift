@@ -28,16 +28,26 @@ public struct MaraflowExportResult {
 /// page that has no Maraflow representation is reported instead of being silently dropped.
 public enum MaraflowExporter {
     public static func export(_ project: PCCProject) throws -> MaraflowExportResult {
-        guard let extras = project.maraflow else { throw MaraflowExportError.notImported }
-        var properties = extras.properties
+        // An imported project keeps its verbatim table; a native project gets a minimal Maraflow envelope and whatever
+        // native blocks it has. This is what lets Export Maraflow work without an import.
+        let extras = project.maraflow
+        var properties = extras?.properties ?? [:]
         var notes: [String] = []
+        if extras == nil {
+            notes.append("This project was not imported from Maraflow; only its Maraflow-native blocks and metadata were exported.")
+        }
 
         func put(_ key: String, _ value: String) { properties[key] = value }
         func removePrefix(_ prefix: String) {
             for key in properties.keys where key.hasPrefix(prefix) { properties.removeValue(forKey: key) }
         }
 
-        put("maraflow.version", extras.formatVersion.isEmpty ? "1.0.0" : extras.formatVersion)
+        put("maraflow.version", (extras?.formatVersion.isEmpty == false) ? extras!.formatVersion : "1.0.0")
+        if properties["project.targetPlatform"] == nil {
+            put("project.targetPlatform", "STM32F407-Maraflow-Std")
+        }
+        if properties["project.defaultThreadId"] == nil { put("project.defaultThreadId", "2") }
+        if properties["project.primaryLanguage"] == nil { put("project.primaryLanguage", "FBD") }
         put("project.name", project.name)
         put("project.author", project.author)
         put("project.description", project.description)

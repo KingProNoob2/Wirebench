@@ -466,10 +466,6 @@ struct WirebenchCLI {
     static func exportMaraflow(path: String, output: String?) {
         do {
             let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
-            guard loaded.project.maraflow != nil else {
-                print("This project was not imported from Maraflow.")
-                exit(1)
-            }
             let result = try MaraflowExporter.export(loaded.project)
             let target = output.map { URL(fileURLWithPath: $0) }
                 ?? URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("mfl")

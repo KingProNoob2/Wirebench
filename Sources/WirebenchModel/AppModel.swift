@@ -1169,12 +1169,6 @@ public final class AppModel: @unchecked Sendable {
     @MainActor
     public func exportMaraflow() {
         guard let project else { return }
-        guard project.maraflow != nil else {
-            presentMessage(title: "Nothing to export",
-                           message: "This project was not imported from Maraflow, so it has no Maraflow fields to export.",
-                           kind: .info)
-            return
-        }
         do {
             let result = try MaraflowExporter.export(project)
             preparedMaraflowExport = result.data
