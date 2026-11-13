@@ -72,10 +72,14 @@ public struct MaraflowImporter {
             usedPageNames.insert(caption.lowercased())
             project.pages.append(ProjectPage(caption: caption))
 
-            if page.language == "ST" && page.stCode.isEmpty {
-                notes.append("Page '\(caption)' is Structured Text; its source is not represented on the sheet.")
-            } else if page.language == "ST" {
-                notes.append("Page '\(caption)' is Structured Text; the imported page is empty (the source is not converted).")
+            if page.language == "ST" {
+                let before = project.modules.count
+                importStPage(page, caption: caption, project: &project, nextId: &nextModuleId,
+                             notes: &notes, approximated: &approximated)
+                let added = project.modules.count - before
+                notes.append(added == 0
+                    ? "Page '\(caption)' is Structured Text; no block-call statements could be converted."
+                    : "Page '\(caption)' is Structured Text; converted \(added) block(s) from its declarations and calls.")
             }
             if page.rungCount > 0 {
                 notes.append("Page '\(caption)' has \(page.rungCount) ladder rung(s); ladder logic is not imported.")
@@ -237,6 +241,440 @@ public struct MaraflowImporter {
                                                       ("MARAFLOW_TYPE", block.typeName),
                                                       ("MARAFLOW_ID", block.id)]),
                          rawChildren: [])
+    }
+
+    // MARK: - Structured Text pages
+
+    private struct STVariable {
+        var name: String
+        var type: String
+        var initial: String
+    }
+
+    private enum STOperand {
+        case literal(PinValue)
+        case variable(String)
+    }
+
+    private struct STCallArgument {
+        var name: String?
+        var operand: STOperand
+    }
+
+    /// Converts the Maraflow ST dialect's generated block-call statements into blocks and wires. It supports the
+    /// declarations (`VAR…END_VAR`), `<var> := Type(args)` and `Instance(args, Out => var)` forms that the editor
+    /// writes, with literal or variable arguments. General expressions and control flow are reported, not guessed.
+    private static func importStPage(_ page: MaraflowPage, caption: String, project: inout PCCProject,
+                                     nextId: inout Int, notes: inout [String],
+                                     approximated: inout [String: Int]) {
+        let parsed = stDeclarations(in: page.stCode, fallback: page.stVariables)
+        var variables: [String: Int] = [:]
+        var variableTypes: [String: String] = [:]
+        var blockOrder = 10
+
+        func addVariable(_ name: String, type: String, initial: String) {
+            let key = name.lowercased()
+            guard variables[key] == nil else { return }
+            let type = stType(type)
+            let guid: UUID
+            switch type {
+            case "BOOL": guid = BlockTypeCatalog.info(forBlockName: "BoolVar")!.guid
+            case "LONG": guid = BlockTypeCatalog.info(forBlockName: "LongVar")!.guid
+            case "FLOAT": guid = BlockTypeCatalog.info(forBlockName: "FloatVar")!.guid
+            default: guid = BlockTypeCatalog.info(forBlockName: "IntVar")!.guid
+            }
+            let id = nextId
+            nextId += 1
+            var module = BlockFactory.makeModule(guid: guid, id: id, name: name, x: 32,
+                                                 y: Double(32 + variables.count * 128), order: 1,
+                                                 threadId: page.stThreadID, page: caption)
+            let value = stPinValue(initial, type: type)
+            module.outPins[0].value = value
+            if type != "BOOL" {
+                module.rawAttributes["INIT_VALUE"] = value.description
+            }
+            project.modules.append(module)
+            variables[key] = id
+            variableTypes[key] = type
+        }
+
+        for variable in parsed { addVariable(variable.name, type: variable.type, initial: variable.initial) }
+
+        for (statement, precedingDefinition) in stStatements(page.stCode) {
+            let text = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            guard let call = stCall(text) else {
+                if let assignment = stAssignment(text) {
+                    applySTAssignment(assignment, variables: &variables, variableTypes: &variableTypes,
+                                      project: &project, nextId: &nextId, caption: caption,
+                                      page: page, notes: &notes)
+                } else {
+                    notes.append("ST page '\(caption)': a statement is not a supported block call and was skipped.")
+                }
+                continue
+            }
+            let definitionId = precedingDefinition ?? stDefinitionId(for: call.typeName) ?? ""
+            let args = stArguments(call.arguments)
+            let outputArgs = args.filter { $0.name == "=>" }
+            let inputArgs = args.filter { $0.name != "=>" }
+            guard !definitionId.isEmpty else {
+                notes.append("ST page '\(caption)': block type '\(call.typeName)' is not known and was skipped.")
+                continue
+            }
+
+            if definitionId.hasPrefix("Macro.User.") {
+                importSTMacroCall(call, definitionId: definitionId, inputArgs: inputArgs, outputArgs: outputArgs,
+                                  variables: &variables, variableTypes: &variableTypes, project: &project,
+                                  nextId: &nextId, caption: caption, page: page, notes: &notes)
+                continue
+            }
+
+            guard let mapping = mappings[definitionId],
+                  let info = BlockTypeCatalog.info(forBlockName: mapping.target),
+                  let targetTemplate = PinTemplateCatalog.template(forGuid: info.guid) else {
+                notes.append("ST page '\(caption)': '\(definitionId)' has no Wirebench block and was skipped.")
+                continue
+            }
+
+            var module = BlockFactory.makeModule(guid: info.guid, id: nextId, name: call.instanceName ?? call.typeName,
+                                                 x: Double(32 + (variables.count % 4) * 192),
+                                                 y: Double(32 + (variables.count / 4) * 160),
+                                                 order: blockOrder, threadId: page.stThreadID, page: caption)
+            nextId += 1
+            blockOrder += 10
+            module.rawAttributes["MARAFLOW_DEF"] = definitionId
+            module.rawAttributes["MARAFLOW_ST"] = "1"
+            project.modules.append(module)
+            let moduleIndex = project.modules.count - 1
+
+            // Calls written from the editor omit En; the maraflow definition always has it first.
+            var syntheticInputs = inputArgs
+            if targetTemplate.inputs.first?.abbrev.lowercased() == "en",
+               !syntheticInputs.contains(where: { $0.name?.lowercased() == "en" }) {
+                syntheticInputs.insert(STCallArgument(name: "En", operand: .literal(.bool(true))), at: 0)
+            }
+            for (index, argument) in syntheticInputs.enumerated() {
+                let targetIndex: Int?
+                let isParam = mapping.params[index] != nil
+                if let param = mapping.params[index] {
+                    targetIndex = param < module.paramPins.count ? param : nil
+                } else {
+                    let mapped = mapping.inputs.isEmpty ? index : mapping.inputs[index]
+                    targetIndex = mapped.flatMap { $0 < module.inPins.count ? $0 : nil }
+                }
+                guard let targetIndex else { continue }
+                switch argument.operand {
+                case .literal(let value):
+                    if isParam { project.modules[moduleIndex].paramPins[targetIndex].value = value }
+                    else { project.modules[moduleIndex].inPins[targetIndex].value = value }
+                case .variable(let name):
+                    let key = name.lowercased()
+                    if variables[key] == nil {
+                        let type = stType(variableTypes[key] ?? "INT")
+                        addVariable(name, type: type, initial: "0")
+                    }
+                    if let source = variables[key] {
+                        if isParam {
+                            project.connect(outModuleId: source, outPinId: 0, toModuleId: module.id,
+                                            inPinId: targetIndex, toParam: true)
+                        } else {
+                            project.connect(outModuleId: source, outPinId: 0, toModuleId: module.id,
+                                            inPinId: targetIndex)
+                        }
+                    }
+                }
+                if let name = argument.name, name != "En" {
+                    if isParam, targetIndex < project.modules[moduleIndex].paramPins.count {
+                        project.modules[moduleIndex].paramPins[targetIndex].name = name
+                    } else if targetIndex < project.modules[moduleIndex].inPins.count {
+                        project.modules[moduleIndex].inPins[targetIndex].name = name
+                    }
+                }
+            }
+
+            // Outputs: `Out => Var` in order, or the assignment target for a single-output call.
+            var outputs = outputArgs
+            if outputs.isEmpty, let assignmentTarget = call.assignmentTarget {
+                outputs = [STCallArgument(name: "=>", operand: .variable(assignmentTarget))]
+            }
+            for (index, argument) in outputs.enumerated() {
+                guard case .variable(let name) = argument.operand else { continue }
+                let mapped = mapping.outputs.isEmpty ? index : mapping.outputs[index]
+                guard let outputIndex = mapped, outputIndex < module.outPins.count else { continue }
+                let outputType = targetTemplate.outputs.indices.contains(outputIndex)
+                    ? targetTemplate.outputs[outputIndex].dataType : "Int"
+                if variables[name.lowercased()] == nil {
+                    addVariable(name, type: stType(outputType), initial: "0")
+                }
+                guard let variableId = variables[name.lowercased()] else { continue }
+                let set = BlockFactory.makeModule(guid: SetBlock.guid, id: nextId, name: "Set_\(name)",
+                                                  x: module.x + 64, y: module.y, order: blockOrder,
+                                                  threadId: page.stThreadID, page: caption)
+                nextId += 1
+                blockOrder += 10
+                project.modules.append(set)
+                project.connect(outModuleId: module.id, outPinId: outputIndex, toModuleId: set.id, inPinId: 1)
+                project.connect(outModuleId: variableId, outPinId: 0, toModuleId: set.id, inPinId: 2)
+            }
+            approximated["ST page '\(caption)'"] = 1
+        }
+    }
+
+    private static func importSTMacroCall(_ call: MaraflowSTCall, definitionId: String, inputArgs: [STCallArgument],
+                                          outputArgs: [STCallArgument], variables: inout [String: Int],
+                                          variableTypes: inout [String: String], project: inout PCCProject,
+                                          nextId: inout Int, caption: String, page: MaraflowPage,
+                                          notes: inout [String]) {
+        let name = String(definitionId.dropFirst("Macro.User.".count))
+        let inPins = inputArgs.enumerated().map { Pin(id: $0.offset, value: stStaticValue($0.element.operand), rights: 0,
+                                                      name: $0.element.name) }
+        let outPins = outputArgs.enumerated().map { Pin(id: $0.offset, value: .undefined, rights: 2,
+                                                        name: $0.element.name) }
+        let module = PCCModule(id: nextId, guid: MacroBlock.guid, name: call.instanceName ?? name,
+                               x: 32, y: 32, order: 10, threadId: page.stThreadID, page: caption,
+                               inPins: inPins, paramPins: [], outPins: outPins,
+                               rawAttributes: AttributeBag([("MACRO_NAME", name), ("MARAFLOW_ST", "1")]))
+        nextId += 1
+        project.modules.append(module)
+        for (index, argument) in inputArgs.enumerated() {
+            guard case .variable(let variableName) = argument.operand else { continue }
+            if variables[variableName.lowercased()] == nil {
+                notes.append("ST page '\(caption)': macro argument '\(variableName)' is not declared.")
+                continue
+            }
+            if let source = variables[variableName.lowercased()] {
+                project.connect(outModuleId: source, outPinId: 0, toModuleId: module.id, inPinId: index)
+            }
+        }
+        for (index, argument) in outputArgs.enumerated() {
+            guard case .variable(let variableName) = argument.operand else { continue }
+            if variables[variableName.lowercased()] == nil {
+                variableTypes[variableName.lowercased()] = "INT"
+                let id = nextId
+                nextId += 1
+                let variableBlock = BlockFactory.makeModule(guid: BlockTypeCatalog.info(forBlockName: "IntVar")!.guid,
+                                                            id: id, name: variableName, x: 32, y: 200, order: 1,
+                                                            threadId: page.stThreadID, page: caption)
+                project.modules.append(variableBlock)
+                variables[variableName.lowercased()] = id
+            }
+            guard let variableId = variables[variableName.lowercased()] else { continue }
+            let set = BlockFactory.makeModule(guid: SetBlock.guid, id: nextId, name: "Set_\(variableName)",
+                                              x: 96, y: 200, order: 20, threadId: page.stThreadID, page: caption)
+            nextId += 1
+            project.modules.append(set)
+            project.connect(outModuleId: module.id, outPinId: index, toModuleId: set.id, inPinId: 1)
+            project.connect(outModuleId: variableId, outPinId: 0, toModuleId: set.id, inPinId: 2)
+        }
+    }
+
+    /// Masks `VAR…END_VAR` blocks and splits the executable body into statements, carrying the `// Block: <defId>`
+    /// comment that the Maraflow editor writes before each generated call.
+    private static func stStatements(_ code: String) -> [(String, String?)] {
+        var body = code
+        if let block = try? NSRegularExpression(pattern: "(?is)\\b(?:VAR_INPUT|VAR_OUTPUT|VAR_TEMP|VAR)\\b.*?\\bEND_VAR\\b") {
+            body = block.stringByReplacingMatches(in: body, range: NSRange(body.startIndex..<body.endIndex, in: body),
+                                                   withTemplate: "\n")
+        }
+        var result: [(String, String?)] = []
+        var currentDefinition: String?
+        var buffer = ""
+        for line in body.components(separatedBy: .newlines) {
+            var line = line
+            if let range = line.range(of: "// Block:") {
+                currentDefinition = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                line = String(line[..<range.lowerBound])
+            } else if let range = line.range(of: "//") {
+                line = String(line[..<range.lowerBound])
+            }
+            buffer += line + "\n"
+            while let semicolon = buffer.firstIndex(of: ";") {
+                let statement = String(buffer[..<semicolon])
+                buffer = String(buffer[buffer.index(after: semicolon)...])
+                result.append((statement, currentDefinition))
+                currentDefinition = nil
+            }
+        }
+        let rest = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rest.isEmpty { result.append((rest, currentDefinition)) }
+        return result
+    }
+
+    private static func stDeclarations(in code: String, fallback: [MaraflowStVariable]) -> [STVariable] {
+        var result: [STVariable] = fallback.map { STVariable(name: $0.name, type: $0.type, initial: $0.initial) }
+        guard let block = try? NSRegularExpression(pattern: "(?is)\\b(?:VAR_INPUT|VAR_OUTPUT|VAR_TEMP|VAR)\\b(.*?)\\bEND_VAR\\b"),
+              let line = try? NSRegularExpression(pattern: "(?im)^\\s*([A-Za-z_]\\w*)\\s*:\\s*([A-Za-z_]\\w*)(?:\\s*:=\\s*([^;]+))?\\s*;")
+        else { return result }
+        let range = NSRange(code.startIndex..<code.endIndex, in: code)
+        for match in block.matches(in: code, range: range) {
+            guard let contentRange = Range(match.range(at: 1), in: code) else { continue }
+            let content = String(code[contentRange])
+            let contentNS = NSRange(content.startIndex..<content.endIndex, in: content)
+            for decl in line.matches(in: content, range: contentNS) {
+                guard let nameRange = Range(decl.range(at: 1), in: content),
+                      let typeRange = Range(decl.range(at: 2), in: content) else { continue }
+                let name = String(content[nameRange])
+                let type = String(content[typeRange])
+                var initial = "0"
+                if decl.range(at: 3).location != NSNotFound, let initialRange = Range(decl.range(at: 3), in: content) {
+                    initial = String(content[initialRange]).trimmingCharacters(in: .whitespaces)
+                }
+                if let index = result.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+                    result[index] = STVariable(name: name, type: type, initial: initial)
+                } else {
+                    result.append(STVariable(name: name, type: type, initial: initial))
+                }
+            }
+        }
+        return result
+    }
+
+    private struct MaraflowSTCall {
+        var typeName: String
+        var instanceName: String?
+        var assignmentTarget: String?
+        var arguments: String
+    }
+
+    private static func stCall(_ statement: String) -> MaraflowSTCall? {
+        guard let regex = try? NSRegularExpression(pattern: "(?is)^\\s*(?:([A-Za-z_]\\w*)\\s*:=\\s*)?([A-Za-z_]\\w*)\\s*\\((.*)\\)\\s*$"),
+              let match = regex.firstMatch(in: statement, range: NSRange(statement.startIndex..<statement.endIndex, in: statement))
+        else { return nil }
+        func group(_ index: Int) -> String? {
+            guard match.range(at: index).location != NSNotFound, let range = Range(match.range(at: index), in: statement)
+            else { return nil }
+            return String(statement[range])
+        }
+        guard let typeName = group(2), let arguments = group(3) else { return nil }
+        return MaraflowSTCall(typeName: typeName, instanceName: group(1) == nil ? nil : nil,
+                              assignmentTarget: group(1), arguments: arguments)
+    }
+
+    private static func stArguments(_ text: String) -> [STCallArgument] {
+        stSplit(text, on: ",").compactMap { part in
+            let part = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !part.isEmpty else { return nil }
+            if let regex = try? NSRegularExpression(pattern: "(?is)^\\s*([A-Za-z_]\\w*)\\s*=>\\s*([A-Za-z_]\\w*)\\s*$"),
+               let match = regex.firstMatch(in: part, range: NSRange(part.startIndex..<part.endIndex, in: part)),
+               let variable = Range(match.range(at: 2), in: part).map({ String(part[$0]) }) {
+                return STCallArgument(name: "=>", operand: .variable(variable))
+            }
+            if let regex = try? NSRegularExpression(pattern: "(?is)^\\s*([A-Za-z_]\\w*)\\s*:=\\s*(.+?)\\s*$"),
+               let match = regex.firstMatch(in: part, range: NSRange(part.startIndex..<part.endIndex, in: part)),
+               let name = Range(match.range(at: 1), in: part).map({ String(part[$0]) }),
+               let value = Range(match.range(at: 2), in: part).map({ String(part[$0]) }),
+               let operand = stOperand(value) {
+                return STCallArgument(name: name, operand: operand)
+            }
+            guard let operand = stOperand(part) else { return nil }
+            return STCallArgument(name: nil, operand: operand)
+        }
+    }
+
+    private static func stOperand(_ text: String) -> STOperand? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if text.caseInsensitiveCompare("true") == .orderedSame { return .literal(.bool(true)) }
+        if text.caseInsensitiveCompare("false") == .orderedSame { return .literal(.bool(false)) }
+        if text.range(of: "^[A-Za-z_]\\w*$", options: .regularExpression) != nil { return .variable(text) }
+        if text.range(of: "^[-+]?\\d+$", options: .regularExpression) != nil {
+            return .literal(.int32(Int32(clamping: parseInteger(text))))
+        }
+        if text.range(of: "^[-+]?(?:\\d+\\.\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?$", options: .regularExpression) != nil,
+           let value = Float(text) {
+            return .literal(.float(value))
+        }
+        return nil
+    }
+
+    private static func stStaticValue(_ operand: STOperand) -> PinValue {
+        if case .literal(let value) = operand { return value }
+        return .undefined
+    }
+
+    private static func stSplit(_ text: String, on separator: Character) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var depth = 0
+        for character in text {
+            if character == "(" { depth += 1 }
+            if character == ")" { depth -= 1 }
+            if character == separator && depth == 0 {
+                parts.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        parts.append(current)
+        return parts
+    }
+
+    private static func stDefinitionId(for typeName: String) -> String? {
+        let key = typeName.lowercased()
+        if let exact = mappings.first(where: { $0.key.split(separator: ".").last?.lowercased() == key })?.key {
+            return exact
+        }
+        return nil
+    }
+
+    private static func stType(_ type: String) -> String {
+        switch type.uppercased() {
+        case "BOOL", "BOOLEAN": return "BOOL"
+        case "LONG", "LINT": return "LONG"
+        case "FLOAT", "REAL": return "FLOAT"
+        default: return "INT"
+        }
+    }
+
+    private static func stPinValue(_ text: String, type: String) -> PinValue {
+        switch type {
+        case "BOOL": return .bool(text == "1" || text.lowercased() == "true")
+        case "LONG": return .int64(parseInteger(text))
+        case "FLOAT": return .float(Float(text) ?? 0)
+        default: return .int32(Int32(clamping: parseInteger(text)))
+        }
+    }
+
+    private static func stAssignment(_ text: String) -> (target: String, value: STOperand)? {
+        guard let regex = try? NSRegularExpression(pattern: "(?is)^\\s*([A-Za-z_]\\w*)\\s*:=\\s*(.+?)\\s*$"),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text)),
+              let target = Range(match.range(at: 1), in: text).map({ String(text[$0]) }),
+              let value = Range(match.range(at: 2), in: text).map({ String(text[$0]) }),
+              let operand = stOperand(value) else { return nil }
+        return (target, operand)
+    }
+
+    private static func applySTAssignment(_ assignment: (target: String, value: STOperand),
+                                          variables: inout [String: Int], variableTypes: inout [String: String],
+                                          project: inout PCCProject, nextId: inout Int, caption: String,
+                                          page: MaraflowPage, notes: inout [String]) {
+        let key = assignment.target.lowercased()
+        guard let variableId = variables[key] else {
+            notes.append("ST page '\(caption)': assignment to undeclared '\(assignment.target)' was skipped.")
+            return
+        }
+        let set = BlockFactory.makeModule(guid: SetBlock.guid, id: nextId, name: "Set_\(assignment.target)",
+                                          x: 32, y: 32, order: 10, threadId: page.stThreadID, page: caption)
+        nextId += 1
+        project.modules.append(set)
+        switch assignment.value {
+        case .literal(let value):
+            setInPin(project: &project, moduleId: set.id, pin: 1, value: value)
+        case .variable(let source):
+            if let sourceId = variables[source.lowercased()] {
+                project.connect(outModuleId: sourceId, outPinId: 0, toModuleId: set.id, inPinId: 1)
+            } else {
+                notes.append("ST page '\(caption)': assignment reads undeclared '\(source)'.")
+            }
+        }
+        project.connect(outModuleId: variableId, outPinId: 0, toModuleId: set.id, inPinId: 2)
+    }
+
+    private static func setInPin(project: inout PCCProject, moduleId: Int, pin: Int, value: PinValue) {
+        guard let index = project.modules.firstIndex(where: { $0.id == moduleId }),
+              project.modules[index].inPins.indices.contains(pin) else { return }
+        project.modules[index].inPins[pin].value = value
     }
 
     private enum MacroInterfaceKind {

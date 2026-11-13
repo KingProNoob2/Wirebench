@@ -90,13 +90,20 @@ struct MaraflowWire {
     var hidden: Bool
 }
 
+struct MaraflowStVariable {
+    var name: String
+    var type: String
+    var initial: String
+}
+
 struct MaraflowPage {
     var name: String
     var language: String
     var blocks: [MaraflowBlock]
     var wires: [MaraflowWire]
     var stCode: String
-    var stVariables: Int
+    var stVariables: [MaraflowStVariable]
+    var stThreadID: Int
     var rungCount: Int
     var graphicCount: Int
 
@@ -140,19 +147,31 @@ struct MaraflowProject {
                     hidden: document.bool(wirePrefix + "hidden", false)
                 ))
             }
+            let variableCount = max(0, min(document.int(prefix + "stVarCount", 0), 10_000))
+            var variables: [MaraflowStVariable] = []
+            for variableIndex in 0..<variableCount {
+                let variablePrefix = prefix + "stVar.\(variableIndex)."
+                variables.append(MaraflowStVariable(
+                    name: document.string(variablePrefix + "name", "Var\(variableIndex + 1)"),
+                    type: document.string(variablePrefix + "type", "INT").uppercased(),
+                    initial: document.string(variablePrefix + "init", "0")
+                ))
+            }
             pages.append(MaraflowPage(
                 name: name,
                 language: language,
                 blocks: blocks,
                 wires: wires,
                 stCode: document.string(prefix + "stCode"),
-                stVariables: document.int(prefix + "stVarCount", 0),
+                stVariables: variables,
+                stThreadID: document.int(prefix + "stThreadId", 2),
                 rungCount: document.int(prefix + "rungCount", 0),
                 graphicCount: document.int(prefix + "graphicCount", 0)
             ))
         }
         if pages.isEmpty { pages = [MaraflowPage(name: "Page 1", language: "FBD", blocks: [], wires: [],
-                                                 stCode: "", stVariables: 0, rungCount: 0, graphicCount: 0)] }
+                                                 stCode: "", stVariables: [], stThreadID: 2,
+                                                 rungCount: 0, graphicCount: 0)] }
         return MaraflowProject(
             name: document.string("project.name", filename),
             author: document.string("project.author"),

@@ -334,6 +334,52 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: call.id)[0].asInt == 5, "the macro input reaches Add and comes back")
     }
 
+    @Test("ST pages convert their declarations and generated block calls")
+    func stPage() throws {
+        let code = """
+        VAR
+            And_Out : BOOL;
+            Sum_Out : INT;
+        END_VAR
+
+        // Block: Bool.And
+        And_Out := And(
+            X1 := 1,
+            X2 := 1
+        );
+
+        // Block: Math.Add
+        Sum_Out := Add(
+            X1 := 5,
+            X2 := 2
+        );
+        """
+        let entries: [(String, String)] = [
+            ("project.name", "STDemo"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", code),
+            ("page.0.stVarCount", "0"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+        ]
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stdemo")
+        #expect(outcome.project.pages.map(\.caption) == ["Logic"])
+        let andOut = try #require(outcome.project.modules.first { $0.name == "And_Out" })
+        let sumOut = try #require(outcome.project.modules.first { $0.name == "Sum_Out" })
+        #expect(andOut.guid == BlockTypeCatalog.info(forBlockName: "BoolVar")?.guid)
+        #expect(sumOut.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid)
+        #expect(outcome.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "And")?.guid })
+        #expect(outcome.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "IAdd")?.guid })
+
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: andOut.id)[0].asBool)
+        #expect(core.outPins(moduleId: sumOut.id)[0].asInt == 7)
+        #expect(outcome.notes.contains { $0.contains("Structured Text") && $0.contains("converted") })
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [
@@ -362,7 +408,6 @@ struct MaraflowImportTests {
         #expect(notes.contains("Structured Text"))
         #expect(notes.contains("ladder rung"))
         #expect(notes.contains("Macro page"))
-        #expect(loaded.project.modules.isEmpty)
     }
 
     @Test("A non-Maraflow XML file is not treated as one")

@@ -58,8 +58,11 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 ## Limits
 
 - **Ladder pages** keep their page but not their rungs; the report gives the rung count.
-- **Structured Text pages** keep their page but not their source; the report names them. Converting that source
-  through the ST compiler is a later step.
+- **Structured Text pages** are converted when they use the editor's generated block-call form: the `VAR…END_VAR`
+  declarations become variable blocks, `<var> := Type(args)` and `Instance(args, Out => var)` become blocks plus
+  `Set` writes, and literal or declared-variable arguments are wired. General expressions (for example `a + 1`),
+  `IF`/loops and undeclared variables are reported and skipped, not guessed. The report gives the number of blocks
+  converted.
 - **Macros** are converted: a macro page keeps its `*Name` caption, `MacroIn`/`MacroOut` become the `Inputs`/`Outputs`
   interface blocks, and `Macro.User.*` blocks become Wirebench macro calls with the same pins. A call whose page is
   missing stays inert.
