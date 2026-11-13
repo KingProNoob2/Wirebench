@@ -70,8 +70,10 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 - Native Maraflow blocks are written with their definition id, exact pins, constants and preserved properties;
   macro calls and macro interfaces become `Macro.User.*`/`Macro.MacroIn`/`Macro.MacroOut`; ST pages keep their source.
 - Ladder pages re-use the preserved rung table (block/wire overlays do not apply to an LD page).
-- A Dirigo-only block or an edited/new graphic has no Maraflow counterpart: the block is skipped with a report note;
-  graphics remain the preserved base rather than being regenerated.
+- Dirigo blocks with a direct counterpart are translated back through a bridge: And/Or/Xor/Not/RS, common integer
+  and float math, ISwitch/IDemux, 8xDI/8xDO, Segment/Value and the visual variables. Their pins are re-ordered onto the
+  Maraflow definition's own pin table. Other Dirigo-only blocks are skipped with a report note; graphics remain the
+  preserved base rather than being regenerated.
 - Native `.mfl` → `.wbp` → `.mfl` round trips are covered by `MaraflowExportTests`. A project that was not imported
   from Maraflow can still be exported: it gets a minimal Maraflow envelope and whatever Maraflow-native blocks it
   holds, with every Dirigo-only block reported as skipped.

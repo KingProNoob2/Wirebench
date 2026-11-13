@@ -27,6 +27,47 @@ public struct MaraflowExportResult {
 /// points, unknown keys) survive unchanged. The current pages, native blocks and wires are laid over it; a block or a
 /// page that has no Maraflow representation is reported instead of being silently dropped.
 public enum MaraflowExporter {
+    /// Dirigo types with a direct Maraflow counterpart. `inputs`/`outputs` map a Maraflow pin index to the Dirigo pin
+    /// index it should read; pins the map leaves out take the Maraflow definition's default.
+    struct Bridge {
+        let definitionId: String
+        var inputs: [Int: Int] = [:]
+        var outputs: [Int: Int] = [:]
+    }
+
+    static func bridge(for info: BlockTypeInfo) -> Bridge? {
+        switch info.blockName {
+        case "And": return Bridge(definitionId: "Bool.And")
+        case "Or": return Bridge(definitionId: "Bool.Or")
+        case "Xor": return Bridge(definitionId: "Bool.Xor")
+        case "Not": return Bridge(definitionId: "Bool.Not")
+        case "RS": return Bridge(definitionId: "Bool.RS")
+        case "IAdd": return Bridge(definitionId: "Math.Add")
+        case "ISub": return Bridge(definitionId: "Math.Sub")
+        case "IMul": return Bridge(definitionId: "Math.Mul")
+        case "IAbs": return Bridge(definitionId: "Math.Abs")
+        case "INeg": return Bridge(definitionId: "Math.Neg")
+        case "FSqrt": return Bridge(definitionId: "Math.Sqrt")
+        case "FSin": return Bridge(definitionId: "Math.Sin")
+        case "FCos": return Bridge(definitionId: "Math.Cos")
+        case "FAdd": return Bridge(definitionId: "Math.Add")
+        case "FSub": return Bridge(definitionId: "Math.Sub")
+        case "FMul": return Bridge(definitionId: "Math.Mul")
+        case "ISwitch": return Bridge(definitionId: "Main.Switches.Sel")
+        case "IDemux": return Bridge(definitionId: "Main.Switches.Demux")
+        case "8xDI": return Bridge(definitionId: "IO.8xDI")
+        case "8xDO": return Bridge(definitionId: "IO.8xDO")
+        case "Segment": return Bridge(definitionId: "Visual.Segment")
+        case "Value": return Bridge(definitionId: "Visual.Value")
+        case "BoolVar": return Bridge(definitionId: "Visual.Vars.BoolVar")
+        case "IntVar": return Bridge(definitionId: "Visual.Vars.IntVar")
+        case "LongVar": return Bridge(definitionId: "Visual.Vars.LongVar")
+        case "PulseGen": return Bridge(definitionId: "Main.Timers.PulseGen")
+        case "SinglePulse": return Bridge(definitionId: "Main.Timers.SinglePulse")
+        default: return nil
+        }
+    }
+
     public static func export(_ project: PCCProject) throws -> MaraflowExportResult {
         // An imported project keeps its verbatim table; a native project gets a minimal Maraflow envelope and whatever
         // native blocks it has. This is what lets Export Maraflow work without an import.
@@ -134,6 +175,8 @@ public enum MaraflowExporter {
                 let isInterface = module.guid == InputsBlock.guid
                 var defID: String?
                 var typeName = module.name
+                var bridgeMap: Bridge?
+                var bridgeDefinition: MaraflowDefinition?
                 if isInterface {
                     let kind = (module.rawAttributes["MACRO_NAME"] ?? "").lowercased()
                     if kind == "inputs" {
@@ -149,6 +192,13 @@ public enum MaraflowExporter {
                 } else if let macroName {
                     defID = "Macro.User.\(macroName)"
                     typeName = macroName
+                } else if let info = BlockTypeCatalog.info(forGuid: module.guid),
+                          let candidate = Self.bridge(for: info),
+                          let definition = MaraflowCatalog.byId[candidate.definitionId] {
+                    defID = definition.id
+                    typeName = definition.typeName
+                    bridgeMap = candidate
+                    bridgeDefinition = definition
                 }
                 guard let defID else {
                     notes.append("Block '\(module.name)' has no Maraflow representation and was not exported.")
@@ -177,23 +227,47 @@ public enum MaraflowExporter {
                 }
                 put(prefix + "propCount", "\(propIndex)")
 
-                put(prefix + "inCount", "\(module.inPins.count)")
-                for (index, pin) in module.inPins.enumerated() {
-                    let pinPrefix = prefix + "in.\(index)."
-                    put(pinPrefix + "short", pin.name ?? "X\(index)")
-                    put(pinPrefix + "full", pin.name ?? "Input \(index)")
-                    put(pinPrefix + "type", pinType(definition: definition, index: index, output: false,
-                                                   fallback: pin.value))
-                    put(pinPrefix + "const", pin.value.description)
-                }
-                put(prefix + "outCount", "\(module.outPins.count)")
-                for (index, pin) in module.outPins.enumerated() {
-                    let pinPrefix = prefix + "out.\(index)."
-                    put(pinPrefix + "short", pin.name ?? "Y\(index)")
-                    put(pinPrefix + "full", pin.name ?? "Output \(index)")
-                    put(pinPrefix + "type", pinType(definition: definition, index: index, output: true,
-                                                   fallback: pin.value))
-                    put(pinPrefix + "const", pin.value.description)
+                if let bridgeMap, let bridgeDefinition {
+                    // A Dirigo block's pins are re-ordered onto the Maraflow definition's own pin table.
+                    put(prefix + "inCount", "\(bridgeDefinition.inputs.count)")
+                    for (index, spec) in bridgeDefinition.inputs.enumerated() {
+                        let source = bridgeMap.inputs[index] ?? index
+                        let pin = module.inPins.indices.contains(source) ? module.inPins[source] : nil
+                        let pinPrefix = prefix + "in.\(index)."
+                        put(pinPrefix + "short", spec.abbrev)
+                        put(pinPrefix + "full", spec.name)
+                        put(pinPrefix + "type", spec.dataType.uppercased())
+                        put(pinPrefix + "const", pin?.value.description ?? spec.defaultValue)
+                    }
+                    put(prefix + "outCount", "\(bridgeDefinition.outputs.count)")
+                    for (index, spec) in bridgeDefinition.outputs.enumerated() {
+                        let source = bridgeMap.outputs[index] ?? index
+                        let pin = module.outPins.indices.contains(source) ? module.outPins[source] : nil
+                        let pinPrefix = prefix + "out.\(index)."
+                        put(pinPrefix + "short", spec.abbrev)
+                        put(pinPrefix + "full", spec.name)
+                        put(pinPrefix + "type", spec.dataType.uppercased())
+                        put(pinPrefix + "const", pin?.value.description ?? spec.defaultValue)
+                    }
+                } else {
+                    put(prefix + "inCount", "\(module.inPins.count)")
+                    for (index, pin) in module.inPins.enumerated() {
+                        let pinPrefix = prefix + "in.\(index)."
+                        put(pinPrefix + "short", pin.name ?? "X\(index)")
+                        put(pinPrefix + "full", pin.name ?? "Input \(index)")
+                        put(pinPrefix + "type", pinType(definition: definition, index: index, output: false,
+                                                       fallback: pin.value))
+                        put(pinPrefix + "const", pin.value.description)
+                    }
+                    put(prefix + "outCount", "\(module.outPins.count)")
+                    for (index, pin) in module.outPins.enumerated() {
+                        let pinPrefix = prefix + "out.\(index)."
+                        put(pinPrefix + "short", pin.name ?? "Y\(index)")
+                        put(pinPrefix + "full", pin.name ?? "Output \(index)")
+                        put(pinPrefix + "type", pinType(definition: definition, index: index, output: true,
+                                                       fallback: pin.value))
+                        put(pinPrefix + "const", pin.value.description)
+                    }
                 }
             }
             put("page.\(pageIndex).blockCount", "\(blockIndex)")

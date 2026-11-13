@@ -85,6 +85,30 @@ struct MaraflowExportTests {
         #expect(again.project.maraflow?.properties["page.0.stCode"]?.contains("n := n + 1") == true)
     }
 
+    @Test("A normal Dirigo And/Not project exports as Maraflow blocks and wires")
+    func dirigoBlocksExport() throws {
+        var project = PCCProject(name: "Logic")
+        project.pages = [ProjectPage(caption: "main")]
+        var and = BlockFactory.makeModule(guid: BlockTypeCatalog.info(forBlockName: "And")!.guid,
+                                          id: 1, name: "And1", x: 32, y: 32, order: 10,
+                                          threadId: 2, page: "main")
+        and.inPins[0].value = .bool(true)
+        and.inPins[1].value = .bool(true)
+        and.inPins[2].value = .bool(false)
+        var not = BlockFactory.makeModule(guid: BlockTypeCatalog.info(forBlockName: "Not")!.guid,
+                                          id: 2, name: "Not1", x: 256, y: 32, order: 20,
+                                          threadId: 2, page: "main")
+        not.inPins[0].value = .bool(true)
+        project.modules = [and, not]
+        _ = project.connect(outModuleId: 1, outPinId: 0, toModuleId: 2, inPinId: 1)
+        let result = try MaraflowExporter.export(project)
+        let again = try ProjectFile.read(data: result.data, filename: "logic")
+        #expect(again.project.modules.count == 2)
+        #expect(again.project.modules.contains { $0.guid == MaraflowCatalog.byId["Bool.And"]?.guid })
+        #expect(again.project.modules.contains { $0.guid == MaraflowCatalog.byId["Bool.Not"]?.guid })
+        #expect(again.project.inConnections.count == 1)
+    }
+
     @MainActor
     @Test("The app prepares and writes the export")
     func appExport() throws {
@@ -101,15 +125,15 @@ struct MaraflowExportTests {
         #expect(again.project.modules.count == model.project?.modules.count)
     }
 
-    @Test("A native project exports a minimal Maraflow envelope and reports skipped blocks")
+    @Test("A native project exports a minimal Maraflow envelope and reports Dirigo-only blocks")
     func nativeProjectExports() throws {
         var project = PCCProject(name: "Native")
         project.pages = [ProjectPage(caption: "main")]
-        project.modules = [BlockFactory.makeModule(guid: BlockTypeCatalog.info(forBlockName: "And")!.guid,
-                                                   id: 1, name: "And1", x: 0, y: 0, order: 10,
+        project.modules = [BlockFactory.makeModule(guid: BlockTypeCatalog.info(forBlockName: "Div")!.guid,
+                                                   id: 1, name: "Div1", x: 0, y: 0, order: 10,
                                                    threadId: 2, page: "main")]
         let result = try MaraflowExporter.export(project)
-        #expect(result.notes.contains { $0.contains("And1") })
+        #expect(result.notes.contains { $0.contains("Div1") })
         let again = try ProjectFile.read(data: result.data, filename: "native")
         #expect(again.format == .maraflow)
         #expect(again.project.pages.map(\.caption) == ["main"])
