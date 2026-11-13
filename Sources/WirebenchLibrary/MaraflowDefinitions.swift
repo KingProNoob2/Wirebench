@@ -226,6 +226,14 @@ public enum MaraflowCatalog {
     public static let ported: Set<String> = [
         "Bool.And", "Bool.Nand", "Bool.Or", "Bool.Nor", "Bool.Xor", "Bool.Xnor", "Bool.Not",
         "Bool.RS", "Bool.SR",
+        "Math.Add", "Math.Sub", "Math.Mul", "Math.Min", "Math.Max", "Math.Div", "Math.Mod",
+        "Math.Pow", "Math.Abs", "Math.Neg", "Math.Sqrt", "Math.Sin", "Math.Cos", "Math.Clamp",
+        "Math.Random", "Math.Scale", "Math.PID",
+        "Main.Comparators.EQ", "Main.Comparators.NE", "Main.Comparators.GT", "Main.Comparators.GE",
+        "Main.Comparators.LT", "Main.Comparators.LE", "Main.Comparators.InRange",
+        "Main.Comparators.Hysteresis",
+        "Main.Conversion.PackBits", "Main.Conversion.UnpackBits",
+        "Main.Switches.Sel", "Main.Switches.Mux", "Main.Switches.Demux",
     ]
 
     /// All definitions keyed by definition id (e.g. `Bool.And`).

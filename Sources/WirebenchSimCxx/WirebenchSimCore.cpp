@@ -21,6 +21,7 @@
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <random>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -116,6 +117,30 @@ inline WirebenchValue floatValue(double value) {
     v.kind = WIREBENCH_VALUE_FLOAT;
     v.f = static_cast<float>(value);
     return v;
+}
+
+inline WirebenchValue int64Value(int64_t value) {
+    WirebenchValue v{};
+    v.kind = WIREBENCH_VALUE_INT64;
+    v.i64 = value;
+    return v;
+}
+
+/// A numeric result written to a pin whose kind decides the conversion, mirroring `DataType.convertValue`.
+inline WirebenchValue maraflowNumber(double value, const WirebenchValue &prototype) {
+    switch (prototype.kind) {
+        case WIREBENCH_VALUE_BOOL: return boolean(value != 0.0);
+        case WIREBENCH_VALUE_INT16:
+        case WIREBENCH_VALUE_INT32: return int32Value(static_cast<int32_t>(value));
+        case WIREBENCH_VALUE_INT64: return int64Value(static_cast<int64_t>(value));
+        case WIREBENCH_VALUE_FLOAT: return floatValue(value);
+        default: return int32Value(static_cast<int32_t>(value));
+    }
+}
+
+inline std::mt19937 &maraflowRng() {
+    static thread_local std::mt19937 engine(std::random_device{}());
+    return engine;
 }
 
 /// Days since 1 Jan 1980 for a proleptic Gregorian date — `DirigoEpoch.days`, by Howard Hinnant's
@@ -1046,6 +1071,170 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     if (m.outPins.size() > 1) m.outPins[1] = boolean(!m.flagA);
                     return;
                 }
+                case MARAFLOW_Math_Add: {
+                    double sum = 0.0;
+                    for (size_t i = 1; i < m.inPins.size(); ++i) sum += asFloat(m.inPins[i]);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(sum, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Sub: {
+                    double result = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    for (size_t i = 2; i < m.inPins.size(); ++i) result -= asFloat(m.inPins[i]);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(result, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Mul: {
+                    double product = 1.0;
+                    for (size_t i = 1; i < m.inPins.size(); ++i) product *= asFloat(m.inPins[i]);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(product, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Div: {
+                    const double a = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double b = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(std::abs(b) < 1e-12 ? 0.0 : a / b, m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(std::abs(b) < 1e-12);
+                    return;
+                }
+                case MARAFLOW_Math_Mod: {
+                    const int64_t a = static_cast<int64_t>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
+                    const int64_t b = static_cast<int64_t>(m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(b == 0 ? 0.0 : static_cast<double>(a % b), m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(b == 0);
+                    return;
+                }
+                case MARAFLOW_Math_Min:
+                case MARAFLOW_Math_Max: {
+                    double value = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    for (size_t i = 2; i < m.inPins.size(); ++i) {
+                        const double operand = static_cast<double>(asFloat(m.inPins[i]));
+                        value = m.variant == MARAFLOW_Math_Min ? std::min(value, operand)
+                                                              : std::max(value, operand);
+                    }
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(value, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Abs: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(std::abs(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0), m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Neg: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(-(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0), m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Sqrt: {
+                    const double value = std::sqrt(std::max(0.0, m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0));
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(value, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Sin: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(std::sin(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0), m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Cos: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(std::cos(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0), m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Clamp: {
+                    const double value = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double lo = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const double hi = m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 0.0;
+                    const double clamped = std::clamp(value, std::min(lo, hi), std::max(lo, hi));
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(clamped, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Random: {
+                    const bool trigger = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const bool rising = trigger && !m.flagA;
+                    m.flagA = trigger;
+                    const double lo = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const double hi = m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 100.0;
+                    if (rising || m.s[1] < 0.5) {
+                        const double low = std::min(lo, hi);
+                        const double high = std::max(lo, hi);
+                        double sample;
+                        if (m.outPins.empty() || m.outPins[0].kind != WIREBENCH_VALUE_FLOAT) {
+                            const int64_t lowInt = static_cast<int64_t>(std::floor(low));
+                            const int64_t highInt = static_cast<int64_t>(std::floor(high));
+                            if (highInt <= lowInt) sample = static_cast<double>(lowInt);
+                            else {
+                                std::uniform_int_distribution<int64_t> distribution(lowInt, highInt);
+                                sample = static_cast<double>(distribution(maraflowRng()));
+                            }
+                        } else {
+                            std::uniform_real_distribution<double> distribution(low, high);
+                            sample = distribution(maraflowRng());
+                        }
+                        m.s[0] = sample;
+                        m.s[1] = 1;
+                    }
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(m.s[0], m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Math_Scale: {
+                    const double input = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double inLow = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const double inHigh = m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 100.0;
+                    const double outLow = m.inPins.size() > 4 ? asFloat(m.inPins[4]) : 0.0;
+                    const double outHigh = m.inPins.size() > 5 ? asFloat(m.inPins[5]) : 10.0;
+                    const double span = inHigh - inLow;
+                    const double scaled = std::abs(span) < 1e-12 ? outLow
+                        : outLow + ((input - inLow) / span) * (outHigh - outLow);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(scaled, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Main_Comparators_EQ:
+                case MARAFLOW_Main_Comparators_NE:
+                case MARAFLOW_Main_Comparators_GT:
+                case MARAFLOW_Main_Comparators_GE:
+                case MARAFLOW_Main_Comparators_LT:
+                case MARAFLOW_Main_Comparators_LE: {
+                    const double a = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double b = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    bool result = false;
+                    switch (m.variant) {
+                        case MARAFLOW_Main_Comparators_EQ: result = std::abs(a - b) < 1e-6; break;
+                        case MARAFLOW_Main_Comparators_NE: result = std::abs(a - b) >= 1e-6; break;
+                        case MARAFLOW_Main_Comparators_GT: result = a > b; break;
+                        case MARAFLOW_Main_Comparators_GE: result = a >= b; break;
+                        case MARAFLOW_Main_Comparators_LT: result = a < b; break;
+                        default: result = a <= b; break;
+                    }
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(result);
+                    return;
+                }
+                case MARAFLOW_Main_Conversion_PackBits: {
+                    int64_t packed = 0;
+                    for (size_t i = 1; i < m.inPins.size(); ++i) {
+                        if (asBool(m.inPins[i])) packed |= (1LL << (i - 1));
+                    }
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(static_cast<double>(packed), m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Main_Conversion_UnpackBits: {
+                    const int64_t value = static_cast<int64_t>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
+                    for (size_t i = 0; i < m.outPins.size(); ++i) {
+                        m.outPins[i] = boolean(((value >> i) & 1LL) != 0);
+                    }
+                    return;
+                }
+                case MARAFLOW_Main_Switches_Sel: {
+                    const bool gate = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const double value = gate
+                        ? (m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 0.0)
+                        : (m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(value, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Main_Switches_Mux: {
+                    const int channelCount = static_cast<int>(m.inPins.size()) - 2;
+                    if (channelCount > 0) {
+                        const int address = static_cast<int>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
+                        const int index = std::clamp(address, 0, channelCount - 1);
+                        if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(asFloat(m.inPins[2 + index]), m.outPins[0]);
+                    }
+                    return;
+                }
                 default:
                     return;   /* not ported yet: hold the outputs */
             }
@@ -1161,6 +1350,7 @@ void resetModule(Module &m) {
             return;
         case WIREBENCH_BLOCK_MARAFLOW:
             m.flagA = false;
+            m.s[0] = m.s[1] = m.s[2] = 0;
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             return;
         case WIREBENCH_BLOCK_SYSTEMCMD:

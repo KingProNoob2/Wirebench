@@ -181,7 +181,10 @@ struct ToolTests {
         // The original's help has no page for these, so there is nothing to condense: `Generic` and `Unresolved` are placeholders, the rest
         // are blocks the help never documented. A block not in this list that loses its reference fails here.
         let undocumented: Set<String> = ["FloatMath", "Generic", "IQRF", "Switch2", "Switch8", "Unresolved"]
-        let missing = BlockTypeCatalog.all.map(\.blockName).filter { !undocumented.contains($0) && run(box, "block_help", ["type": $0]).failed }
+        let nativeNames = Set(MaraflowCatalog.all.map(\.typeName))
+        let missing = BlockTypeCatalog.all.map(\.blockName).filter {
+            !undocumented.contains($0) && !nativeNames.contains($0) && run(box, "block_help", ["type": $0]).failed
+        }
         #expect(missing.isEmpty, "no reference for: \(missing.sorted())")
         #expect(run(box, "block_help", ["type": "Segment"]).result.contains("DP"), "Segment's pins are listed")
     }

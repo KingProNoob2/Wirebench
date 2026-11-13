@@ -161,10 +161,9 @@ struct MaraflowImportTests {
         #expect(!output.inPins[3].inverted)
 
         let placeholder = try #require(project.modules.first { $0.name == "PID1" })
-        #expect(placeholder.guid == BlockTypeCatalog.info(forBlockName: "Unresolved")?.guid)
+        #expect(placeholder.guid == MaraflowCatalog.byId["Math.PID"]?.guid)
         #expect(placeholder.inPins.count == 7)
         #expect(placeholder.outPins.count == 1)
-        #expect(loaded.notes.contains { $0.contains("PID") && $0.contains("placeholder") })
         #expect(project.connection(inModuleId: output.id, inPinId: 2)?.outModuleId == placeholder.id)
 
         // Everything that was imported survives the native format.
@@ -257,6 +256,52 @@ struct MaraflowImportTests {
                                   ("In", "Edge Trigger Input", "BOOL", "1")],
                          outputs: [("Q", "Single-Cycle Pulse Output", "BOOL", "0")])
         return propertiesXML(entries)
+    }
+
+    @Test("Native math, comparators and conversion blocks simulate")
+    func nativeMathBlocks() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "Math"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "4"),
+            ("page.0.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "add", definition: "Math.Add", type: "Add", name: "Add1",
+                              gridX: 2, gridY: 2, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("X1", "Operand 1", "INT", "5"),
+                                       ("X2", "Operand 2", "INT", "2")],
+                              outputs: [("Y", "Result", "INT", "0")])
+        entries += Self.block("page.0.block.1.", id: "div", definition: "Math.Div", type: "Div", name: "Div1",
+                              gridX: 10, gridY: 2, order: 20,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("A", "Dividend", "INT", "7"),
+                                       ("B", "Divisor", "INT", "2")],
+                              outputs: [("Y", "Result", "INT", "0"), ("Err", "Error", "BOOL", "0")])
+        entries += Self.block("page.0.block.2.", id: "eq", definition: "Main.Comparators.EQ", type: "EQ", name: "EQ1",
+                              gridX: 18, gridY: 2, order: 30,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("X1", "Left", "INT", "3"),
+                                       ("X2", "Right", "INT", "3")],
+                              outputs: [("Y", "Result", "BOOL", "0")])
+        entries += Self.block("page.0.block.3.", id: "pack", definition: "Main.Conversion.PackBits", type: "PackBits", name: "Pack1",
+                              gridX: 26, gridY: 2, order: 40,
+                              inputs: [("En", "Enable", "BOOL", "1"),
+                                       ("B0", "Bit 0", "BOOL", "1"), ("B1", "Bit 1", "BOOL", "1")],
+                              outputs: [("Y", "Packed", "INT", "0")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "math")
+        let add = try #require(outcome.project.modules.first { $0.name == "Add1" })
+        let div = try #require(outcome.project.modules.first { $0.name == "Div1" })
+        let eq = try #require(outcome.project.modules.first { $0.name == "EQ1" })
+        let pack = try #require(outcome.project.modules.first { $0.name == "Pack1" })
+        #expect(add.guid == MaraflowCatalog.byId["Math.Add"]?.guid)
+        #expect(pack.guid == MaraflowCatalog.byId["Main.Conversion.PackBits"]?.guid)
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: add.id)[0].asInt == 7)
+        #expect(core.outPins(moduleId: div.id)[0].asInt == 3)
+        #expect(core.outPins(moduleId: div.id)[1].asBool == false)
+        #expect(core.outPins(moduleId: eq.id)[0].asBool)
+        #expect(core.outPins(moduleId: pack.id)[0].asInt == 3)
     }
 
     @Test("Timer, PulseGen and SinglePulse map onto blocks that run")
