@@ -96,6 +96,21 @@ struct MaraflowStVariable {
     var initial: String
 }
 
+struct MaraflowLadderElement {
+    var kind: String
+    var operand: String
+    var sourceOperand: String
+}
+
+struct MaraflowRung {
+    var comment: String
+    var threadID: Int
+    var order: Int
+    var main: [MaraflowLadderElement]
+    var branches: [[MaraflowLadderElement]]
+    var coils: [MaraflowLadderElement]
+}
+
 struct MaraflowPage {
     var name: String
     var language: String
@@ -104,7 +119,7 @@ struct MaraflowPage {
     var stCode: String
     var stVariables: [MaraflowStVariable]
     var stThreadID: Int
-    var rungCount: Int
+    var rungs: [MaraflowRung]
     var graphicCount: Int
 
     var isMacro: Bool { name.hasPrefix("*") }
@@ -157,6 +172,32 @@ struct MaraflowProject {
                     initial: document.string(variablePrefix + "init", "0")
                 ))
             }
+            let rungCount = max(0, min(document.int(prefix + "rungCount", 0), 10_000))
+            var rungs: [MaraflowRung] = []
+            for rungIndex in 0..<rungCount {
+                let rungPrefix = prefix + "rung.\(rungIndex)."
+                let mainCount = max(0, min(document.int(rungPrefix + "mainCount", 0), 512))
+                let main = (0..<mainCount).map {
+                    readLadderElement(document, prefix: rungPrefix + "main.\($0).")
+                }
+                let branchCount = max(0, min(document.int(rungPrefix + "branchCount", 0), 512))
+                var branches: [[MaraflowLadderElement]] = []
+                for branchIndex in 0..<branchCount {
+                    let branchPrefix = rungPrefix + "branch.\(branchIndex)."
+                    let elementCount = max(0, min(document.int(branchPrefix + "elCount", 0), 512))
+                    branches.append((0..<elementCount).map {
+                        readLadderElement(document, prefix: branchPrefix + "el.\($0).")
+                    })
+                }
+                let coilCount = max(0, min(document.int(rungPrefix + "coilCount", 0), 512))
+                let coils = (0..<coilCount).map {
+                    readLadderElement(document, prefix: rungPrefix + "coil.\($0).")
+                }
+                rungs.append(MaraflowRung(comment: document.string(rungPrefix + "comment"),
+                                          threadID: document.int(rungPrefix + "threadId", 2),
+                                          order: document.int(rungPrefix + "order", (rungIndex + 1) * 10),
+                                          main: main, branches: branches, coils: coils))
+            }
             pages.append(MaraflowPage(
                 name: name,
                 language: language,
@@ -165,13 +206,13 @@ struct MaraflowProject {
                 stCode: document.string(prefix + "stCode"),
                 stVariables: variables,
                 stThreadID: document.int(prefix + "stThreadId", 2),
-                rungCount: document.int(prefix + "rungCount", 0),
+                rungs: rungs,
                 graphicCount: document.int(prefix + "graphicCount", 0)
             ))
         }
         if pages.isEmpty { pages = [MaraflowPage(name: "Page 1", language: "FBD", blocks: [], wires: [],
                                                  stCode: "", stVariables: [], stThreadID: 2,
-                                                 rungCount: 0, graphicCount: 0)] }
+                                                 rungs: [], graphicCount: 0)] }
         return MaraflowProject(
             name: document.string("project.name", filename),
             author: document.string("project.author"),
@@ -180,6 +221,12 @@ struct MaraflowProject {
             version: document.string("maraflow.version"),
             pages: pages
         )
+    }
+
+    private static func readLadderElement(_ document: MaraflowDocument, prefix: String) -> MaraflowLadderElement {
+        MaraflowLadderElement(kind: document.string(prefix + "kind", "NO_CONTACT"),
+                              operand: document.string(prefix + "operand"),
+                              sourceOperand: document.string(prefix + "srcOperand"))
     }
 
     private static func readBlock(_ document: MaraflowDocument, prefix: String, index: Int) -> MaraflowBlock {

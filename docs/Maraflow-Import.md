@@ -57,7 +57,10 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 
 ## Limits
 
-- **Ladder pages** keep their page but not their rungs; the report gives the rung count.
+- **Ladder pages** convert the simple rung shape: series NO/NC contacts on `DI0…DI7` become an `8xDI` reading and
+  `And`/`Not` logic, and normal/negated coils on `DO0…DO7` drive an `8xDO`. Parallel branches, function-block
+  elements, edge contacts, latching coils and analog coils are reported and skipped, since partially converting a
+  rung would change its meaning.
 - **Structured Text pages** are converted when they use the editor's generated block-call form: the `VAR…END_VAR`
   declarations become variable blocks, `<var> := Type(args)` and `Instance(args, Out => var)` become blocks plus
   `Set` writes, and literal or declared-variable arguments are wired. General expressions (for example `a + 1`),
@@ -168,12 +171,12 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Visual.Vars.BoolVar` | `BoolVar` |  |
 | `Visual.Vars.IntVar` | `IntVar` |  |
 | `Visual.Vars.LongVar` | `LongVar` |  |
-| `Ladder.Contact.NO` | inert |  |
-| `Ladder.Contact.NC` | inert |  |
+| `Ladder.Contact.NO` | rung logic | 8xDI contact |
+| `Ladder.Contact.NC` | rung logic | 8xDI + Not |
 | `Ladder.Contact.POS` | inert |  |
 | `Ladder.Contact.NEG` | inert |  |
-| `Ladder.Coil.NORMAL` | inert |  |
-| `Ladder.Coil.NEGATED` | inert |  |
+| `Ladder.Coil.NORMAL` | rung logic | 8xDO coil |
+| `Ladder.Coil.NEGATED` | rung logic | 8xDO + Not |
 | `Ladder.Coil.SET` | inert |  |
 | `Ladder.Coil.RESET` | inert |  |
 | `Ladder.Coil.POS` | inert |  |
@@ -181,4 +184,4 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Ladder.Coil.WRITE_REG` | inert |  |
 | `Ladder.Coil.ANALOG` | inert |  |
 
-Counts: 50 mapped, 44 inert placeholders.
+Counts: 54 mapped, 40 inert placeholders.

@@ -380,6 +380,52 @@ struct MaraflowImportTests {
         #expect(outcome.notes.contains { $0.contains("Structured Text") && $0.contains("converted") })
     }
 
+    static func ladderProject() -> Data {
+        var entries: [(String, String)] = [
+            ("project.name", "LadderDemo"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Ladder"),
+            ("page.0.language", "LD"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.0.rungCount", "2"),
+            ("page.0.rung.0.threadId", "2"),
+            ("page.0.rung.0.order", "10"),
+            ("page.0.rung.0.mainCount", "1"),
+            ("page.0.rung.0.main.0.kind", "NO_CONTACT"),
+            ("page.0.rung.0.main.0.operand", "DI0"),
+            ("page.0.rung.0.coilCount", "1"),
+            ("page.0.rung.0.coil.0.kind", "NORMAL_COIL"),
+            ("page.0.rung.0.coil.0.operand", "DO0"),
+            ("page.0.rung.1.threadId", "2"),
+            ("page.0.rung.1.order", "20"),
+            ("page.0.rung.1.mainCount", "1"),
+            ("page.0.rung.1.main.0.kind", "NC_CONTACT"),
+            ("page.0.rung.1.main.0.operand", "DI1"),
+            ("page.0.rung.1.coilCount", "1"),
+            ("page.0.rung.1.coil.0.kind", "NEGATED_COIL"),
+            ("page.0.rung.1.coil.0.operand", "DO1"),
+        ]
+        return Self.propertiesXML(entries)
+    }
+
+    @Test("Simple ladder rungs become DI, logic and DO blocks")
+    func ladderPages() throws {
+        let outcome = try MaraflowImporter.importProject(data: Self.ladderProject(), filename: "ladder")
+        let di = try #require(outcome.project.modules.first { $0.guid == BlockTypeCatalog.info(forBlockName: "8xDI")?.guid })
+        let output = try #require(outcome.project.modules.first { $0.guid == BlockTypeCatalog.info(forBlockName: "8xDO")?.guid })
+        #expect(outcome.project.modules.contains { $0.guid == BlockTypeCatalog.info(forBlockName: "Not")?.guid })
+        #expect(outcome.notes.contains { $0.contains("ladder block") })
+        #expect(outcome.project.connection(inModuleId: output.id, inPinId: 1)?.outModuleId == di.id)
+
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.setOut(moduleId: di.id, pin: 0, value: .bool(true))
+        core.setOut(moduleId: di.id, pin: 1, value: .bool(false))
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.inPins(moduleId: output.id)[1].asBool, "NO DI0 energises DO0")
+        #expect(!core.inPins(moduleId: output.id)[2].asBool, "NC DI1 is true, then the negated coil makes DO1 false")
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [
@@ -406,7 +452,7 @@ struct MaraflowImportTests {
         #expect(loaded.project.pages.map(\.caption) == ["Code", "Relays", "*Blink"])
         let notes = loaded.notes.joined(separator: "\n")
         #expect(notes.contains("Structured Text"))
-        #expect(notes.contains("ladder rung"))
+        #expect(notes.contains("ladder block"))
         #expect(notes.contains("Macro page"))
     }
 

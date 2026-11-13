@@ -81,8 +81,12 @@ public struct MaraflowImporter {
                     ? "Page '\(caption)' is Structured Text; no block-call statements could be converted."
                     : "Page '\(caption)' is Structured Text; converted \(added) block(s) from its declarations and calls.")
             }
-            if page.rungCount > 0 {
-                notes.append("Page '\(caption)' has \(page.rungCount) ladder rung(s); ladder logic is not imported.")
+            if !page.rungs.isEmpty {
+                let before = project.modules.count
+                importLadderPage(page, caption: caption, project: &project, nextId: &nextModuleId,
+                                 notes: &notes)
+                let converted = project.modules.count - before
+                notes.append("Page '\(caption)': converted \(converted) ladder block(s) from \(page.rungs.count) rung(s).")
             }
             if page.graphicCount > 0 {
                 notes.append("Page '\(caption)' has \(page.graphicCount) graphic element(s); graphics are not imported.")
@@ -241,6 +245,134 @@ public struct MaraflowImporter {
                                                       ("MARAFLOW_TYPE", block.typeName),
                                                       ("MARAFLOW_ID", block.id)]),
                          rawChildren: [])
+    }
+
+    // MARK: - Ladder pages
+
+    private enum LadderSource {
+        case constant(Bool)
+        case pin(module: Int, pin: Int)
+    }
+
+    /// Converts the simple rung shape — series NO/NC contacts on `DI0…DI7` driving NO/negated coils on
+    /// `DO0…DO7` — into an 8xDI, logic blocks and an 8xDO. Parallel branches, function blocks, edge contacts and
+    /// latching/analog coils are reported and left out; partial rung semantics would be worse than none.
+    private static func importLadderPage(_ page: MaraflowPage, caption: String, project: inout PCCProject,
+                                         nextId: inout Int, notes: inout [String]) {
+        var diModule: Int?
+        var doModule: Int?
+        var order = 10
+
+        func addModule(_ guid: UUID, name: String, x: Double, y: Double, moduleOrder: Int) -> Int {
+            let id = nextId
+            nextId += 1
+            var module = BlockFactory.makeModule(guid: guid, id: id, name: name, x: x, y: y,
+                                                 order: moduleOrder, threadId: page.stThreadID, page: caption)
+            if !module.inPins.isEmpty {
+                module.inPins[0].value = .bool(true)
+            }
+            project.modules.append(module)
+            return id
+        }
+
+        func sharedDI() -> Int {
+            if let diModule { return diModule }
+            let id = addModule(BlockTypeCatalog.info(forBlockName: "8xDI")!.guid, name: "DI",
+                               x: 32, y: 32, moduleOrder: 1)
+            diModule = id
+            return id
+        }
+
+        func sharedDO() -> Int {
+            if let doModule { return doModule }
+            let id = addModule(BlockTypeCatalog.info(forBlockName: "8xDO")!.guid, name: "DO",
+                               x: 224, y: 32, moduleOrder: 100_000)
+            doModule = id
+            return id
+        }
+
+        func wire(_ source: LadderSource, to module: Int, pin: Int) {
+            switch source {
+            case .constant(let value):
+                if let index = project.modules.firstIndex(where: { $0.id == module }),
+                   project.modules[index].inPins.indices.contains(pin) {
+                    project.modules[index].inPins[pin].value = .bool(value)
+                }
+            case .pin(let sourceModule, let sourcePin):
+                project.connect(outModuleId: sourceModule, outPinId: sourcePin, toModuleId: module, inPinId: pin)
+            }
+        }
+
+        func invert(_ source: LadderSource) -> LadderSource {
+            let id = addModule(BlockTypeCatalog.info(forBlockName: "Not")!.guid,
+                               name: "LadderNot\(nextId)", x: 32, y: 200, moduleOrder: order)
+            order += 10
+            wire(source, to: id, pin: 1)
+            return .pin(module: id, pin: 0)
+        }
+
+        for rung in page.rungs {
+            guard rung.branches.isEmpty else {
+                notes.append("Ladder page '\(caption)': a rung with parallel branches was skipped.")
+                continue
+            }
+            if rung.main.contains(where: { $0.kind == "FUNCTION_BLOCK" }) {
+                notes.append("Ladder page '\(caption)': a rung with a function block was skipped.")
+                continue
+            }
+            var condition: LadderSource?
+            var unsupported = false
+            for element in rung.main {
+                let operand = element.operand.uppercased()
+                guard operand.hasPrefix("DI"), let channel = Int(operand.dropFirst(2)), (0...7).contains(channel) else {
+                    unsupported = true
+                    break
+                }
+                let source: LadderSource = .pin(module: sharedDI(), pin: channel)
+                var contact: LadderSource?
+                switch element.kind {
+                case "NO_CONTACT": contact = source
+                case "NC_CONTACT": contact = invert(source)
+                default: unsupported = true
+                }
+                if unsupported { break }
+                guard let contact else { unsupported = true; break }
+                if let accumulated = condition {
+                    let id = addModule(BlockTypeCatalog.info(forBlockName: "And")!.guid,
+                                       name: "LadderAnd\(nextId)", x: 32, y: 32, moduleOrder: order)
+                    order += 10
+                    wire(accumulated, to: id, pin: 1)
+                    wire(contact, to: id, pin: 2)
+                    condition = .pin(module: id, pin: 0)
+                } else {
+                    condition = contact
+                }
+            }
+            guard !unsupported, let condition else {
+                if !unsupported {
+                    notes.append("Ladder page '\(caption)': a rung without contacts was skipped.")
+                } else {
+                    notes.append("Ladder page '\(caption)': a rung with edge contacts or a non-DI operand was skipped.")
+                }
+                continue
+            }
+            for coil in rung.coils {
+                let operand = coil.operand.uppercased()
+                guard operand.hasPrefix("DO"), let channel = Int(operand.dropFirst(2)), (0...7).contains(channel) else {
+                    notes.append("Ladder page '\(caption)': coil '\(coil.operand)' is not a DO channel and was skipped.")
+                    continue
+                }
+                let outputModule = sharedDO()
+                switch coil.kind {
+                case "NORMAL_COIL":
+                    wire(condition, to: outputModule, pin: channel + 1)
+                case "NEGATED_COIL":
+                    wire(invert(condition), to: outputModule, pin: channel + 1)
+                default:
+                    notes.append("Ladder page '\(caption)': a \(coil.kind.lowercased()) was skipped (only normal and negated coils are converted).")
+                }
+            }
+        }
     }
 
     // MARK: - Structured Text pages
