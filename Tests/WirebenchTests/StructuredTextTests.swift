@@ -463,7 +463,48 @@ struct StructuredTextTests {
         #expect(core.outPins(moduleId: variable.id)[0].asInt == 3)
     }
 
-    @Test("Loop refusals: a live bound, a zero step, an index write, the cap, WHILE and REPEAT")
+    @Test("WHILE advances one iteration per scan")
+    func whileLoop() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            WHILE n < 3 DO
+                n := n + 1;
+            END_WHILE;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        for _ in 0..<4 { core.step(deltaMs: 10, now: Self.now) }
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 3, "three iterations over three scans, then stopped")
+    }
+
+    @Test("REPEAT advances until its condition holds")
+    func repeatLoop() throws {
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            REPEAT
+                n := n + 1;
+            UNTIL n = 2
+            END_REPEAT;
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        for _ in 0..<3 { core.step(deltaMs: 10, now: Self.now) }
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 2)
+    }
+
+    @Test("Loop refusals: a live bound, a zero step, an index write, the cap")
     func loopRefusals() {
         let cases: [(String, String)] = [
             ("""
@@ -498,23 +539,7 @@ struct StructuredTextTests {
                  END_FOR;
              END_PROGRAM
              """, "256"),
-            ("""
-             PROGRAM P
-             VAR n : INT := 0; END_VAR
-                 WHILE n < 3 DO
-                     n := n + 1;
-                 END_WHILE;
-             END_PROGRAM
-             """, "WHILE is not supported"),
-            ("""
-             PROGRAM P
-             VAR n : INT := 0; END_VAR
-                 REPEAT
-                     n := n + 1;
-                 UNTIL n = 3
-                 END_REPEAT;
-             END_PROGRAM
-             """, "REPEAT is not supported"),
+
         ]
         for (source, fragment) in cases {
             let message = Self.error(source)

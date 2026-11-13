@@ -47,13 +47,18 @@ END_PROGRAM
   arithmetic is refused with a message; this subset is Boolean.
 - **Statements.** `name := expression;`, `instance(arguments);`, `IF … THEN … ELSIF … ELSE … END_IF;`,
   `CASE selector OF 1: … 2, 3: … 5..7: … ELSE … END_CASE;`, and
-  `FOR i := 1 TO n [BY step] DO … END_FOR;`. FOR bounds and step must be whole-number literals and the body is
+  `FOR i := 1 TO n [BY step] DO … END_FOR;`, `WHILE cond DO … END_WHILE;` and
+  `REPEAT … UNTIL cond END_REPEAT;`. FOR bounds and step must be whole-number literals and the body is
   unrolled at compile time (at most 256 iterations); the index is a compile-time binding, not a runtime variable after
   the loop (a read of `i` after `END_FOR` yields its value at the start of the scan, not the final index). Reads of
   variables assigned unconditionally earlier in the unrolled body are substituted with those
   expressions, so `n := n + 1` counts correctly; a conditional write is not substituted (it falls back to the
-  variable's value at the start of the scan). `WHILE` and `REPEAT` are refused: a loop over a live condition cannot be
-  expressed as dataflow — use FOR with constant bounds or a counter.
+  variable's value at the start of the scan).
+  `WHILE`/`REPEAT` are a **state machine**: each scan executes at most one pass of the body, while the condition holds
+  (WHILE) or the until-condition does not (REPEAT), evaluated from the variables' values at the start of the scan. The
+  loop's state is the program's own variables; no hidden block is created. Statements after the loop run every scan.
+  This differs from ST's within-scan loop: a `WHILE n < 3` counter takes three scans, not one. A REPEAT whose
+  until-condition is already true at the start of a scan skips its body (ST would run it once).
   CASE labels are whole numbers or ranges and must not
   overlap; the selector must be `INT`/`LONG` (a `REAL` selector needs a float comparator, which the catalogue lacks).
   CASE is lowered to the same comparisons and merges as an IF chain.
@@ -139,7 +144,8 @@ same compiler.
   allowed. Calls are inlined purely (locals as value bindings, IF as selects), so a recursive function and a path
   that leaves a local unassigned are refused.
 - `FOR` needs literal bounds/step and unrolls to at most 256 iterations; an instance cannot be called once per
-  iteration (the same block call twice in one scan is refused). `WHILE` and `REPEAT` are refused.
+  iteration (the same block call twice in one scan is refused). `WHILE`/`REPEAT` run one iteration per scan (see
+  above); an output written only inside a loop body needs an assignment before the loop, like an IF branch.
 - Arrays are INT/LONG/REAL, at most 16, and cannot be written inside IF or CASE. A read in the same scan as a write
   sees the value from before the scan.
 - A variable written inside a conditional in a FOR body is read back as the scan-start value, not the value the

@@ -60,11 +60,12 @@ are refused; labels may be negative; tests cover selection, ranges and the refus
 `CASE selector OF 1: ... 2, 3: ... ELSE ... END_CASE`. Selector is INT/LONG. Lower through `ISwitch`/`LSwitch`
 or comparison chains; each arm merges per the IF rules. Refuse REAL selectors and overlapping labels.
 
-## Stage 3: FOR / WHILE / REPEAT (FOR done and verified; WHILE/REPEAT refused)
+## Stage 3: FOR / WHILE / REPEAT (done and verified)
 
 `FOR` with literal bounds/step is unrolled (cap 256 iterations) with index and unconditional-write substitution; the
-index is a compile-time binding. `WHILE`/`REPEAT` are parsed far enough to refuse with a reason: a live condition cannot
-be dataflow without a state machine, which this stage does not add.
+index is a compile-time binding. `WHILE`/`REPEAT` are a state machine: one pass of the body per scan while the condition
+holds (evaluated at scan start), using the program's variables as the loop state; statements after the loop run every
+scan. This is documented in `Structured-Text.md` and differs from ST's within-scan loop by design.
 
 A loop is not expressible as dataflow without unrolling or a state machine. Decide per construct:
 `FOR` with constant bounds and no early `EXIT` can unroll (bounded by a documented maximum, e.g. 10 000

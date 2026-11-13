@@ -376,6 +376,19 @@ final class Emitter {
         }
     }
 
+    /// Grows a module's input pins to `count`. A selector (`ISwitch`/`LSwitch`/`FSwitch`) is created with one X pin,
+    /// but a merge needs X0 and X1; the module's `INPUT_COUNT` follows the pins so the core sees both.
+    private func ensureInPins(_ module: Int, count: Int) {
+        guard let index = modules.firstIndex(where: { $0.id == module }) else { return }
+        while modules[index].inPins.count < count {
+            modules[index].inPins.append(Pin(id: modules[index].inPins.count, value: .bool(false)))
+        }
+        if let counted = BlockLabels.countedInputCount(for: modules[index].guid,
+                                                       totalPins: modules[index].inPins.count) {
+            modules[index].inputCount = counted
+        }
+    }
+
     func setIn(_ module: Int, _ pin: Int, _ value: PinValue) {
         guard let index = modules.firstIndex(where: { $0.id == module }),
               modules[index].inPins.indices.contains(pin) else { return }
@@ -648,6 +661,7 @@ final class Emitter {
             let test = try materialiseBool(condition)
             let yes = try materialiseNumber(whenTrue), no = try materialiseNumber(whenFalse)
             let block = addBlock(blockGuid)
+            ensureInPins(block, count: 4)
             connect(block, 0, .constant(true))
             connect(block, 1, test)
             connect(block, 2, no)       // X0, the value when Sw = 0

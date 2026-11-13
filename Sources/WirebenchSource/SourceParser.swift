@@ -714,12 +714,8 @@ public struct SourceParser {
         if isKeyword("IF") { return try ifStatement() }
         if isKeyword("CASE") { return try caseStatement() }
         if isKeyword("FOR") { return try forStatement() }
-        if isKeyword("WHILE") {
-            throw error("WHILE is not supported: a loop over a live condition cannot be dataflow; use FOR with constant bounds or a counter")
-        }
-        if isKeyword("REPEAT") {
-            throw error("REPEAT is not supported: a loop over a live condition cannot be dataflow; use FOR with constant bounds or a counter")
-        }
+        if isKeyword("WHILE") { return try whileStatement() }
+        if isKeyword("REPEAT") { return try repeatStatement() }
         guard current.kind == .identifier else {
             throw error("expected a statement but found \(describe(current))")
         }
@@ -891,6 +887,37 @@ public struct SourceParser {
     /// whole-number literals, the body is capped at 256 iterations, and reads of the index and of variables assigned
     /// earlier in the unrolled body are substituted with their expressions so the sequence keeps the loop's meaning.
     /// The index is a compile-time binding: it is not written to a runtime variable after the loop.
+    /// `WHILE cond DO … END_WHILE` as a state machine: one pass of the body per scan while the condition holds at the
+    /// start of the scan. `REPEAT … UNTIL cond END_REPEAT` is the same with the condition negated; it checks at the
+    /// start of the scan, so a condition already true skips the body (ST would run it once). The loop's state is the
+    /// program's own variables, so no hidden block is created; statements after the loop run every scan.
+    private mutating func whileStatement() throws -> SourceStmt {
+        let keyword = advance()   // WHILE
+        let condition = try expression()
+        try expectKeyword("DO")
+        let saved = sequenceBindings
+        let body = try statements { $0 == "END_WHILE" }
+        sequenceBindings = saved
+        for name in assignedNames(in: body) { sequenceBindings.removeValue(forKey: name.lowercased()) }
+        try expectKeyword("END_WHILE")
+        try expectSymbol(";")
+        return SourceStmt(.ifThen(condition, body, nil), line: keyword.line)
+    }
+
+    private mutating func repeatStatement() throws -> SourceStmt {
+        let keyword = advance()   // REPEAT
+        let saved = sequenceBindings
+        let body = try statements { $0 == "UNTIL" }
+        sequenceBindings = saved
+        for name in assignedNames(in: body) { sequenceBindings.removeValue(forKey: name.lowercased()) }
+        try expectKeyword("UNTIL")
+        let condition = try expression()
+        try expectKeyword("END_REPEAT")
+        try expectSymbol(";")
+        let test = SourceExpr(.unary("!", condition), line: keyword.line)
+        return SourceStmt(.ifThen(test, body, nil), line: keyword.line)
+    }
+
     private mutating func forStatement() throws -> SourceStmt {
         let keyword = advance()   // FOR
         let indexToken = try expectIdentifier("a loop variable")
