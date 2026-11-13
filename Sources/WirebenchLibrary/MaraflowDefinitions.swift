@@ -131,6 +131,14 @@ public enum MaraflowStPage {
                                            summary: "Maraflow Structured Text page", isImplemented: false)
 }
 
+/// The synthetic block that represents one Maraflow ladder page (or one thread's rungs from it).
+public enum MaraflowLdPage {
+    public static let guid = UUID(uuidString: "FF2D353C-89E9-56F7-BD26-A9FA908811E5")!
+    public static let info = BlockTypeInfo(guid: guid, blockName: "Maraflow LD page",
+                                           delphiClass: "TMMaraflowLD", category: "Reusable",
+                                           summary: "Maraflow ladder page", isImplemented: false)
+}
+
 /// Every statically registered Maraflow definition, keyed by its definition id.
 public enum MaraflowCatalog {
     /// All statically registered definitions, in `BlockCatalog` registration order.

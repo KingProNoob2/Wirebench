@@ -173,7 +173,9 @@ typedef enum {
        implements the semantics that have been ported so far, and the rest hold their pins. */
     WIREBENCH_BLOCK_MARAFLOW = 75,
     /// One Maraflow Structured Text page; the core compiles and runs it against the operand namespace.
-    WIREBENCH_BLOCK_MARAFLOW_ST = 76
+    WIREBENCH_BLOCK_MARAFLOW_ST = 76,
+    /// One Maraflow ladder page (or one thread's rungs from it), evaluated against the operand namespace.
+    WIREBENCH_BLOCK_MARAFLOW_LD = 77
 } WirebenchBlockKind;
 
 /* `variant` for `WIREBENCH_BLOCK_LONGMATH`, in `LongMathOperation` order. */

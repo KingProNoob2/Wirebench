@@ -102,12 +102,18 @@ struct MaraflowLadderElement {
     var sourceOperand: String
 }
 
+struct MaraflowLadderBranch {
+    var start: Int
+    var end: Int
+    var elements: [MaraflowLadderElement]
+}
+
 struct MaraflowRung {
     var comment: String
     var threadID: Int
     var order: Int
     var main: [MaraflowLadderElement]
-    var branches: [[MaraflowLadderElement]]
+    var branches: [MaraflowLadderBranch]
     var coils: [MaraflowLadderElement]
 }
 
@@ -182,13 +188,16 @@ struct MaraflowProject {
                     readLadderElement(document, prefix: rungPrefix + "main.\($0).")
                 }
                 let branchCount = max(0, min(document.int(rungPrefix + "branchCount", 0), 512))
-                var branches: [[MaraflowLadderElement]] = []
+                var branches: [MaraflowLadderBranch] = []
                 for branchIndex in 0..<branchCount {
                     let branchPrefix = rungPrefix + "branch.\(branchIndex)."
                     let elementCount = max(0, min(document.int(branchPrefix + "elCount", 0), 512))
-                    branches.append((0..<elementCount).map {
-                        readLadderElement(document, prefix: branchPrefix + "el.\($0).")
-                    })
+                    branches.append(MaraflowLadderBranch(
+                        start: document.int(branchPrefix + "startCol", 0),
+                        end: document.int(branchPrefix + "endCol", 0),
+                        elements: (0..<elementCount).map {
+                            readLadderElement(document, prefix: branchPrefix + "el.\($0).")
+                        }))
                 }
                 let coilCount = max(0, min(document.int(rungPrefix + "coilCount", 0), 512))
                 let coils = (0..<coilCount).map {

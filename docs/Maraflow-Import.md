@@ -62,18 +62,10 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 
 ## Limits
 
-- **Ladder pages** convert the simple rung shape: series NO/NC contacts on `DI0…DI7` become an `8xDI` reading and
-  `And`/`Not` logic, and normal/negated coils on `DO0…DO7` drive an `8xDO`. Parallel branches, function-block
-  elements, edge contacts, latching coils and analog coils are reported and skipped, since partially converting a
-  rung would change its meaning.
-- **Structured Text pages** run through a native C++ port of Maraflow's `StInterpreter`: declarations and scopes,
-  expressions with Maraflow's precedence, assignments, `IF`/`ELSIF`/`ELSE`, `CASE`, `FOR`/`WHILE`/`REPEAT`,
-  `EXIT`/`RETURN`, positional and named calls with `=>` outputs, the built-in function library, and the standard
-  function blocks (`RS`, `SR`, `TON`, `TOF`, `TP`, `CTU`, `CTD`, `CTUD`, edge triggers, `SINGLEPULSE`, `RANDOM`).
-  Page variables persist between scans; `VAR_TEMP` resets each scan; writes use the shared operand namespace, so
-  registers and I/O channels are visible to FBD blocks. Compile errors are line-numbered and exposed through the
-  engine (`maraflowStError`). **Not yet:** ST *macro* pages (their `VAR_INPUT`/`VAR_OUTPUT` interface is not bridged
-  to macro call pins) and dotted reads of arbitrary FBD block pins (only the interpreter's own FB instances).
+- **Ladder pages** run through a native evaluator: series NO/NC/edge contacts, parallel branches with their
+  start/end columns, normal/negated/set/reset/edge coils and analog moves, immediate operand writes and per-element
+  edge memory. Rungs are grouped by thread so scheduler order matches Maraflow. **Not yet:** function-block elements
+  embedded in a rung and dotted `Block.Pin` operands (the evaluator works on plain operands).
 
 ## Where it lives
 

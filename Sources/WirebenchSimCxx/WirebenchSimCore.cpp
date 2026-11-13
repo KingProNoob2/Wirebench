@@ -16,6 +16,7 @@
 #include "WirebenchSimCxx.h"
 #include "MaraflowVariants.h"
 #include "MaraflowStInterpreter.h"
+#include <sstream>
 
 #include <algorithm>
 #include <cmath>
@@ -177,6 +178,31 @@ inline WirebenchValue undefinedValue() {
     return v;
 }
 
+struct LdElement {
+    std::string kind;
+    std::string operand;
+    std::string source;
+    bool previous = false;   /* per-element edge memory, like Maraflow's prevEdgeInput */
+};
+
+struct LdBranch {
+    int start = 0;
+    int end = 0;
+    std::vector<LdElement> elements;
+    bool output = false;     /* branchEnergizedOut */
+};
+
+struct LdRung {
+    int order = 0;
+    std::vector<LdElement> main;
+    std::vector<LdBranch> branches;
+    std::vector<LdElement> coils;
+};
+
+struct LdProgram {
+    std::vector<LdRung> rungs;
+};
+
 struct Module {
     int32_t id = 0;
     int32_t order = 0;
@@ -210,6 +236,7 @@ struct Module {
     bool stCompileTried = false;
     bool stCompiled = false;
     std::string stError;
+    std::shared_ptr<LdProgram> ldProgram;
     /* Connection indices into `WirebenchSim::connections`, in file order. Resolved once when the
        simulation is created: the per-wire id lookups these replace were most of a step's cost. */
     std::vector<size_t> incoming;
@@ -282,9 +309,171 @@ double intervalMs(const WirebenchSim *sim, int32_t threadId) {
     return std::max(1.0, sim->cycleDelayMs);
 }
 
+inline std::string ldUpper(std::string value) {
+    for (auto &c : value) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return value;
+}
+
+double ldOperand(WirebenchSim *sim, const std::string &raw) {
+    if (!sim) return 0.0;
+    std::string name = raw;
+    while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(name.begin());
+    while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+    if (name.empty()) return 0.0;
+    auto found = sim->operands.find(name);
+    if (found != sim->operands.end()) return found->second;
+    found = sim->operands.find(ldUpper(name));
+    if (found != sim->operands.end()) return found->second;
+    if (ldUpper(name) == "TRUE") return 1.0;
+    if (ldUpper(name) == "FALSE") return 0.0;
+    char *end = nullptr;
+    const double numeric = std::strtod(name.c_str(), &end);
+    if (end && *end == '\0') return numeric;
+    return 0.0;
+}
+
+void ldWrite(WirebenchSim *sim, const std::string &name, double value) {
+    if (!sim || name.empty()) return;
+    sim->operands[name] = value;
+    sim->operands[ldUpper(name)] = value;
+}
+
+bool ldSeries(WirebenchSim *sim, LdElement &element, bool powerIn) {
+    if (element.kind == "FUNCTION_BLOCK") return false;   /* embedded FBs are a later stage */
+    const bool raw = ldOperand(sim, element.operand) != 0.0;
+    const bool previous = element.previous;
+    element.previous = raw;
+    bool conducts = false;
+    if (element.kind == "NO_CONTACT") conducts = raw;
+    else if (element.kind == "NC_CONTACT") conducts = !raw;
+    else if (element.kind == "POS_EDGE_CONTACT") conducts = raw && !previous;
+    else if (element.kind == "NEG_EDGE_CONTACT") conducts = !raw && previous;
+    return powerIn && conducts;
+}
+
+void ldApplyCoil(WirebenchSim *sim, LdElement &coil, bool power) {
+    const bool previous = coil.previous;
+    coil.previous = power;
+    if (coil.kind == "NORMAL_COIL") {
+        ldWrite(sim, coil.operand, power ? 1.0 : 0.0);
+    } else if (coil.kind == "NEGATED_COIL") {
+        ldWrite(sim, coil.operand, power ? 0.0 : 1.0);
+    } else if (coil.kind == "SET_COIL") {
+        if (power) ldWrite(sim, coil.operand, 1.0);
+    } else if (coil.kind == "RESET_COIL") {
+        if (power) ldWrite(sim, coil.operand, 0.0);
+    } else if (coil.kind == "POS_EDGE_COIL") {
+        ldWrite(sim, coil.operand, (power && !previous) ? 1.0 : 0.0);
+    } else if (coil.kind == "NEG_EDGE_COIL") {
+        ldWrite(sim, coil.operand, (!power && previous) ? 1.0 : 0.0);
+    } else if (coil.kind == "ANALOG_COIL") {
+        if (power) ldWrite(sim, coil.operand, ldOperand(sim, coil.source));
+    }
+}
+
+std::shared_ptr<LdProgram> parseLadder(const std::string &text) {
+    auto program = std::make_shared<LdProgram>();
+    if (text.empty()) return program;
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (line.empty()) continue;
+        std::vector<std::string> fields;
+        std::string field;
+        for (char c : line) {
+            if (c == '\x1f') { fields.push_back(field); field.clear(); }
+            else field.push_back(c);
+        }
+        fields.push_back(field);
+        if (fields.size() < 2) continue;
+        const std::string tag = fields[0];
+        if (tag == "R") {
+            program->rungs.push_back(LdRung{});
+            if (fields.size() > 1) program->rungs.back().order = std::atoi(fields[1].c_str());
+        } else if (!program->rungs.empty()) {
+            LdRung &rung = program->rungs.back();
+            auto element = [&fields]() {
+                LdElement e;
+                if (fields.size() > 1) e.kind = fields[1];
+                if (fields.size() > 2) e.operand = fields[2];
+                if (fields.size() > 3) e.source = fields[3];
+                return e;
+            };
+            if (tag == "M") rung.main.push_back(element());
+            else if (tag == "B") {
+                LdBranch branch;
+                if (fields.size() > 1) branch.start = std::atoi(fields[1].c_str());
+                if (fields.size() > 2) branch.end = std::atoi(fields[2].c_str());
+                rung.branches.push_back(branch);
+            } else if (tag == "E" && !rung.branches.empty()) {
+                rung.branches.back().elements.push_back(element());
+            } else if (tag == "C") {
+                rung.coils.push_back(element());
+            }
+        }
+    }
+    std::stable_sort(program->rungs.begin(), program->rungs.end(),
+                     [](const LdRung &a, const LdRung &b) { return a.order < b.order; });
+    return program;
+}
+
+void resetLadder(LdProgram &program) {
+    for (auto &rung : program.rungs) {
+        for (auto &element : rung.main) element.previous = false;
+        for (auto &branch : rung.branches) {
+            branch.output = false;
+            for (auto &element : branch.elements) element.previous = false;
+        }
+        for (auto &coil : rung.coils) coil.previous = false;
+    }
+}
+
+void runLadder(WirebenchSim *sim, LdProgram &program) {
+    for (auto &rung : program.rungs) {
+        const int count = static_cast<int>(rung.main.size());
+        std::vector<bool> power(static_cast<size_t>(count) + 1, false);
+        if (!power.empty()) power[0] = true;
+        for (int col = 0; col < count; ++col) {
+            for (auto &branch : rung.branches) {
+                if (branch.end == col - 1 && branch.start <= col - 1 && power[static_cast<size_t>(col)])
+                    power[static_cast<size_t>(col)] = true;
+                if (branch.end == col - 1 && branch.start <= col - 1)
+                    power[static_cast<size_t>(col)] = power[static_cast<size_t>(col)] || branch.output;
+            }
+            for (auto &branch : rung.branches) {
+                if (branch.start == col) {
+                    bool branchPower = power[static_cast<size_t>(col)];
+                    for (auto &element : branch.elements) branchPower = ldSeries(sim, element, branchPower);
+                    branch.output = branchPower;
+                }
+            }
+            power[static_cast<size_t>(col) + 1] = ldSeries(sim, rung.main[static_cast<size_t>(col)],
+                                                          power[static_cast<size_t>(col)]);
+        }
+        bool finalPower = power[static_cast<size_t>(count)];
+        for (auto &branch : rung.branches) {
+            if (branch.end >= count - 1) {
+                if (count == 0) {
+                    bool branchPower = true;
+                    for (auto &element : branch.elements) branchPower = ldSeries(sim, element, branchPower);
+                    branch.output = branchPower;
+                }
+                finalPower = finalPower || branch.output;
+            }
+        }
+        for (auto &coil : rung.coils) ldApplyCoil(sim, coil, finalPower);
+    }
+}
+
 /// One module, mirroring its Swift block's `process(sample:)` exactly — including the `En = 0` rule,
 /// which holds the output rather than clearing it (docs/spec/blocks-datapath.md §0.5).
 void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const WirebenchWallClock &clock) {
+    if (m.kind == WIREBENCH_BLOCK_MARAFLOW_LD) {
+        if (!sim) return;
+        if (!m.ldProgram) m.ldProgram = parseLadder(m.strings.count("LDRungs") ? m.strings["LDRungs"] : "");
+        runLadder(sim, *m.ldProgram);
+        return;
+    }
     if (m.kind == WIREBENCH_BLOCK_MARAFLOW_ST) {
         if (!sim) return;
         if (!m.stCompileTried) {
@@ -1578,6 +1767,9 @@ void resetModule(Module &m) {
         case WIREBENCH_BLOCK_SWITCH:
             /* `ISwitchBlock.reset`: a zero of the switch's own element type. */
             if (!m.outPins.empty()) m.outPins[0] = m.variant == 1 ? floatValue(0) : int32Value(0);
+            return;
+        case WIREBENCH_BLOCK_MARAFLOW_LD:
+            if (m.ldProgram) resetLadder(*m.ldProgram);
             return;
         case WIREBENCH_BLOCK_MARAFLOW_ST:
             if (m.stInterpreter) m.stInterpreter->reset();

@@ -64,7 +64,7 @@ public struct MaraflowImporter {
         var nextModuleId = 1
         var usedPageNames: Set<String> = []
 
-        for page in maraflow.pages {
+        for (pageIndex, page) in maraflow.pages.enumerated() {
             var caption = page.isMacro ? "*" + page.cleanName : page.cleanName
             if usedPageNames.contains(caption.lowercased()) {
                 var suffix = 2
@@ -80,11 +80,14 @@ public struct MaraflowImporter {
                 notes.append("Page '\(caption)' is Structured Text; it runs through the native ST interpreter.")
             }
             if !page.rungs.isEmpty {
-                let before = project.modules.count
-                importLadderPage(page, caption: caption, project: &project, nextId: &nextModuleId,
-                                 notes: &notes)
-                let converted = project.modules.count - before
-                notes.append("Page '\(caption)': converted \(converted) ladder block(s) from \(page.rungs.count) rung(s).")
+                let groups = Dictionary(grouping: page.rungs, by: \.threadID)
+                for thread in groups.keys.sorted() {
+                    project.modules.append(ldPageModule(page, caption: caption, rungs: groups[thread]!,
+                                                        thread: thread, order: pageIndex,
+                                                        id: nextModuleId))
+                    nextModuleId += 1
+                }
+                notes.append("Page '\(caption)': \(page.rungs.count) ladder rung(s) run through the native ladder evaluator.")
             }
             if page.graphicCount > 0 {
                 notes.append("Page '\(caption)' has \(page.graphicCount) graphic element(s); graphics are not imported.")
@@ -278,6 +281,36 @@ public struct MaraflowImporter {
                                                       ("MARAFLOW_TYPE", block.typeName),
                                                       ("MARAFLOW_ID", block.id)]),
                          rawChildren: [])
+    }
+
+    /// One ladder page's rungs for one thread become one no-pin native block. Rungs on other threads are in their
+    /// own module, so the core's scheduler reproduces Maraflow's per-thread rung order.
+    private static func ldPageModule(_ page: MaraflowPage, caption: String, rungs: [MaraflowRung],
+                                     thread: Int, order: Int, id: Int) -> PCCModule {
+        func clean(_ value: String) -> String {
+            value.replacingOccurrences(of: "\u{1F}", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+        }
+        var text = ""
+        for rung in rungs.sorted(by: { $0.order < $1.order }) {
+            text += "R\u{1F}\(rung.order)\n"
+            for element in rung.main {
+                text += "M\u{1F}\(clean(element.kind))\u{1F}\(clean(element.operand))\u{1F}\(clean(element.sourceOperand))\n"
+            }
+            for branch in rung.branches {
+                text += "B\u{1F}\(branch.start)\u{1F}\(branch.end)\n"
+                for element in branch.elements {
+                    text += "E\u{1F}\(clean(element.kind))\u{1F}\(clean(element.operand))\u{1F}\(clean(element.sourceOperand))\n"
+                }
+            }
+            for coil in rung.coils {
+                text += "C\u{1F}\(clean(coil.kind))\u{1F}\(clean(coil.operand))\u{1F}\(clean(coil.sourceOperand))\n"
+            }
+        }
+        return PCCModule(id: id, guid: MaraflowLdPage.guid, name: "LD \(caption) T\(thread)",
+                         x: 32, y: 32, order: order, threadId: thread, page: caption,
+                         inPins: [], paramPins: [], outPins: [],
+                         rawAttributes: AttributeBag([("MARAFLOW_LD_RUNGS", text)]))
     }
 
     /// One Structured Text page becomes one native block with no pins; the core compiles and runs its code each scan.

@@ -677,6 +677,148 @@ struct MaraflowImportTests {
         #expect(message.contains("line 2"))
     }
 
+    @Test("Ladder pages run through the native evaluator")
+    func ladderPages() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "LadderDemo"),
+            ("project.pageCount", "3"),
+            ("page.0.name", "Ladder"),
+            ("page.0.language", "LD"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.0.rungCount", "2"),
+            ("page.0.rung.0.threadId", "2"),
+            ("page.0.rung.0.order", "10"),
+            ("page.0.rung.0.mainCount", "1"),
+            ("page.0.rung.0.main.0.kind", "NO_CONTACT"),
+            ("page.0.rung.0.main.0.operand", "DI0"),
+            ("page.0.rung.0.coilCount", "1"),
+            ("page.0.rung.0.coil.0.kind", "NORMAL_COIL"),
+            ("page.0.rung.0.coil.0.operand", "DO0"),
+            ("page.0.rung.1.threadId", "2"),
+            ("page.0.rung.1.order", "20"),
+            ("page.0.rung.1.mainCount", "1"),
+            ("page.0.rung.1.main.0.kind", "NC_CONTACT"),
+            ("page.0.rung.1.main.0.operand", "DI1"),
+            ("page.0.rung.1.coilCount", "1"),
+            ("page.0.rung.1.coil.0.kind", "NEGATED_COIL"),
+            ("page.0.rung.1.coil.0.operand", "DO1"),
+            ("page.1.name", "Drive"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "2"),
+            ("page.1.wireCount", "0"),
+            ("page.2.name", "Read"),
+            ("page.2.language", "FBD"),
+            ("page.2.blockCount", "2"),
+            ("page.2.wireCount", "0"),
+        ]
+        entries += Self.block("page.1.block.0.", id: "d0", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "Drive0", gridX: 2, gridY: 2, order: -100,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DI0")])
+        entries += Self.block("page.1.block.1.", id: "d1", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "Drive1", gridX: 10, gridY: 2, order: -90,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "0")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DI1")])
+        entries += Self.block("page.2.block.0.", id: "r0", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read0", gridX: 2, gridY: 2, order: 100,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "DO0")])
+        entries += Self.block("page.2.block.1.", id: "r1", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read1", gridX: 10, gridY: 2, order: 110,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "DO1")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "ladder")
+        let ldPages = outcome.project.modules.filter { $0.guid == MaraflowLdPage.guid }
+        #expect(ldPages.count == 1, "both rungs are on thread 2")
+        #expect(ldPages[0].rawAttributes["MARAFLOW_LD_RUNGS"]?.contains("NO_CONTACT") == true)
+        let read0 = try #require(outcome.project.modules.first { $0.name == "Read0" })
+        let read1 = try #require(outcome.project.modules.first { $0.name == "Read1" })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: read0.id)[0].asInt == 1, "NO DI0 energises DO0")
+        #expect(core.outPins(moduleId: read1.id)[0].asInt == 0, "NC DI1 is true, so the negated coil is false")
+        #expect(outcome.notes.contains { $0.contains("native ladder evaluator") })
+    }
+
+    @Test("Ladder branches, edges, latches and analog coils")
+    func ladderSemantics() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "LadderSemantics"),
+            ("project.pageCount", "3"),
+            ("page.0.name", "Ladder"),
+            ("page.0.language", "LD"),
+            ("page.0.rungCount", "5"),
+        ]
+        func rung(_ index: Int, main: (String, String), branch: ((String, String))? = nil,
+                  coil: (String, String, String)) {
+            let prefix = "page.0.rung.\(index)."
+            entries += [(prefix + "threadId", "2"), (prefix + "order", "\((index + 1) * 10)"),
+                        (prefix + "mainCount", "1"),
+                        (prefix + "main.0.kind", main.0), (prefix + "main.0.operand", main.1)]
+            if let branch {
+                entries += [(prefix + "branchCount", "1"),
+                            (prefix + "branch.0.startCol", "0"),
+                            (prefix + "branch.0.endCol", "0"),
+                            (prefix + "branch.0.elCount", "1"),
+                            (prefix + "branch.0.el.0.kind", branch.0),
+                            (prefix + "branch.0.el.0.operand", branch.1)]
+            } else {
+                entries.append((prefix + "branchCount", "0"))
+            }
+            entries += [(prefix + "coilCount", "1"),
+                        (prefix + "coil.0.kind", coil.0),
+                        (prefix + "coil.0.operand", coil.1),
+                        (prefix + "coil.0.srcOperand", coil.2)]
+        }
+        rung(0, main: ("NO_CONTACT", "DI0"), branch: ("NC_CONTACT", "DI1"), coil: ("NORMAL_COIL", "DO2", ""))
+        rung(1, main: ("NO_CONTACT", "DI2"), coil: ("SET_COIL", "DO3", ""))
+        rung(2, main: ("NO_CONTACT", "DI3"), coil: ("POS_EDGE_COIL", "DO5", ""))
+        rung(3, main: ("NO_CONTACT", "DI4"), coil: ("ANALOG_COIL", "AO0", "AI0"))
+        rung(4, main: ("POS_EDGE_CONTACT", "DI5"), coil: ("NORMAL_COIL", "DO6", ""))
+
+        entries += [("page.1.name", "Drive"), ("page.1.language", "FBD"), ("page.1.blockCount", "7"),
+                    ("page.1.wireCount", "0"),
+                    ("page.2.name", "Read"), ("page.2.language", "FBD"), ("page.2.blockCount", "5"),
+                    ("page.2.wireCount", "0")]
+        let drivers = [("DI0", "0"), ("DI1", "0"), ("DI2", "1"), ("DI3", "1"), ("DI4", "1"),
+                       ("DI5", "1"), ("AI0", "123")]
+        for (index, driver) in drivers.enumerated() {
+            entries += Self.block("page.1.block.\(index).", id: "d\(index)", definition: "Main.Execution.WriteReg",
+                                  type: "WriteReg", name: "Drive\(index)", gridX: index * 8, gridY: 2,
+                                  order: -200 + index * 10,
+                                  inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", driver.1)],
+                                  outputs: [("Out", "Stored", "INT", "0")],
+                                  properties: [("RegisterName", driver.0)])
+        }
+        let readers = ["DO2", "DO3", "DO5", "AO0", "DO6"]
+        for (index, operand) in readers.enumerated() {
+            entries += Self.block("page.2.block.\(index).", id: "r\(index)", definition: "Main.Execution.ReadReg",
+                                  type: "ReadReg", name: "Read\(operand)", gridX: index * 8, gridY: 2,
+                                  order: 100 + index * 10,
+                                  inputs: [("En", "Enable", "BOOL", "1")],
+                                  outputs: [("Out", "Value", "INT", "0")],
+                                  properties: [("RegisterName", operand)])
+        }
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "ldsem")
+        let modules = Dictionary(uniqueKeysWithValues: outcome.project.modules.map { ($0.name, $0.id) })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: modules["ReadDO2"]!)[0].asInt == 1, "parallel NC branch energises the coil")
+        #expect(core.outPins(moduleId: modules["ReadDO3"]!)[0].asInt == 1, "SET coil latches")
+        #expect(core.outPins(moduleId: modules["ReadDO5"]!)[0].asInt == 1, "rising-edge coil pulses once")
+        #expect(core.outPins(moduleId: modules["ReadAO0"]!)[0].asInt == 123, "analog coil moves AI0 to AO0")
+        #expect(core.outPins(moduleId: modules["ReadDO6"]!)[0].asInt == 1, "rising contact conducts once")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: modules["ReadDO3"]!)[0].asInt == 1, "SET coil holds")
+        #expect(core.outPins(moduleId: modules["ReadDO5"]!)[0].asInt == 0, "edge coil clears")
+        #expect(core.outPins(moduleId: modules["ReadDO6"]!)[0].asInt == 0, "edge contact clears")
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [
@@ -703,7 +845,7 @@ struct MaraflowImportTests {
         #expect(loaded.project.pages.map(\.caption) == ["Code", "Relays", "*Blink"])
         let notes = loaded.notes.joined(separator: "\n")
         #expect(notes.contains("Structured Text"))
-        #expect(notes.contains("ladder block"))
+        #expect(notes.contains("ladder rung"))
         #expect(notes.contains("Macro page"))
     }
 

@@ -202,7 +202,7 @@ public enum BlockTypeCatalog {
 
     /// All recovered Dirigo types, then the synthetic Maraflow types. A Maraflow name that collides with a Dirigo
     /// one stays reachable by GUID; `byName` keeps the Dirigo entry so existing lookups do not change.
-    public static let all: [BlockTypeInfo] = base + MaraflowCatalog.infos + [MaraflowStPage.info]
+    public static let all: [BlockTypeInfo] = base + MaraflowCatalog.infos + [MaraflowStPage.info, MaraflowLdPage.info]
 
     /// Registry keyed by block-type GUID.
     public static let byGuid: [UUID: BlockTypeInfo] = {

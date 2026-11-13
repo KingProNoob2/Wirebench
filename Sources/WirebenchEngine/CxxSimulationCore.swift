@@ -33,6 +33,7 @@ public final class CxxSimulationCore {
     /// wrong too. `isFullyPorted` is the check for that.
     public static func kind(forGUID guid: UUID) -> WirebenchBlockKind? {
         if guid == MaraflowStPage.guid { return WIREBENCH_BLOCK_MARAFLOW_ST }
+        if guid == MaraflowLdPage.guid { return WIREBENCH_BLOCK_MARAFLOW_LD }
         if let definition = MaraflowCatalog.definition(forGuid: guid) {
             return MaraflowCatalog.ported.contains(definition.id) ? WIREBENCH_BLOCK_MARAFLOW : nil
         }
@@ -371,7 +372,14 @@ public final class CxxSimulationCore {
             }
         }
         // Native Maraflow string configuration (register names, interrupt sources). The C ABI takes C strings.
-        for (position, mod) in project.modules.enumerated() where MaraflowCatalog.definition(forGuid: mod.guid) != nil || mod.guid == MaraflowStPage.guid {
+        for (position, mod) in project.modules.enumerated() where MaraflowCatalog.definition(forGuid: mod.guid) != nil || mod.guid == MaraflowStPage.guid || mod.guid == MaraflowLdPage.guid {
+            if let rungs = mod.rawAttributes["MARAFLOW_LD_RUNGS"] {
+                "LDRungs".withCString { keyCString in
+                    rungs.withCString { rungsCString in
+                        wirebench_sim_set_string(created, Int32(position), keyCString, rungsCString)
+                    }
+                }
+            }
             if let code = mod.rawAttributes["MARAFLOW_ST_CODE"] {
                 "STCode".withCString { keyCString in
                     code.withCString { codeCString in
