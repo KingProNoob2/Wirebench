@@ -634,8 +634,10 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
         return;
     }
     /* Every kind below writes outputs and nothing else a reader can see (`Set` works in the step loop, not
-       here), so a module without out pins has nothing to do — and the cases may then index `outPins[0]`. */
-    if (m.outPins.empty()) return;
+       here), so a module without out pins has nothing to do — and the cases may then index `outPins[0]`.
+       OREF is the exception: its visible effect is the DO register it writes. */
+    const bool writesRegistersWithoutOutputs = m.kind == WIREBENCH_BLOCK_MARAFLOW && m.variant == MARAFLOW_IO_OREF;
+    if (m.outPins.empty() && !writesRegistersWithoutOutputs) return;
     switch (m.kind) {
         case WIREBENCH_BLOCK_NOT: {
             const bool enabled = m.inPins.empty() ? true : asBool(m.inPins[0]);
@@ -1488,6 +1490,20 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     for (size_t i = 1; i < m.inPins.size(); ++i) {
                         if (sim) sim->operands["DO" + std::to_string(i - 1)] = asBool(m.inPins[i]) ? 1.0 : 0.0;
                     }
+                    return;
+                }
+                case MARAFLOW_IO_IREF: {
+                    // A single digital input reference: `Channel` names DI0..DI15.
+                    const std::string channel = "DI" + std::to_string(m.config[0]);
+                    if (!m.outPins.empty()) {
+                        m.outPins[0] = boolean(sim && sim->operands.count(channel) && sim->operands[channel] != 0.0);
+                    }
+                    return;
+                }
+                case MARAFLOW_IO_OREF: {
+                    // A single digital output reference: `Channel` names DO0..DO15.
+                    if (sim) sim->operands["DO" + std::to_string(m.config[0])] =
+                        m.inPins.empty() ? 0.0 : (asBool(m.inPins[0]) ? 1.0 : 0.0);
                     return;
                 }
                 case MARAFLOW_Main_Timers_Timer: {

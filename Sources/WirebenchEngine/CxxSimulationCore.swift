@@ -166,7 +166,7 @@ public final class CxxSimulationCore {
                 return Int64(digits.prefix(while: { $0.isNumber })) ?? 0
             }
             switch definition.id {
-            case "IO.DI", "IO.DO", "IO.AI", "IO.AO", "IO.PWM":
+            case "IO.DI", "IO.DO", "IO.AI", "IO.AO", "IO.PWM", "IO.IREF", "IO.OREF":
                 return (Int32(index), [channel()])
             case "Visual.Vars.BoolVar", "Visual.Vars.IntVar", "Visual.Vars.LongVar":
                 let raw = mod.rawAttributes["MARAFLOW_PROP_CurrentValue"] ?? "0"

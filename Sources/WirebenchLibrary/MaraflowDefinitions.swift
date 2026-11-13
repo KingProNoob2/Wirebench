@@ -177,6 +177,12 @@ public enum MaraflowCatalog {
         makeDefinition("IO.AO", "3D1A47DA-58C0-567D-B912-DFCDE725CFD0", "AO", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("Val", "Analog Output Value", "Int", "0")], [pin("Ok", "DAC Status", "Boolean", "1")], configurable: true),
         makeDefinition("IO.PWM", "685C097D-E81D-5907-98B4-80247C11EF4B", "PWM", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("Frq", "Frequency (Hz)", "Int", "1000"), pin("Dty", "Duty Cycle (0-100%)", "Float", "50")], [pin("Act", "PWM Active", "Boolean", "0")]),
         makeDefinition("IO.Encoder", "9857F4AB-DE72-5AA5-9889-E99701B5E8F1", "Encoder", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("Rst", "Reset Counter", "Boolean", "0")], [pin("Cnt", "Quadrature Count", "Long", "0"), pin("Vel", "Pulse Velocity", "Int", "0")]),
+        // Legacy Maraflow single-channel references, saved by older projects as `IO.IREF`/`IO.OREF` with a
+        // `Channel` property ("DI0", "DO3", ...). They are the one-bit form of 8xDI/8xDO.
+        makeDefinition("IO.IREF", "E2C49F39-7516-5508-AED3-70F1E3EABD9E", "IREF", "I/O", noInputs,
+                       [pin("Y", "Input Reference", "Boolean", "0")]),
+        makeDefinition("IO.OREF", "CBC0A94B-8EEB-5F8F-ACE0-E6155CBCEB7A", "OREF", "I/O",
+                       [pin("X", "Output Reference", "Boolean", "0")], noOutputs),
         makeDefinition("Comm.ModbusRTU.MbRtuRead", "9F102FE4-BA5C-5E85-B31F-24E5A74013EB", "MbRtuRead", "Communication/Modbus RTU", enableOnlyInputs, commReadOutputs, configurable: true),
         makeDefinition("Comm.ModbusRTU.MbRtuWrite", "CCBA92D4-6DDB-5E6F-8C28-C240600EB1BE", "MbRtuWrite", "Communication/Modbus RTU", commWriteInputs, commWriteOutputs, configurable: true),
         makeDefinition("Comm.ModbusTCP.MbTcpRead", "7AB7CDEF-7323-589D-9E59-98DF3B418FD4", "MbTcpRead", "Communication/Modbus TCP", enableOnlyInputs, commReadOutputs, configurable: true),
@@ -252,6 +258,7 @@ public enum MaraflowCatalog {
         "Main.Conversion.PackBits", "Main.Conversion.UnpackBits",
         "Main.Switches.Sel", "Main.Switches.Mux", "Main.Switches.Demux",
         "IO.DI", "IO.DO", "IO.8xDI", "IO.8xDO", "IO.AI", "IO.AO", "IO.PWM", "IO.Encoder",
+        "IO.IREF", "IO.OREF",
         "Main.Timers.DateTime", "Main.Timers.DecodeDate", "Main.Timers.EncodeDate",
         "Main.Timers.PulseGen", "Main.Timers.PulseLen", "Main.Timers.SinglePulse",
         "Main.Timers.Timer", "Main.Timers.Counter",

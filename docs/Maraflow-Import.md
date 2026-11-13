@@ -118,9 +118,10 @@ Open one with **File ▸ Open**, `wirebench-cli info project.mfl`, or any other 
 
 ## Definition reference
 
-All 93 statically registered Maraflow definitions are native `MaraflowBlock` entries in the C++ core with exact
-pins; `Macro.User.*` is dynamic and becomes a macro call. Definitions with no evaluator in Maraflow's own
-`SimulationEngine` are native no-ops, matching it.
+All statically registered Maraflow definitions are native `MaraflowBlock` entries in the C++ core with exact pins.
+That is the 93 definitions the current source registers plus the two legacy single-bit I/O references older projects
+still contain (`IO.IREF`/`IO.OREF`, the one-channel form of 8xDI/8xDO). `Macro.User.*` is dynamic and becomes a macro
+call. Definitions with no evaluator in Maraflow's own `SimulationEngine` are native no-ops, matching it.
 
 | Maraflow definition | Type | Status |
 |---|---|---|
@@ -217,5 +218,7 @@ pins; `Macro.User.*` is dynamic and becomes a macro call. Definitions with no ev
 | `Ladder.Coil.NEG` | Falling Coil (--(N)--) | native |
 | `Ladder.Coil.WRITE_REG` | Write Register (--[REG :=]--) | native |
 | `Ladder.Coil.ANALOG` | Analog Output / Move (--[AO :=]--) | native |
+| `IO.IREF` | Input Reference (`Channel` = DI0…) | native |
+| `IO.OREF` | Output Reference (`Channel` = DO0…) | native |
 
-Counts: 93 native, 0 inert placeholders.
+Counts: 95 native, 0 inert placeholders.

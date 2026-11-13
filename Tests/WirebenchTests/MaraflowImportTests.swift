@@ -285,7 +285,7 @@ struct MaraflowImportTests {
 
     @Test("Every static Maraflow definition is a native block")
     func everyDefinitionIsNative() {
-        #expect(MaraflowCatalog.all.count == 93)
+        #expect(MaraflowCatalog.all.count == 95)
         #expect(MaraflowCatalog.ported.count == MaraflowCatalog.all.count)
         #expect(MaraflowCatalog.all.allSatisfy { BlockTypeCatalog.info(forGuid: $0.guid) != nil })
     }
@@ -324,6 +324,44 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: variable.id)[0].asInt == 7)
         // The engine's UI toggle is the channel source in a real simulation; here DO writes DO2, so DI2 stays low.
         #expect(core.outPins(moduleId: input.id)[0].asBool == false)
+    }
+
+    @Test("Legacy IREF and OREF are single-channel digital references")
+    func legacyIORefs() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "Refs"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "3"),
+            ("page.0.wireCount", "1"),
+            ("page.0.wire.0.srcBlock", "iref"),
+            ("page.0.wire.0.srcPin", "0"),
+            ("page.0.wire.0.dstBlock", "oref"),
+            ("page.0.wire.0.dstPin", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "di", definition: "Main.Execution.WriteReg",
+                              type: "WriteReg", name: "DriveDI3", gridX: 2, gridY: 2, order: -100,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "1")],
+                              outputs: [("Out", "Stored", "INT", "0")],
+                              properties: [("RegisterName", "DI3")])
+        entries += Self.block("page.0.block.1.", id: "iref", definition: "IO.IREF", type: "IREF",
+                              name: "IREF1", gridX: 10, gridY: 2, order: 10, inputs: [],
+                              outputs: [("Y", "Input Reference", "BOOL", "0")],
+                              properties: [("Channel", "DI3")])
+        entries += Self.block("page.0.block.2.", id: "oref", definition: "IO.OREF", type: "OREF",
+                              name: "OREF1", gridX: 18, gridY: 2, order: 20,
+                              inputs: [("X", "Output Reference", "BOOL", "0")], outputs: [],
+                              properties: [("Channel", "DO2")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "refs")
+        let input = try #require(outcome.project.modules.first { $0.name == "IREF1" })
+        let output = try #require(outcome.project.modules.first { $0.name == "OREF1" })
+        #expect(input.guid == MaraflowCatalog.byId["IO.IREF"]?.guid)
+        #expect(output.guid == MaraflowCatalog.byId["IO.OREF"]?.guid)
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: input.id)[0].asBool)
+        #expect(core.operandValue("DO2") == 1, "OREF writes its channel from IREF's output")
     }
 
     @Test("Execution registers are shared by ReadReg and WriteReg")
