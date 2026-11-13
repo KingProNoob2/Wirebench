@@ -158,7 +158,7 @@ public final class AgentToolbox: @unchecked Sendable {
                   summary: "Starts an empty project. Refused while the open one has unsaved changes: save it first.",
                   schema: schema(), changes: true),
         AgentTool(name: "open_project",
-                  summary: "Opens a .wbp project file (a legacy .pcc is imported). Refused while the open project has unsaved changes.",
+                  summary: "Opens a .wbp project file (legacy .pcc and Maraflow .mfl files are imported). Refused while the open project has unsaved changes.",
                   schema: schema([("path", "string", "The file's full path.")], required: ["path"]), changes: true),
         AgentTool(name: "save_project",
                   summary: "Saves the project: to the file it was opened from, or, if it has none yet (or you give a path), to a new .wbp file. It never overwrites a different file that already exists.",
@@ -596,7 +596,7 @@ public final class AgentToolbox: @unchecked Sendable {
             guard let path = string(args, "path") else { return failure("Give a path.", summary: "No path") }
             guard !model.isDocumentEdited else { return failure("The open project has unsaved changes. Save it first, or ask the user.", summary: "Unsaved changes") }
             let url = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
-            let extensionOK = ["wbp", "pcc", "xml"].contains(url.pathExtension.lowercased())
+            let extensionOK = ["wbp", "pcc", "xml", "mfl"].contains(url.pathExtension.lowercased())
             guard extensionOK, FileManager.default.fileExists(atPath: url.path) else {
                 return failure("No .wbp file at \(url.path) (a legacy .pcc is also accepted).", summary: "No file at \(path)")
             }

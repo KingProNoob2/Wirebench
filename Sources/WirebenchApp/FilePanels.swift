@@ -9,6 +9,9 @@ extension UTType {
         UTType(filenameExtension: "wbp") ?? UTType(exportedAs: "com.wirebench.project", conformingTo: .json)
     }
 
+    /// Maraflow's project format, read-only: `.mfl` is imported and saved as `.wbp`.
+    static var maraflowProject: UTType { UTType(filenameExtension: "mfl") ?? .xml }
+
     /// Dirigo's project format, kept for reading legacy files and for the legacy export.
     ///
     /// Named here rather than exported from an `Info.plist` because all the app needs it for is to

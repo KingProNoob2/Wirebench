@@ -83,27 +83,3 @@ public enum WirebenchDocumentError: Error, LocalizedError, Equatable {
         }
     }
 }
-
-/// A project file on disk, in either the current format or Dirigo's legacy `.pcc`.
-public enum ProjectFileFormat: String, Sendable {
-    case wirebench
-    case dirigo
-}
-
-/// Reads either format and writes the current one. Format detection is by content, not only by extension, so a
-/// `.pcc` holding JSON still opens and a `.wbp` holding XML is treated as a legacy import.
-public enum ProjectFile {
-    public static let fileExtension = WirebenchDocument.fileExtension
-
-    public static func read(at url: URL) throws -> (project: PCCProject, format: ProjectFileFormat) {
-        let data = try Data(contentsOf: url)
-        if WirebenchDocument.looksLikeDocument(data) {
-            return (try WirebenchDocument.decode(data), .wirebench)
-        }
-        return (try PCCParser().parse(data: data), .dirigo)
-    }
-
-    public static func write(_ project: PCCProject, to url: URL) throws {
-        try WirebenchDocument.encode(project).write(to: url, options: .atomic)
-    }
-}

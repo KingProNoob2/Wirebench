@@ -242,6 +242,11 @@ targets:
               - "wbp"
             CFBundleTypeRole: "Editor"
             LSHandlerRank: "Default"
+          - CFBundleTypeName: "Maraflow Project (import only)"
+            CFBundleTypeExtensions:
+              - "mfl"
+            CFBundleTypeRole: "Viewer"
+            LSHandlerRank: "Alternate"
           - CFBundleTypeName: "Dirigo PCC Project (legacy)"
             CFBundleTypeExtensions:
               - "pcc"

@@ -105,7 +105,7 @@ struct WirebenchCLI {
         Wirebench CLI - Reverse Engineered PLC Engine
         ================================================
         Usage:
-          (projects may also be given in the legacy .pcc format)
+          (projects may also be given as legacy .pcc or Maraflow .mfl)
           wirebench-cli info <project.wbp>         Inspect project structure and components
           wirebench-cli sim <project.wbp> [ticks]  Run deterministic simulation benchmark
           wirebench-cli roundtrip <legacy.pcc>    Verify lossless XML AST roundtrip fidelity
@@ -139,6 +139,7 @@ struct WirebenchCLI {
             let elapsed = (Date().timeIntervalSinceReferenceDate - start) * 1000
 
             print("\n Successfully parsed: \(url.lastPathComponent) (\(loaded.format.rawValue)) in \(String(format: "%.2f", elapsed)) ms")
+            for note in loaded.notes { print("  Note: \(note)") }
             print("-------------------------------------------------------------------")
             print("  Application     : \(project.application) \(project.applicationVersion)")
             print("  Profile         : \(project.profile)")

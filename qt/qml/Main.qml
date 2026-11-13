@@ -837,7 +837,7 @@ ApplicationWindow {
         parentWindow: window
         title: "Open project"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["Wirebench projects (*.wbp)", "Dirigo projects (*.pcc *.xml)", "All files (*)"]
+        nameFilters: ["Wirebench projects (*.wbp)", "Maraflow projects (*.mfl)", "Dirigo projects (*.pcc *.xml)", "All files (*)"]
         onAccepted: controller.command({cmd: "open", path: controller.localPath(selectedFile)})
     }
     FileDialog {

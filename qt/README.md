@@ -62,7 +62,7 @@ that opens a project, plays it, builds and queries the palette.
 
 ## What it does
 
-Open, save and save-as through the platform's file dialogs (or drop a `.wbp` or legacy `.pcc` on the window); pan, zoom and fit; select (click or a
+Open, save and save-as through the platform's file dialogs (or drop a `.wbp`, legacy `.pcc` or Maraflow `.mfl` on the window); pan, zoom and fit; select (click or a
 selection box), move, wire (drag from an output pin to an input pin), delete, undo and redo; the block library with search;
 rectangles, ellipses and text; play, pause, step and reset with live values on pins and wires and a lit `Segment` display; an
 inspector with live signals and editable values; a configuration dialog for most block kinds (shared with the SwiftUI dialog through

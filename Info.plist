@@ -23,6 +23,18 @@
 		<dict>
 			<key>CFBundleTypeExtensions</key>
 			<array>
+				<string>mfl</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Maraflow Project (import only)</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
 				<string>pcc</string>
 				<string>xml</string>
 			</array>

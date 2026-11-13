@@ -717,15 +717,21 @@ public final class AppModel: @unchecked Sendable {
                 notes.append("This project asks for the profile '\(proj.profile)', which this build does not know. "
                     + "Its threads and periods fall back to the default profile.")
             }
-            if loaded.format == .dirigo {
-                notes.append("This is a legacy Dirigo .pcc. Saving writes the current .wbp format, so Save asks for a new file.")
+            notes.append(contentsOf: loaded.notes)
+            if loaded.format != .wirebench {
+                notes.append("This project is imported, so saving writes the current .wbp format and asks for a new file.")
             }
             if !notes.isEmpty {
-                presentMessage(title: loaded.format == .dirigo ? "Legacy project opened" : "Unknown profile",
-                               message: notes.joined(separator: "\n\n"),
-                               kind: notes.count > 1 || loaded.format == .dirigo ? .info : .warning)
+                let title: String
+                switch loaded.format {
+                case .wirebench: title = "Unknown profile"
+                case .dirigo: title = "Legacy project opened"
+                case .maraflow: title = "Maraflow project imported"
+                }
+                presentMessage(title: title, message: notes.joined(separator: "\n\n"),
+                               kind: loaded.format == .wirebench && notes.count == 1 ? .warning : .info)
             }
-            isLegacyDocument = loaded.format == .dirigo
+            isLegacyDocument = loaded.format != .wirebench
             isRestoringUndo = true
             self.project = proj
             // A new document means new meanings for the same module ids, and `ModulePinCatalog`
