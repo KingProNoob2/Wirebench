@@ -133,6 +133,16 @@ struct WirebenchApp: App {
             Button("Export Program Binary\u{2026}") { model.exportCompiledProgram() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
+
+            Divider()
+
+            Button("Export Legacy .PCC\u{2026}") { model.exportForDirigo() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(model.project == nil)
+
+            Button("Export Maraflow .mfl\u{2026}") { model.exportMaraflow() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(model.project == nil)
         }
 
         CommandGroup(replacing: .newItem) {
@@ -194,17 +204,6 @@ struct WirebenchApp: App {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
 
-                Button("Export Legacy .PCC\u{2026}") {
-                    model.exportForDirigo()
-                }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(model.project == nil)
-
-                Button("Export Maraflow .mfl\u{2026}") {
-                    model.exportMaraflow()
-                }
-                .keyboardShortcut("m", modifiers: [.command, .shift])
-                .disabled(model.project == nil)
             }
         }
     }
