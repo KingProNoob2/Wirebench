@@ -149,14 +149,19 @@ public struct SourceFunction: Equatable, Sendable {
     public var name: String
     public var returnType: SourceType
     public var parameters: [SourceParameter]
-    public var body: SourceExpr
+    /// `VAR` locals, assigned in the body; inlined as expression bindings.
+    public var locals: [SourceVariable]
+    /// Straight-line assignments to locals and to the function's own name (its return value).
+    public var statements: [SourceStmt]
     public var line: Int
 
-    public init(name: String, returnType: SourceType, parameters: [SourceParameter], body: SourceExpr, line: Int) {
+    public init(name: String, returnType: SourceType, parameters: [SourceParameter],
+                locals: [SourceVariable] = [], statements: [SourceStmt], line: Int) {
         self.name = name
         self.returnType = returnType
         self.parameters = parameters
-        self.body = body
+        self.locals = locals
+        self.statements = statements
         self.line = line
     }
 }
@@ -365,19 +370,63 @@ public struct SourceParser {
             }
             advance()   // END_VAR
         }
-        if isKeyword("VAR") || isKeyword("VAR_OUTPUT") || isKeyword("VAR_IN_OUT") {
-            throw error("a FUNCTION has VAR_INPUT parameters only")
+        var locals: [SourceVariable] = []
+        if isKeyword("VAR") {
+            advance()
+            while !isKeyword("END_VAR") {
+                if isAtEnd { throw error("the VAR block is not closed with END_VAR") }
+                let localToken = try expectIdentifier("a local name")
+                try expectSymbol(":")
+                let type = try scalarType("a local type")
+                var initial: SourceLiteral?
+                if isSymbol(":=") {
+                    initial = try initialValue(for: type)
+                }
+                try expectSymbol(";")
+                guard !parameters.contains(where: { $0.name.lowercased() == localToken.text.lowercased() })
+                        && !locals.contains(where: { $0.name.lowercased() == localToken.text.lowercased() })
+                        && localToken.text.lowercased() != name.lowercased() else {
+                    throw error("'\(localToken.text)' is declared twice")
+                }
+                locals.append(SourceVariable(name: localToken.text, type: type, initial: initial, line: localToken.line))
+            }
+            advance()   // END_VAR
         }
-        let bodyStatements = try statements { $0 == "END_FUNCTION" }
+        if isKeyword("VAR_OUTPUT") || isKeyword("VAR_IN_OUT") {
+            throw error("a FUNCTION has VAR_INPUT parameters and VAR locals only")
+        }
+        let body = try statements { $0 == "END_FUNCTION" }
         try expectKeyword("END_FUNCTION")
-        guard bodyStatements.count == 1,
-              case .assign(let target, let expression) = bodyStatements[0].kind,
-              target.lowercased() == name.lowercased() else {
-            throw error("a FUNCTION body is one assignment to its name, as in '\(name) := …;'")
+        guard !body.isEmpty else { throw error("a FUNCTION body is empty") }
+        let parameterNames = Set(parameters.map { $0.name.lowercased() })
+        var available = Set(parameters.map { $0.name.lowercased() })
+        for local in locals where local.initial != nil { available.insert(local.name.lowercased()) }
+        var returns = false
+        for statement in body {
+            guard case .assign(let target, let expression) = statement.kind else {
+                throw SourceError(line: statement.line,
+                                  message: "a FUNCTION body is straight assignments only (no IF, loops, calls or array writes)")
+            }
+            if parameterNames.contains(target.lowercased()) {
+                throw SourceError(line: statement.line,
+                                  message: "a FUNCTION parameter ('\(target)') is read-only; copy it to a local")
+            }
+            try validateFunctionBody(expression, available: available, function: name)
+            if target.lowercased() == name.lowercased() {
+                returns = true
+            } else {
+                guard locals.contains(where: { $0.name.lowercased() == target.lowercased() }) else {
+                    throw SourceError(line: statement.line,
+                                      message: "'\(target)' is not a local of '\(name)'; assign locals or '\(name)'")
+                }
+                available.insert(target.lowercased())
+            }
         }
-        try validateFunctionBody(expression, parameters: Set(parameters.map { $0.name.lowercased() }))
-        return SourceFunction(name: name, returnType: returnType, parameters: parameters, body: expression,
-                              line: keyword.line)
+        guard returns else {
+            throw error("a FUNCTION body must assign its name, as in '\(name) := …;'")
+        }
+        return SourceFunction(name: name, returnType: returnType, parameters: parameters, locals: locals,
+                              statements: body, line: keyword.line)
     }
 
     private mutating func scalarType(_ what: String) throws -> SourceType {
@@ -388,26 +437,27 @@ public struct SourceParser {
         return type
     }
 
-    /// A FUNCTION body may use its parameters and literals only: no caller variables, instances or arrays.
-    private func validateFunctionBody(_ expression: SourceExpr, parameters: Set<String>) throws {
+    /// A FUNCTION body may use its parameters, its assigned locals and literals: no caller variables, instances or
+    /// arrays. A local that has not been assigned yet (and has no initialiser) is an error here.
+    private func validateFunctionBody(_ expression: SourceExpr, available: Set<String>, function: String) throws {
         switch expression.kind {
         case .boolean, .integer, .real:
             break
         case .name(let name):
-            guard parameters.contains(name.lowercased()) else {
+            guard available.contains(name.lowercased()) else {
                 throw SourceError(line: expression.line,
-                                  message: "a FUNCTION body can only use its parameters; '\(name)' is not one")
+                                  message: "'\(name)' is used before it is assigned in '\(function)', or is not a parameter/local")
             }
         case .member, .element:
             throw SourceError(line: expression.line,
                               message: "a FUNCTION body cannot read instances or arrays")
         case .unary(_, let operand):
-            try validateFunctionBody(operand, parameters: parameters)
+            try validateFunctionBody(operand, available: available, function: function)
         case .binary(_, let left, let right):
-            try validateFunctionBody(left, parameters: parameters)
-            try validateFunctionBody(right, parameters: parameters)
+            try validateFunctionBody(left, available: available, function: function)
+            try validateFunctionBody(right, available: available, function: function)
         case .functionCall(_, let arguments):
-            for argument in arguments { try validateFunctionBody(argument, parameters: parameters) }
+            for argument in arguments { try validateFunctionBody(argument, available: available, function: function) }
         }
     }
 

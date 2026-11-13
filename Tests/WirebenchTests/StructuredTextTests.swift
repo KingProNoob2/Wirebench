@@ -705,6 +705,83 @@ struct StructuredTextTests {
         #expect(core.outPins(moduleId: variable.id)[0].asInt == 61, "7^2 + 2 + 4 + 6")
     }
 
+    @Test("A FUNCTION with locals and initialisers inlines them in order")
+    func functionLocals() throws {
+        let compiled = try SourceCompiler().compile("""
+        FUNCTION F : INT
+        VAR_INPUT
+            x : INT;
+        END_VAR
+        VAR
+            t : INT;
+            u : INT := 2;
+        END_VAR
+            t := x + 1;
+            u := u * 3;
+            F := t * u;
+        END_FUNCTION
+
+        PROGRAM P
+        VAR
+            n : INT := 0;
+        END_VAR
+            n := F(1);
+        END_PROGRAM
+        """)
+        let variable = try #require(compiled.project.modules.first {
+            $0.guid == BlockTypeCatalog.info(forBlockName: "IntVar")?.guid
+        })
+        let core = CxxSimulationCore(project: compiled.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Self.now)
+        #expect(core.outPins(moduleId: variable.id)[0].asInt == 12, "(1+1) * (2*3)")
+    }
+
+    @Test("Function body refusals: an unassigned local, a parameter write, control flow")
+    func functionBodyRefusals() {
+        let cases: [(String, String)] = [
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+             VAR t : INT; END_VAR
+                 F := t + 1;
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1);
+             END_PROGRAM
+             """, "before it is assigned"),
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+                 x := 2;
+                 F := x;
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1);
+             END_PROGRAM
+             """, "read-only"),
+            ("""
+             FUNCTION F : INT
+             VAR_INPUT x : INT; END_VAR
+                 IF x > 0 THEN
+                     F := 1;
+                 ELSE
+                     F := 0;
+                 END_IF;
+             END_FUNCTION
+             PROGRAM P
+             VAR n : INT := 0; END_VAR
+                 n := F(1);
+             END_PROGRAM
+             """, "straight assignments only"),
+        ]
+        for (source, fragment) in cases {
+            let message = Self.error(source)
+            #expect(message?.contains(fragment) == true, "\(fragment): \(message ?? "compiled")")
+        }
+    }
+
     @Test("Function refusals: recursion, a caller name, the wrong argument count, a return type")
     func functionRefusals() {
         let cases: [(String, String)] = [
@@ -727,7 +804,7 @@ struct StructuredTextTests {
              VAR n : INT := 0; END_VAR
                  n := F(1);
              END_PROGRAM
-             """, "can only use its parameters"),
+             """, "not a parameter/local"),
             ("""
              FUNCTION F : INT
              VAR_INPUT x : INT; END_VAR

@@ -77,9 +77,10 @@ Arrays are only accepted in a PROGRAM (a function block's array would collide on
 Array declarations, element reads and writes are lowered to `Create…Array`/`Read…Array`/`Write…Array` with the
 lower bound subtracted and at most 16 arrays; REAL arrays use `CreateLongArray` (which allocates Long or Float slots)
 with the Float read/write blocks. Array writes are listed in recovery
-rather than recovered. FUNCTIONS are implemented as pure expression functions inlined at the call (one assignment to the function
-name, parameters and literals only, argument count and return type checked, recursion refused). Local variables,
-control flow inside functions, and typed function-block interfaces remain out of scope.
+rather than recovered. FUNCTIONS are implemented as pure inlined functions: typed parameters and `VAR` locals with optional initialisers,
+straight-line assignments (locals become ordered expression bindings), the last assignment to the function name as
+the result, argument count and return type checked, recursion refused. Control flow inside a function and typed
+function-block interfaces remain out of scope.
 
 Functions (`FUNCTION f : INT ... END_FUNCTION`) lower to a macro-style page plus a call block, or are refused
 until the macro backend supports typed interfaces. Arrays need `ArrayRead`/`ArrayWrite` (or the catalogue's

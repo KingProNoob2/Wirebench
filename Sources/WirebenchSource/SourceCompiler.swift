@@ -884,18 +884,57 @@ struct Lowering {
         }
     }
 
-    /// Inline a FUNCTION: parameters become the caller's argument expressions, nested calls are expanded first.
-    private func expand(_ expression: SourceExpr, parameters: [SourceParameter], arguments: [SourceExpr],
-                        depth: Int, line: Int) throws -> SourceExpr {
+    /// Inline a FUNCTION: parameters become the caller's argument expressions, locals become bindings accumulated in
+    /// body order, and the last assignment to the function's name is its result. Nested calls expand recursively.
+    private func expandFunction(_ function: SourceFunction, arguments: [SourceExpr], depth: Int,
+                                line: Int) throws -> SourceExpr {
+        guard depth < 32 else {
+            throw SourceError(line: line, message: "a function call is recursive or nested too deeply")
+        }
+        var bindings: [String: SourceExpr] = [:]
+        for (parameter, argument) in zip(function.parameters, arguments) {
+            bindings[parameter.name.lowercased()] = argument
+        }
+        for local in function.locals {
+            if let initial = local.initial {
+                bindings[local.name.lowercased()] = literalExpression(initial, line: local.line)
+            }
+        }
+        var result: SourceExpr?
+        for statement in function.statements {
+            guard case .assign(let target, let expression) = statement.kind else {
+                throw SourceError(line: statement.line,
+                                  message: "a FUNCTION body is straight assignments only")
+            }
+            let expanded = try expandExpression(expression, bindings: &bindings, depth: depth, line: line)
+            if target.lowercased() == function.name.lowercased() {
+                result = expanded
+            } else {
+                bindings[target.lowercased()] = expanded
+            }
+        }
+        guard let result else {
+            throw SourceError(line: line, message: "function '\(function.name)' never assigns its name")
+        }
+        return result
+    }
+
+    private func literalExpression(_ literal: SourceLiteral, line: Int) -> SourceExpr {
+        switch literal {
+        case .boolean(let value): return SourceExpr(.boolean(value), line: line)
+        case .integer(let value): return SourceExpr(.integer(value), line: line)
+        case .real(let value): return SourceExpr(.real(value), line: line)
+        }
+    }
+
+    private func expandExpression(_ expression: SourceExpr, bindings: inout [String: SourceExpr],
+                                  depth: Int, line: Int) throws -> SourceExpr {
         guard depth < 32 else {
             throw SourceError(line: line, message: "a function call is recursive or nested too deeply")
         }
         switch expression.kind {
         case .name(let name):
-            if let index = parameters.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
-                return arguments[index]
-            }
-            return expression
+            return bindings[name.lowercased()] ?? expression
         case .functionCall(let name, let callArguments):
             guard let function = functions[name.lowercased()] else {
                 throw SourceError(line: line, message: "unknown function '\(name)'")
@@ -906,18 +945,16 @@ struct Lowering {
             }
             var expandedArguments: [SourceExpr] = []
             for argument in callArguments {
-                expandedArguments.append(try expand(argument, parameters: parameters, arguments: arguments,
-                                                    depth: depth + 1, line: line))
+                expandedArguments.append(try expandExpression(argument, bindings: &bindings, depth: depth + 1, line: line))
             }
-            return try expand(function.body, parameters: function.parameters, arguments: expandedArguments,
-                              depth: depth + 1, line: line)
+            return try expandFunction(function, arguments: expandedArguments, depth: depth + 1, line: line)
         case .unary(let op, let operand):
-            return SourceExpr(.unary(op, try expand(operand, parameters: parameters, arguments: arguments,
-                                                    depth: depth + 1, line: line)), line: expression.line)
+            return SourceExpr(.unary(op, try expandExpression(operand, bindings: &bindings, depth: depth + 1, line: line)),
+                              line: expression.line)
         case .binary(let op, let left, let right):
             return SourceExpr(.binary(op,
-                                      try expand(left, parameters: parameters, arguments: arguments, depth: depth + 1, line: line),
-                                      try expand(right, parameters: parameters, arguments: arguments, depth: depth + 1, line: line)),
+                                      try expandExpression(left, bindings: &bindings, depth: depth + 1, line: line),
+                                      try expandExpression(right, bindings: &bindings, depth: depth + 1, line: line)),
                               line: expression.line)
         case .member, .element:
             throw SourceError(line: line, message: "a FUNCTION body cannot read instances or arrays")
@@ -1216,8 +1253,7 @@ struct Lowering {
                 throw SourceError(line: expression.line,
                                   message: "'\(name)' takes \(function.parameters.count) argument(s), not \(arguments.count)")
             }
-            let expanded = try expand(function.body, parameters: function.parameters, arguments: arguments,
-                                      depth: 0, line: expression.line)
+            let expanded = try expandFunction(function, arguments: arguments, depth: 0, line: expression.line)
             guard expandNodeCount(expanded) <= 50_000 else {
                 throw SourceError(line: expression.line, message: "this function call expands to too large an expression")
             }
