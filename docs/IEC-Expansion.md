@@ -69,7 +69,8 @@ scan. This is documented in `Structured-Text.md` and differs from ST's within-sc
 
 A loop is not expressible as dataflow without unrolling or a state machine. Decide per construct:
 `FOR` with constant bounds and no early `EXIT` can unroll (bounded by a documented maximum, e.g. 10 000
-iterations) at compile time; `WHILE`/`REPEAT` need a counted state machine or are refused. Document the choice
+iterations) at compile time; `WHILE`/`REPEAT` are a per-scan state machine with the semantics documented in
+`Structured-Text.md`.
 in `docs/Structured-Text.md`; tests must pin the semantics, including the iteration cap.
 
 ## Stage 4: functions and arrays (INT/LONG arrays verified; pure expression FUNCTIONS verified)

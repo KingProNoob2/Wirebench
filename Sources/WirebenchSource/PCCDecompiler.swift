@@ -584,6 +584,13 @@ private final class PageReader {
         case XorBlock.guid:
             return binary(producer, "XOR", depth)
         default:
+            // Recovery is BOOL-only: a non-Boolean output read as a signal would be silently wrong, so the consumer
+            // is listed instead of being wired to a typed pin.
+            let types = BlockLabels.outputTypes(for: producer.guid)
+            if !types.isEmpty {
+                let type = types.indices.contains(source.pin) ? types[source.pin] : (types.last ?? "")
+                if !BlockLabels.isBooleanType(type) { return nil }
+            }
             return blockOutput(producer, source.pin)
         }
     }

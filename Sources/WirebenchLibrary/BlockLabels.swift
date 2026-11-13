@@ -98,6 +98,11 @@ public enum BlockLabels {
         return unique(fixed.map(\.abbrev)) + (0..<run).map { "\(prefix)\($0)" }
     }
 
+    /// The output pins' data types, in pin order.
+    public static func outputTypes(for guid: UUID) -> [String] {
+        template(for: guid)?.outputs.map(\.dataType) ?? []
+    }
+
     public static func paramTypes(for guid: UUID) -> [String] {
         template(for: guid)?.params.map(\.dataType) ?? []
     }

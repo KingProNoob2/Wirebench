@@ -24,7 +24,7 @@ struct SelfWiringTests {
     func projectAcceptsSelfWire() throws {
         var (project, counter) = project()
         // Y (output 0) into Rst (input 2).
-        #expect(project.connect(outModuleId: counter, outPinId: 0, toModuleId: counter, inPinId: 2) == nil)
+        #expect(project.connect(outModuleId: counter, outPinId: 1, toModuleId: counter, inPinId: 2) == nil)
         #expect(project.inConnections.count == 1)
 
         let xml = PCCSerializer().serialize(project: project)
@@ -45,7 +45,7 @@ struct SelfWiringTests {
         let model = AppModel()
         model.project = project
         model.selectedPage = "main"
-        let wired = model.connectPins(from: PinReference(moduleId: counter, side: .output, index: 0),
+        let wired = model.connectPins(from: PinReference(moduleId: counter, side: .output, index: 1),
                                       to: PinReference(moduleId: counter, side: .input, index: 2))
         #expect(wired)
         #expect(model.project?.inConnections.count == 1)
@@ -57,9 +57,9 @@ struct SelfWiringTests {
     @Test("A self-wired block is recovered and recompiled with its wire")
     func decompileKeepsSelfWire() throws {
         var (project, counter) = project()
-        #expect(project.connect(outModuleId: counter, outPinId: 0, toModuleId: counter, inPinId: 2) == nil)
+        #expect(project.connect(outModuleId: counter, outPinId: 1, toModuleId: counter, inPinId: 2) == nil)
         let source = PCCDecompiler().source(for: project)
-        #expect(source.contains(":= AdvCounter1.Y"))
+        #expect(source.contains(":= AdvCounter1.High"))
         let again = try SourceCompiler().compile(source)
         let wire = try #require(again.project.inConnections.first)
         #expect(wire.outModuleId == wire.inModuleId)
@@ -88,7 +88,7 @@ struct SelfWiringTests {
     @Test("The canvas offers the block's own input when a wire is dragged from its output")
     func canvasOffersSelfWire() throws {
         let (project, counter) = project()
-        let output = PinReference(moduleId: counter, side: .output, index: 0)
+        let output = PinReference(moduleId: counter, side: .output, index: 1)
         let input = PinReference(moduleId: counter, side: .input, index: 2)
         let anchor = try #require(PinHitTest.anchor(for: input, in: project))
         let target = PinHitTest.target(at: anchor, from: output, in: project, pageModuleIds: [counter])

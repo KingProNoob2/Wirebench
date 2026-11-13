@@ -154,9 +154,9 @@ struct RecoveryTests {
     @Test("A self-wired counter keeps its wire through recovery")
     func selfWire() throws {
         var project = Self.project([Self.block("AdvCounter", id: 1, order: 10)])
-        #expect(project.connect(outModuleId: 1, outPinId: 0, toModuleId: 1, inPinId: 2) == nil)
+        #expect(project.connect(outModuleId: 1, outPinId: 1, toModuleId: 1, inPinId: 2) == nil)
         let source = PCCDecompiler().source(for: project)
-        #expect(source.contains(":= AdvCounter1.Y"))
+        #expect(source.contains(":= AdvCounter1.High"))
         let again = try SourceCompiler().compile(source)
         let wire = try #require(again.project.inConnections.first)
         #expect(wire.outModuleId == wire.inModuleId)
@@ -179,6 +179,23 @@ struct RecoveryTests {
         let source = PCCDecompiler().source(for: project)
         #expect(source.contains("AT %IX4"), "the first exposed input is DI4, not DI0")
         #expect(source.contains("AT %QX1"), "DO0 is hidden, so the first output is DO1")
+        _ = try SourceCompiler().compile(source)
+    }
+
+    @Test("A typed block output is listed, not recovered as a Boolean wire")
+    func typedOutputIsListed() throws {
+        var project = Self.project([Self.block("IAdd", id: 1, order: 10),
+                                    Self.block("IntVar", id: 2, order: 20),
+                                    Self.block("Set", id: 3, order: 30),
+                                    Self.block("8xDO", id: 4, order: 40)])
+        project.inConnections = [
+            Connection(inModuleId: 3, inPinId: 1, outModuleId: 1, outPinId: 0),
+            Connection(inModuleId: 3, inPinId: 2, outModuleId: 2, outPinId: 0),
+            Connection(inModuleId: 4, inPinId: 1, outModuleId: 2, outPinId: 0),
+        ]
+        let source = PCCDecompiler().source(for: project)
+        #expect(!source.contains(":= IntVar1.Y"), "a typed output must not become a Boolean assignment")
+        #expect(source.contains("Not recovered"))
         _ = try SourceCompiler().compile(source)
     }
 
