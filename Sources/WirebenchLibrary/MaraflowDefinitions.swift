@@ -312,10 +312,21 @@ public enum MaraflowCatalog {
                                 defaultInputCount: block.defaultInputCount)
     }
 
+    /// Merge Maraflow's category paths into the Dirigo categories the palette already shows, so there is one
+    /// Communication group instead of one per protocol and one Comparators/Timers/... group rather than duplicates
+    /// whose display names only differ by a slash.
+    static func paletteCategory(_ raw: String) -> String {
+        if raw.hasPrefix("Communication/") { return "Communication" }
+        if raw.hasPrefix("Ladder (LD)") { return "Ladder" }
+        if raw == "Visual/Vars" { return "Vars" }
+        if raw.hasPrefix("Main/") { return "Main\\" + raw.dropFirst("Main/".count) }
+        return raw
+    }
+
     /// `BlockTypeInfo` descriptors for the build palette and registry listings.
     public static let infos: [BlockTypeInfo] = all.map { block in
         BlockTypeInfo(guid: block.guid, blockName: block.typeName,
-                      delphiClass: block.delphiClass, category: block.category,
-                      summary: block.summary, isImplemented: false)
+                      delphiClass: block.delphiClass, category: paletteCategory(block.category),
+                      summary: "Maraflow · \(block.category)", isImplemented: false)
     }
 }

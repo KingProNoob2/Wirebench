@@ -272,7 +272,7 @@ struct BlockPaletteView: View {
         // Not a `Button`, and no SwiftUI gesture: `PaletteDragSource` takes the mouse, so a click adds and a drag drags.
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(info.blockName)
+                Text(BlockPaletteSearch.displayBlockName(for: info))
                 Text(info.summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -294,7 +294,8 @@ struct BlockPaletteView: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .overlay {
-            PaletteDragSource(payload: AppModel.palettePayload(block: info.guid), title: info.blockName) {
+            PaletteDragSource(payload: AppModel.palettePayload(block: info.guid),
+                              title: BlockPaletteSearch.displayBlockName(for: info)) {
                 onInsert(info.guid)
                 dismiss()
             }

@@ -12,6 +12,16 @@ public enum BlockPaletteSearch {
         info.guid != MacroInterface.callGUID && info.guid != MacroInterface.interfaceGUID && info.guid != SystemCmdBlock.guid
     }
 
+    /// A block's name in the picker. Maraflow brings native blocks whose type names collide with Dirigo's (`And`,
+    /// `Not`, `Timer`); the native one is suffixed so two rows cannot look identical.
+    public nonisolated static func displayBlockName(for info: BlockTypeInfo) -> String {
+        guard MaraflowCatalog.definition(forGuid: info.guid) != nil else { return info.blockName }
+        if let existing = BlockTypeCatalog.info(forBlockName: info.blockName), existing.guid != info.guid {
+            return info.blockName + " (Maraflow)"
+        }
+        return info.blockName
+    }
+
     /// A category as it should read.
     ///
     /// Dirigo files most blocks under `Main\…`, and a handful carry no category at all — the prefix
