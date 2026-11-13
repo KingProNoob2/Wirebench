@@ -172,6 +172,25 @@ struct StructuredTextTests {
         #expect(!core.inPins(moduleId: out.id)[1].asBool, "the macro inverts")
     }
 
+    @Test("Completion offers keywords, block types, instance names and an instance's outputs")
+    func completion() {
+        let source = """
+        PROGRAM P
+        VAR
+            a AT %IX0 : BOOL;
+            lamp AT %QX0 : BOOL;
+            sum : IAdd;
+        END_VAR
+            sum(X0 := a, X1 := 5);
+            lamp := sum.Y;
+        END_PROGRAM
+        """
+        #expect(SourceCompletion.suggestions(in: source, partial: "su", beforeCaret: "    ").contains("sum"))
+        #expect(SourceCompletion.suggestions(in: source, partial: "", beforeCaret: "    sum.").contains("Y"))
+        #expect(SourceCompletion.suggestions(in: source, partial: "IA", beforeCaret: "").contains("IAdd"))
+        #expect(SourceCompletion.suggestions(in: source, partial: "TH", beforeCaret: "").contains("THEN"))
+    }
+
     @Test("The editor colours the whole ST vocabulary, not only the subset the compiler lowers")
     func highlightVocabulary() {
         let source = "CASE x OF\n  FOR i := 1 TO 10 DO\n"

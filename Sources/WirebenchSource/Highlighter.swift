@@ -48,6 +48,9 @@ public enum SourceHighlighter {
         "STRING", "WSTRING", "CHAR", "WCHAR",
     ]
 
+    /// Every word the editor colours: keywords and type names, for completion as well.
+    public static var vocabulary: Set<String> { keywords.union(types) }
+
     public static func spans(in source: String) -> [SyntaxSpan] {
         let characters = Array(source)
         // Prefix sums of UTF-16 widths: a character index becomes a text offset in one lookup, and a character can be

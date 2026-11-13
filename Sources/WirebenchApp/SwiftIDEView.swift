@@ -19,6 +19,8 @@ struct SwiftIDEView: View {
     @State private var diagnostics: [SourceError] = []
     @State private var failure: String?
     @State private var jumpLine: Int?
+    /// The declarations the report lists, each with the line to jump to; rebuilt with the compile.
+    @State private var outlineRows: [(label: String, line: Int)] = []
     @State private var savingError: String?
     @State private var debounce: Task<Void, Never>?
 
@@ -111,6 +113,8 @@ struct SwiftIDEView: View {
 
                 if isEmpty { emptyState }
 
+                if !outlineRows.isEmpty { outlineView }
+
                 if let failure {
                     Text(failure)
                         .font(.callout)
@@ -162,6 +166,18 @@ struct SwiftIDEView: View {
                 .buttonStyle(.bordered)
                 .disabled(model.project == nil)
         }
+    }
+
+    private var outlineView: some View {
+        DisclosureGroup("Declarations") {
+            ForEach(outlineRows.indices, id: \.self) { index in
+                Button(outlineRows[index].label) { jumpLine = outlineRows[index].line }
+                    .buttonStyle(.plain)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
     }
 
     private var diagnosticList: some View {
@@ -292,6 +308,7 @@ struct SwiftIDEView: View {
 
     private func rebuildEmpty() {
         spans = []
+        outlineRows = []
         compiled = nil
         diagnostics = []
         failure = nil
@@ -299,6 +316,20 @@ struct SwiftIDEView: View {
 
     private func rebuild() {
         spans = SourceHighlighter.spans(in: model.swiftSource)
+        if let program = try? SourceParser.parse(model.swiftSource) {
+            var rows: [(String, Int)] = []
+            for unit in program.units {
+                rows.append(("\(unit.kind == .functionBlock ? "FUNCTION_BLOCK" : "PROGRAM") \(unit.name)", unit.line))
+                for pin in unit.pins {
+                    rows.append(("\(pin.name) AT %\(pin.direction == .input ? "I" : "Q")X\(pin.index) : BOOL", pin.line))
+                }
+                for variable in unit.variables { rows.append(("\(variable.name) : BOOL", variable.line)) }
+                for instance in unit.instances { rows.append(("\(instance.name) : \(instance.typeName)", instance.line)) }
+            }
+            outlineRows = rows
+        } else {
+            outlineRows = []
+        }
         do {
             let result = try SourceCompiler().compile(model.swiftSource, projectName: "Untitled")
             compiled = result

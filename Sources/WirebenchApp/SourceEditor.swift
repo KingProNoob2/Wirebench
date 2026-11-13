@@ -81,6 +81,16 @@ struct SourceEditor: NSViewRepresentable {
     static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
     final class Coordinator: NSObject, NSTextViewDelegate {
+        /// Completion (F5 / Escape in the text view): keywords, types, instances and an instance's members.
+        func textView(_ textView: NSTextView, completions words: [String], forPartialWordRange charRange: NSRange,
+                      indexOfSelectedItem index: UnsafeMutablePointer<Int>?) -> [String] {
+            let text = textView.string as NSString
+            let partial = text.substring(with: charRange)
+            let before = text.substring(to: charRange.location)
+            let suggestions = SourceCompletion.suggestions(in: textView.string, partial: partial, beforeCaret: before)
+            return suggestions.isEmpty ? words : suggestions
+        }
+
         var parent: SourceEditor
         weak var textView: NSTextView?
         weak var ruler: LineNumberRuler?
