@@ -60,8 +60,9 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
 - **Ladder pages** keep their page but not their rungs; the report gives the rung count.
 - **Structured Text pages** keep their page but not their source; the report names them. Converting that source
   through the ST compiler is a later step.
-- **Macros** are imported as normal pages; calls to them are inert placeholders, so their internals are visible but
-  not executable.
+- **Macros** are converted: a macro page keeps its `*Name` caption, `MacroIn`/`MacroOut` become the `Inputs`/`Outputs`
+  interface blocks, and `Macro.User.*` blocks become Wirebench macro calls with the same pins. A call whose page is
+  missing stays inert.
 - Maraflow's target (`STM32F407-…`) has no Wirebench hardware profile; the project uses the default profile, noted
   in the import report.
 - The original `.mfl` is never overwritten: Save asks for a `.wbp` destination, as with a legacy `.pcc`.
@@ -156,9 +157,9 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Main.Timers.SinglePulse` | `SinglePulse` | In to Tr; TOn defaults to one cycle |
 | `Main.Timers.Timer` | `Timer` | PT to Dly; Q/ET to outputs |
 | `Main.Timers.Counter` | inert |  |
-| `Macro.MacroIn` | inert |  |
-| `Macro.MacroOut` | inert |  |
-| `Macro.User.*` | inert | macro calls |
+| `Macro.MacroIn` | Inputs interface | macro sheet input |
+| `Macro.MacroOut` | Outputs interface | macro sheet output |
+| `Macro.User.*` | `Macro` call | macro page by name |
 | `Visual.Segment` | `Segment` |  |
 | `Visual.Value` | `Value` |  |
 | `Visual.Vars.BoolVar` | `BoolVar` |  |
@@ -177,4 +178,4 @@ Every definition in Maraflow's `BlockCatalog` and what the importer does with it
 | `Ladder.Coil.WRITE_REG` | inert |  |
 | `Ladder.Coil.ANALOG` | inert |  |
 
-Counts: 47 mapped, 47 inert placeholders.
+Counts: 50 mapped, 44 inert placeholders.

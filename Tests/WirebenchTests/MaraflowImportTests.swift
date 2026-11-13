@@ -274,6 +274,66 @@ struct MaraflowImportTests {
         #expect(encode.inPins[3].value.asInt == 2026)
     }
 
+    static func macroProject() -> Data {
+        var entries: [(String, String)] = [
+            ("project.name", "MacroDemo"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "1"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "*Add"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "3"),
+            ("page.1.wireCount", "2"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "call", definition: "Macro.User.Add", type: "Add",
+                              name: "AddCall", gridX: 2, gridY: 2, order: 10,
+                              inputs: [("X", "Macro Input 1", "INT", "5")],
+                              outputs: [("Y", "Macro Output 1", "INT", "0")])
+        entries += Self.block("page.1.block.0.", id: "in", definition: "Macro.MacroIn", type: "MacroIn",
+                              name: "MacroIn1", gridX: 2, gridY: 2, order: 10,
+                              inputs: [], outputs: [("X", "Macro Input 1", "INT", "0")])
+        entries += Self.block("page.1.block.1.", id: "add", definition: "Math.Add", type: "Add",
+                              name: "Add1", gridX: 10, gridY: 2, order: 20,
+                              inputs: [("En", "Enable Execution", "BOOL", "1"),
+                                       ("X1", "Operand 1", "INT", "0"),
+                                       ("X2", "Operand 2", "INT", "0")],
+                              outputs: [("Y", "Result", "INT", "0")])
+        entries += Self.block("page.1.block.2.", id: "out", definition: "Macro.MacroOut", type: "MacroOut",
+                              name: "MacroOut1", gridX: 18, gridY: 2, order: 30,
+                              inputs: [("Y", "Macro Output 1", "INT", "0")], outputs: [])
+        entries += [
+            ("page.1.wire.0.srcBlock", "in"), ("page.1.wire.0.srcPin", "0"),
+            ("page.1.wire.0.dstBlock", "add"), ("page.1.wire.0.dstPin", "1"),
+            ("page.1.wire.1.srcBlock", "add"), ("page.1.wire.1.srcPin", "0"),
+            ("page.1.wire.1.dstBlock", "out"), ("page.1.wire.1.dstPin", "0"),
+        ]
+        return Self.propertiesXML(entries)
+    }
+
+    @Test("Macro pages become sheets and macro calls run")
+    func macroPages() throws {
+        let outcome = try MaraflowImporter.importProject(data: Self.macroProject(), filename: "macro")
+        #expect(outcome.project.pages.map(\.caption).sorted() == ["*Add", "Main"])
+        let call = try #require(outcome.project.modules.first { $0.name == "AddCall" })
+        #expect(call.guid == MacroBlock.guid)
+        #expect(call.rawAttributes["MACRO_NAME"] == "Add")
+        #expect(call.inPins.count == 1 && call.outPins.count == 1)
+        let inputs = try #require(outcome.project.modules.first {
+            $0.page == "*Add" && $0.rawAttributes["MACRO_NAME"] == "Inputs"
+        })
+        let outputs = try #require(outcome.project.modules.first {
+            $0.page == "*Add" && $0.rawAttributes["MACRO_NAME"] == "Outputs"
+        })
+        #expect(inputs.outPins.count == 1)
+        #expect(outputs.inPins.count == 1)
+
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: call.id)[0].asInt == 5, "the macro input reaches Add and comes back")
+    }
+
     @Test("ST, ladder and macro pages are kept with their limits reported")
     func nonFBDPages() throws {
         let entries: [(String, String)] = [
@@ -297,7 +357,7 @@ struct MaraflowImportTests {
         ]
         let loaded = try ProjectFile.read(data: Self.propertiesXML(entries), filename: "mixed")
         #expect(loaded.format == .maraflow)
-        #expect(loaded.project.pages.map(\.caption) == ["Code", "Relays", "Blink"])
+        #expect(loaded.project.pages.map(\.caption) == ["Code", "Relays", "*Blink"])
         let notes = loaded.notes.joined(separator: "\n")
         #expect(notes.contains("Structured Text"))
         #expect(notes.contains("ladder rung"))

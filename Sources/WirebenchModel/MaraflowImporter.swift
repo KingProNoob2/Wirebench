@@ -63,11 +63,11 @@ public struct MaraflowImporter {
         var usedPageNames: Set<String> = []
 
         for page in maraflow.pages {
-            var caption = page.cleanName
+            var caption = page.isMacro ? "*" + page.cleanName : page.cleanName
             if usedPageNames.contains(caption.lowercased()) {
                 var suffix = 2
-                while usedPageNames.contains("\(caption) \(suffix)".lowercased()) { suffix += 1 }
-                caption += " \(suffix)"
+                while usedPageNames.contains("\(caption) #\(suffix)".lowercased()) { suffix += 1 }
+                caption += " #\(suffix)"
             }
             usedPageNames.insert(caption.lowercased())
             project.pages.append(ProjectPage(caption: caption))
@@ -84,7 +84,7 @@ public struct MaraflowImporter {
                 notes.append("Page '\(caption)' has \(page.graphicCount) graphic element(s); graphics are not imported.")
             }
             if page.isMacro {
-                notes.append("Macro page '\(caption)' is imported as a normal page; calls to it become inert placeholders.")
+                notes.append("Macro page '\(caption)' is imported as a macro sheet.")
             }
 
             var placed: [String: Placed] = [:]
@@ -93,7 +93,13 @@ public struct MaraflowImporter {
                 nextModuleId += 1
                 let mapping = mappings[block.definitionId]
                 let module: PCCModule
-                if let mapping, BlockTypeCatalog.info(forBlockName: mapping.target) != nil {
+                if block.definitionId == "Macro.MacroIn" {
+                    module = macroInterface(block, kind: .inputs, id: id, page: caption)
+                } else if block.definitionId == "Macro.MacroOut" {
+                    module = macroInterface(block, kind: .outputs, id: id, page: caption)
+                } else if block.definitionId.hasPrefix("Macro.User.") {
+                    module = macroCall(block, id: id, page: caption)
+                } else if let mapping, BlockTypeCatalog.info(forBlockName: mapping.target) != nil {
                     module = mappedModule(block, mapping: mapping, id: id, page: caption,
                                           approximated: &approximated)
                 } else {
@@ -229,6 +235,46 @@ public struct MaraflowImporter {
                          page: page, inPins: inPins, paramPins: [], outPins: outPins,
                          rawAttributes: AttributeBag([("MARAFLOW_DEF", block.definitionId),
                                                       ("MARAFLOW_TYPE", block.typeName),
+                                                      ("MARAFLOW_ID", block.id)]),
+                         rawChildren: [])
+    }
+
+    private enum MacroInterfaceKind {
+        case inputs
+        case outputs
+    }
+
+    private static func macroInterface(_ block: MaraflowBlock, kind: MacroInterfaceKind, id: Int,
+                                       page: String) -> PCCModule {
+        let pins = kind == .inputs
+            ? block.outputs.enumerated().map { Pin(id: $0.offset, value: value(for: $0.element), rights: 2,
+                                                   name: $0.element.short) }
+            : []
+        let inPins = kind == .outputs
+            ? block.inputs.enumerated().map { Pin(id: $0.offset, value: value(for: $0.element), rights: 0,
+                                                  name: $0.element.short) }
+            : []
+        return PCCModule(id: id, guid: InputsBlock.guid, name: block.name, x: Double(block.gridX * 32),
+                         y: Double(block.gridY * 32), order: block.order, threadId: block.threadId,
+                         page: page, inPins: inPins, paramPins: [], outPins: pins,
+                         rawAttributes: AttributeBag([("MACRO_NAME", kind == .inputs ? "Inputs" : "Outputs"),
+                                                      ("KIND", kind == .inputs ? "0" : "1")]),
+                         rawChildren: [])
+    }
+
+    private static func macroCall(_ block: MaraflowBlock, id: Int, page: String) -> PCCModule {
+        let name = String(block.definitionId.dropFirst("Macro.User.".count))
+        let inPins = block.inputs.enumerated().map {
+            Pin(id: $0.offset, value: value(for: $0.element), rights: 0, name: $0.element.short)
+        }
+        let outPins = block.outputs.enumerated().map {
+            Pin(id: $0.offset, value: value(for: $0.element), rights: 2, name: $0.element.short)
+        }
+        return PCCModule(id: id, guid: MacroBlock.guid, name: block.name, x: Double(block.gridX * 32),
+                         y: Double(block.gridY * 32), order: block.order, threadId: block.threadId,
+                         page: page, inPins: inPins, paramPins: [], outPins: outPins,
+                         rawAttributes: AttributeBag([("MACRO_NAME", name.isEmpty ? block.typeName : name),
+                                                      ("MARAFLOW_DEF", block.definitionId),
                                                       ("MARAFLOW_ID", block.id)]),
                          rawChildren: [])
     }
