@@ -25,7 +25,7 @@ enum Theme {
 
 
     /// Wire colours. Live wires glow; idle wires recede so the eye follows the active signal.
-    static var wireIdle: Color { Color.primary.opacity(0.22) }
+    static var wireIdle: Color { Color.primary.opacity(0.32) }
     static var wireLive: Color { Color.accentColor }
 
     /// A flat hairline edge. This used to be a light-to-dark specular gradient; gradients were
@@ -33,6 +33,47 @@ enum Theme {
     static var panelStroke: Color { Color.primary.opacity(0.14) }
 
     static var softShadow: Color { Color.black.opacity(0.28) }
+
+    // MARK: - Block card contrast tokens
+
+    static func canvasBackdrop(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(white: 0.12) : Color(white: 0.90)
+    }
+
+    static func cardFill(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(white: 0.23) : Color.white
+    }
+
+    static func cardStroke(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.20) : Color.black.opacity(0.24)
+    }
+
+    static func cardShadow(for colorScheme: ColorScheme, isSelected: Bool) -> Color {
+        if colorScheme == .dark {
+            return Color.black.opacity(isSelected ? 0.56 : 0.44)
+        }
+        return Color.black.opacity(isSelected ? 0.24 : 0.16)
+    }
+
+    static func pinPrimaryText(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.88)
+    }
+
+    static func pinSecondaryText(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.74) : Color.black.opacity(0.70)
+    }
+
+    static func pinBeadIdleFill(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.24) : Color.black.opacity(0.22)
+    }
+
+    static func pinBeadIdleStroke(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.32) : Color.black.opacity(0.30)
+    }
+
+    static func pinBeadHighStroke(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white.opacity(0.50) : Color.black.opacity(0.25)
+    }
 
     /// Tint used for a block's category, matching the Dirigo block-palette grouping.
     static func tint(forBlockNamed name: String, guid: UUID?) -> Color {
@@ -124,22 +165,28 @@ private struct GreyCardSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     let tint: Color?
     let tintOpacity: Double
+    let shadowColor: Color?
+    let shadowRadius: CGFloat
+    let shadowY: CGFloat
     @Environment(\.colorScheme) private var colorScheme
-
-    private var grey: Color { colorScheme == .dark ? Color(white: 0.20) : Color(white: 0.93) }
 
     func body(content: Content) -> some View {
         content
             .background {
                 ZStack {
-                    shape.fill(grey)
+                    if let shadowColor, shadowRadius > 0 {
+                        shape.fill(Theme.cardFill(for: colorScheme))
+                            .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
+                    } else {
+                        shape.fill(Theme.cardFill(for: colorScheme))
+                    }
                     if let tint {
                         shape.fill(tint.opacity(tintOpacity))
                     }
                 }
             }
             .overlay {
-                shape.strokeBorder(colorScheme == .dark ? Theme.panelStroke : Color.black.opacity(0.18), lineWidth: 1)
+                shape.strokeBorder(Theme.cardStroke(for: colorScheme), lineWidth: 1)
             }
     }
 }
@@ -181,11 +228,21 @@ extension View {
     /// behind each shape independently, and a full sheet has dozens of cards. Glass was replaced by a
     /// material once (which roughly halved canvas render cost), and the material by solid grey.
     /// Chrome (the zoom control, inspector hero tiles, dialogs) still uses the real glass effect.
-    func cardSurface(cornerRadius: CGFloat, tint: Color? = nil, tintOpacity: Double = 0.10) -> some View {
+    func cardSurface(
+        cornerRadius: CGFloat,
+        tint: Color? = nil,
+        tintOpacity: Double = 0.10,
+        shadowColor: Color? = nil,
+        shadowRadius: CGFloat = 0,
+        shadowY: CGFloat = 0
+    ) -> some View {
         modifier(GreyCardSurface(
             shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
             tint: tint,
-            tintOpacity: tintOpacity
+            tintOpacity: tintOpacity,
+            shadowColor: shadowColor,
+            shadowRadius: shadowRadius,
+            shadowY: shadowY
         ))
     }
 
@@ -234,13 +291,14 @@ struct PinBead: View {
     let isHigh: Bool
     var scale: CGFloat = 1
     var tint: Color = Theme.signalHigh
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Circle()
-            .fill(isHigh ? tint : Color.primary.opacity(0.18))
+            .fill(isHigh ? tint : Theme.pinBeadIdleFill(for: colorScheme))
             .overlay {
                 Circle().strokeBorder(
-                    isHigh ? Color.white.opacity(0.50) : Color.primary.opacity(0.16),
+                    isHigh ? Theme.pinBeadHighStroke(for: colorScheme) : Theme.pinBeadIdleStroke(for: colorScheme),
                     lineWidth: 0.5 * scale
                 )
             }
@@ -257,8 +315,10 @@ struct PinBead: View {
 /// colorization" that was asked to go, they were re-rasterised on every frame of a pan or zoom —
 /// which is precisely when the canvas can least afford it.
 struct AmbientBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        Color(nsColor: .underPageBackgroundColor)
+        Theme.canvasBackdrop(for: colorScheme)
             .ignoresSafeArea()
     }
 }

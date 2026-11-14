@@ -24,9 +24,9 @@ struct CanvasLayerTests {
                   outPins: [Pin(id: 0, value: .bool(false))])
     }
 
-    private func layer(zoom: CGFloat = 1, anchor: CGSize = .zero) -> LiveValuesCanvas {
+    private func layer(zoom: CGFloat = 1, anchor: CGSize = .zero, colorScheme: ColorScheme = .dark) -> LiveValuesCanvas {
         LiveValuesCanvas(zoom: zoom, anchor: anchor, margin: CGSize(width: 500, height: 350),
-                         modules: [Self.module(1)], snapshots: [:], drags: [:])
+                         modules: [Self.module(1)], snapshots: [:], drags: [:], colorScheme: colorScheme)
     }
 
     /// The pin layer is drawn for an *anchor* pan and moved for everything since, because drawing every visible row costs
@@ -37,6 +37,8 @@ struct CanvasLayerTests {
         #expect(layer() == layer(), "identical inputs must not redraw it")
         #expect(layer(anchor: CGSize(width: 1, height: 0)) != layer(), "re-centring on a new pan must redraw it")
         #expect(layer(zoom: 1.01) != layer(), "a zoom must redraw them at the new scale")
+        #expect(layer(colorScheme: .light) != layer(colorScheme: .dark),
+                "a scheme change must redraw the pin layer with its scheme-tuned contrast")
         #expect(layer() != LiveValuesCanvas(zoom: 1, anchor: .zero, margin: CGSize(width: 500, height: 350),
                                             modules: [Self.module(2)], snapshots: [:], drags: [:]),
                 "another page's blocks must redraw them")
@@ -95,6 +97,83 @@ struct CanvasLayerTests {
                     #expect(abs(back.x - point.x) < 1e-9 && abs(back.y - point.y) < 1e-9,
                             "zoom \(zoom), pan \(pan), point \(point) came back as \(back)")
                 }
+            }
+        }
+    }
+
+    @Test("Wire hit-testing matches segments within radius and prefers later-drawn wires")
+    func wireHitTestingMatchesSegmentsAndDrawOrder() {
+        let keyA = RoutedWire.Key(outModule: 1, outPin: 0, inModule: 2, inPin: 0)
+        let keyB = RoutedWire.Key(outModule: 3, outPin: 0, inModule: 4, inPin: 0)
+        let wireA = RoutedWire(
+            key: keyA,
+            points: [CGPoint(x: 10, y: 20), CGPoint(x: 110, y: 20), CGPoint(x: 110, y: 80)],
+            isHigh: false, isFeedback: false, width: 1.2
+        )
+        let wireB = RoutedWire(
+            key: keyB,
+            points: [CGPoint(x: 60, y: 0), CGPoint(x: 60, y: 60)],
+            isHigh: true, isFeedback: false, width: 1.8
+        )
+        let entries = WireHitTesting.entries(from: [wireA, wireB])
+
+        #expect(WireHitTesting.hitWire(at: CGPoint(x: 30, y: 26), in: entries) == keyA)
+        #expect(WireHitTesting.hitWire(at: CGPoint(x: 30, y: 28), in: entries) == nil)
+        #expect(WireHitTesting.hitWire(at: CGPoint(x: 115, y: 50), in: entries) == keyA)
+        // Crossing at (60, 20): wireB is drawn after wireA, so wireB wins.
+        #expect(WireHitTesting.hitWire(at: CGPoint(x: 60, y: 20), in: entries) == keyB)
+    }
+
+    @Test("WireRouter.roundedPath produces identical geometry to roundedSegments")
+    func roundedPathMatchesRoundedSegments() {
+        let routes: [[CGPoint]] = [
+            [],
+            [CGPoint(x: 0, y: 0)],
+            [CGPoint(x: 0, y: 0), CGPoint(x: 50, y: 0)],
+            [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 50, y: 0), CGPoint(x: 50, y: 40), CGPoint(x: 90, y: 40)],
+            [CGPoint(x: 0, y: 0), CGPoint(x: 50, y: 0), CGPoint(x: 50, y: 12), CGPoint(x: 50, y: 40)],
+            [CGPoint(x: 10, y: 10), CGPoint(x: 15, y: 10), CGPoint(x: 15, y: 14), CGPoint(x: 40, y: 14)]
+        ]
+        for pts in routes {
+            let expected = CGMutablePath()
+            for segment in WireRouter.roundedSegments(pts, radius: 7) {
+                switch segment {
+                case .move(let p): expected.move(to: p)
+                case .line(let p): expected.addLine(to: p)
+                case .quad(let end, let control): expected.addQuadCurve(to: end, control: control)
+                }
+            }
+            let actual = WireRouter.roundedPath(pts, radius: 7)
+            var expectedElements: [(CGPathElementType, [CGPoint])] = []
+            expected.applyWithBlock { el in
+                let ptr = el.pointee
+                let count: Int
+                switch ptr.type {
+                case .moveToPoint, .addLineToPoint: count = 1
+                case .addQuadCurveToPoint: count = 2
+                case .addCurveToPoint: count = 3
+                case .closeSubpath: count = 0
+                @unknown default: count = 0
+                }
+                expectedElements.append((ptr.type, Array(UnsafeBufferPointer(start: ptr.points, count: count))))
+            }
+            var actualElements: [(CGPathElementType, [CGPoint])] = []
+            actual.applyWithBlock { el in
+                let ptr = el.pointee
+                let count: Int
+                switch ptr.type {
+                case .moveToPoint, .addLineToPoint: count = 1
+                case .addQuadCurveToPoint: count = 2
+                case .addCurveToPoint: count = 3
+                case .closeSubpath: count = 0
+                @unknown default: count = 0
+                }
+                actualElements.append((ptr.type, Array(UnsafeBufferPointer(start: ptr.points, count: count))))
+            }
+            #expect(actualElements.count == expectedElements.count)
+            for (a, e) in zip(actualElements, expectedElements) {
+                #expect(a.0 == e.0)
+                #expect(a.1 == e.1)
             }
         }
     }

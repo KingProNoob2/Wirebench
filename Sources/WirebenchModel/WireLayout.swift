@@ -44,6 +44,8 @@ public final class WireLayout {
     private let routeCache = WireRouteCache()
     /// The finished geometry of every wire, for as long as nothing that shapes it changes; see `wires`.
     private let geometry = WireGeometryCache()
+    private var cachedLaneKey: Int?
+    private var cachedLanes: [Int: CableLane] = [:]
     // What the current call was given, which the helpers below read.
     private var selectedPage = ""
     private var snapToGrid = true
@@ -73,32 +75,43 @@ public final class WireLayout {
         self.selectedPage = selectedPage
         self.snapToGrid = snapToGrid
         self.dragOffsets = dragOffsets
-        routeCache.beginFrame(key: routeKey(project: project, pageModuleIds: pageModuleIds),
-                              dragging: !dragOffsets.isEmpty)
-        var wires: [RoutedWire] = []
+
         // The wires into inputs and into parameter pins, which Dirigo draws among the inputs.
-        let connections = project.inConnections + project.paramConnections
+        let connections = project.paramConnections.isEmpty
+            ? project.inConnections
+            : (project.inConnections + project.paramConnections)
+        let sortedIds = pageModuleIds.sorted()
+        let staticKey = staticLayoutKey(sortedIds: sortedIds, modulesById: modulesById, connections: connections)
+        routeCache.beginFrame(key: routeKey(staticKey: staticKey), dragging: !dragOffsets.isEmpty)
+
+        var wires: [RoutedWire] = []
         wires.reserveCapacity(connections.count)
         // The cables drawn as the file has them, which are left alone when the page's runs are set apart.
-        var followed = Set<String>()
+        var followed = Set<RoutedWire.Key>()
 
         // Every block on the page, so cables can be routed around them rather than through them.
-        let obstacles: [Int: CGRect] = pageModuleIds.reduce(into: [:]) { result, id in
-            guard let module = modulesById[id] else { return }
+        var obstacles: [Int: CGRect] = [:]
+        obstacles.reserveCapacity(sortedIds.count)
+        var sortedObstacles: [(id: Int, rect: CGRect)] = []
+        sortedObstacles.reserveCapacity(sortedIds.count)
+        for id in sortedIds {
+            guard let module = modulesById[id] else { continue }
             let drag = dragOffsets[id] ?? .zero
-            result[id] = CGRect(
+            let rect = CGRect(
                 x: module.x + drag.width,
                 y: module.y + drag.height,
                 width: Double(CardGeometry.cardWidth(for: module)),
                 height: Double(CardGeometry.cardHeight(for: module))
             )
+            obstacles[id] = rect
+            sortedObstacles.append((id: id, rect: rect))
         }
 
         // Routes come from where the blocks are and how they are wired, never from the simulation, so a tick — which
         // changes only which wires are live — has nothing to re-route. Found the same: reuse the geometry, and read off
         // which wires are live now. (Re-deriving it for every wire at every tick, the held-route checks included, was
         // the larger part of what the canvas itself spent on a tick.)
-        let fingerprint = geometryFingerprint(project: project, pageModuleIds: pageModuleIds, obstacles: obstacles)
+        let fingerprint = geometryFingerprint(connections: connections, pageModuleIds: pageModuleIds, sortedObstacles: sortedObstacles)
         if let known = geometry.wires(for: fingerprint) {
             return known.map { wire in
                 var live = wire
@@ -107,8 +120,15 @@ public final class WireLayout {
             }.sorted { !$0.isHigh && $1.isHigh }
         }
 
-        let lanesByConnection = laneAssignments(connections: connections, pageModuleIds: pageModuleIds,
-                                                modulesById: modulesById)
+        let lanesByConnection: [Int: CableLane]
+        if cachedLaneKey == staticKey {
+            lanesByConnection = cachedLanes
+        } else {
+            let computed = laneAssignments(connections: connections, pageModuleIds: pageModuleIds, modulesById: modulesById)
+            cachedLaneKey = staticKey
+            cachedLanes = computed
+            lanesByConnection = computed
+        }
 
         for (index, conn) in connections.enumerated() {
             guard pageModuleIds.contains(conn.outModuleId),
@@ -134,7 +154,8 @@ public final class WireLayout {
             // sit, so parallel runs do not stack into one line and the fan does not braid.
             let cableLane = lanesByConnection[index] ?? CableLane()
 
-            let wireKey = "\(conn.outModuleId).\(conn.outPinId)->\(conn.inModuleId).\(conn.inPinId)\(conn.isParam ? "p" : "")"
+            let wireKey = RoutedWire.Key(outModule: conn.outModuleId, outPin: conn.outPinId,
+                                         inModule: conn.inModuleId, inPin: conn.inPinId, inParam: conn.isParam)
             if followsStoredRoute(conn, src: src, dst: dst) { followed.insert(wireKey) }
             // A cable the drag does not move holds its route, so dragging one block does not set the
             // whole sheet twitching — but only while that route still clears the blocks being moved.
@@ -152,10 +173,7 @@ public final class WireLayout {
             // route, holding would draw a wire through the block, so it re-routes instead.
             let holdSettled: Bool = {
                 guard !isMoving, let held = routeCache.settledPoints(for: wireKey) else { return false }
-                let others = obstacles
-                    .filter { $0.key != conn.outModuleId && $0.key != conn.inModuleId }
-                    .map(\.value)
-                return WireRouter.isClear(held, of: others)
+                return WireRouter.isClear(held, of: sortedObstacles, excluding: conn.outModuleId, and: conn.inModuleId)
             }()
             let points: [CGPoint] = routeCache.points(
                 for: wireKey, holdSettled: holdSettled,
@@ -163,17 +181,17 @@ public final class WireLayout {
                 // pushed aside — it must come back when the block moves on, not settle into the
                 // detour. Its own pins moving is a real change, so that one is kept.
                 temporary: !isMoving && !dragOffsets.isEmpty,
-                signature: routeSignature(conn: conn, src: src, dst: dst, obstacles: obstacles),
+                signature: { routeSignature(conn: conn, src: src, dst: dst, sortedObstacles: sortedObstacles) },
                 src: src, dst: dst) {
                 routingPoints(conn: conn, src: src, dst: dst,
                               lane: cableLane.offset, legSpread: cableLane.spread,
                               srcMod: srcMod, dstMod: dstMod,
-                              srcDrag: srcDrag, dstDrag: dstDrag, obstacles: obstacles)
+                              srcDrag: srcDrag, dstDrag: dstDrag,
+                              obstacles: obstacles, sortedObstacles: sortedObstacles)
             }
 
             wires.append(RoutedWire(
-                key: .init(outModule: conn.outModuleId, outPin: conn.outPinId,
-                           inModule: conn.inModuleId, inPin: conn.inPinId, inParam: conn.isParam),
+                key: wireKey,
                 points: WireRouter.orthogonalized(points),
                 isHigh: isHigh,
                 // REVERSE marks a feedback wire in Dirigo; drawn dashed so it reads as one.
@@ -182,7 +200,7 @@ public final class WireLayout {
             ))
         }
 
-        wires = separated(wires, followed: followed, obstacles: obstacles)
+        wires = separated(wires, followed: followed, sortedObstacles: sortedObstacles)
         geometry.store(wires, for: fingerprint)
 
         // Draw live wires last so they sit on top of the idle ones.
@@ -191,13 +209,14 @@ public final class WireLayout {
 
     /// Cables of different signals that the router left on one line, set side by side (`WireSeparation`). Done on the finished page, because only
     /// there can it be seen which cables share a run; a cable followed from the file as drawn is left as it is.
-    private func separated(_ wires: [RoutedWire], followed: Set<String>, obstacles: [Int: CGRect]) -> [RoutedWire] {
+    private func separated(_ wires: [RoutedWire], followed: Set<RoutedWire.Key>,
+                           sortedObstacles: [(id: Int, rect: CGRect)]) -> [RoutedWire] {
         let items = wires.map { wire in
             WireSeparation.Item(net: wire.key.outModule &* 1_000 &+ wire.key.outPin, points: wire.points,
-                                movable: !followed.contains("\(wire.key.outModule).\(wire.key.outPin)->\(wire.key.inModule).\(wire.key.inPin)\(wire.key.inParam ? "p" : "")"),
+                                movable: !followed.contains(wire.key),
                                 from: wire.key.outModule, to: wire.key.inModule)
         }
-        let moved = WireSeparation.separate(items, obstacles: obstacles.sorted { $0.key < $1.key }.map { (id: $0.key, rect: $0.value) })
+        let moved = WireSeparation.separate(items, obstacles: sortedObstacles)
         return zip(wires, moved).map { wire, points in
             var copy = wire
             copy.points = points
@@ -207,24 +226,26 @@ public final class WireLayout {
 
     /// Everything that shapes a wire's route and look, and nothing that a tick changes: which block is where and how
     /// big, what is being dragged, how each connection is wired and drawn.
-    private func geometryFingerprint(project: PCCProject, pageModuleIds: Set<Int>,
-                                     obstacles: [Int: CGRect]) -> Int {
+    private func geometryFingerprint(connections: [Connection], pageModuleIds: Set<Int>,
+                                     sortedObstacles: [(id: Int, rect: CGRect)]) -> Int {
         var hasher = Hasher()
         hasher.combine(selectedPage)
         hasher.combine(snapToGrid)
         hasher.combine(CardGeometry.pinPitch)
         hasher.combine(CardGeometry.defaultWidth)
-        for (id, rect) in obstacles.sorted(by: { $0.key < $1.key }) {
+        for (id, rect) in sortedObstacles {
             hasher.combine(id)
             hasher.combine(rect.minX); hasher.combine(rect.minY)
             hasher.combine(rect.width); hasher.combine(rect.height)
         }
-        for (id, offset) in dragOffsets.sorted(by: { $0.key < $1.key }) {
-            hasher.combine(id)
-            hasher.combine(offset.width); hasher.combine(offset.height)
+        if !dragOffsets.isEmpty {
+            for (id, offset) in dragOffsets.sorted(by: { $0.key < $1.key }) {
+                hasher.combine(id)
+                hasher.combine(offset.width); hasher.combine(offset.height)
+            }
         }
-        for conn in project.inConnections + project.paramConnections where pageModuleIds.contains(conn.outModuleId)
-                                             && pageModuleIds.contains(conn.inModuleId) {
+        for conn in connections where pageModuleIds.contains(conn.outModuleId)
+                                     && pageModuleIds.contains(conn.inModuleId) {
             hasher.combine(conn.outModuleId); hasher.combine(conn.outPinId)
             hasher.combine(conn.inModuleId); hasher.combine(conn.inPinId); hasher.combine(conn.isParam)
             for point in conn.points {
@@ -325,7 +346,8 @@ public final class WireLayout {
         dstMod: PCCModule,
         srcDrag: CGSize,
         dstDrag: CGSize,
-        obstacles: [Int: CGRect]
+        obstacles: [Int: CGRect],
+        sortedObstacles: [(id: Int, rect: CGRect)]
     ) -> [CGPoint] {
         if followsStoredRoute(conn, src: src, dst: dst) {
             return [src] + conn.points.map { CGPoint(x: src.x + $0.x, y: src.y + $0.y) } + [dst]
@@ -335,13 +357,20 @@ public final class WireLayout {
         let srcTop = srcMod.y + srcDrag.height
         let dstTop = dstMod.y + dstDrag.height
         // Route around every block except the two this cable joins.
-        let others = obstacles.filter { $0.key != conn.outModuleId && $0.key != conn.inModuleId }
-            .map(\.value)
+        var others: [CGRect] = []
+        others.reserveCapacity(sortedObstacles.count)
+        for (id, rect) in sortedObstacles where id != conn.outModuleId && id != conn.inModuleId {
+            others.append(rect)
+        }
+        var ends: [CGRect] = []
+        ends.reserveCapacity(2)
+        if let sRect = obstacles[conn.outModuleId] { ends.append(sRect) }
+        if let dRect = obstacles[conn.inModuleId], conn.inModuleId != conn.outModuleId { ends.append(dRect) }
         return WireRouter.route(from: src, to: dst, lane: lane, legSpread: legSpread,
-                               obstacles: others,
-                               clearAbove: min(srcTop, dstTop) - 26,
-                               clearBelow: max(srcBottom, dstBottom) + 26,
-                               ends: [obstacles[conn.outModuleId], obstacles[conn.inModuleId]].compactMap { $0 })
+                                obstacles: others,
+                                clearAbove: min(srcTop, dstTop) - 26,
+                                clearBelow: max(srcBottom, dstBottom) + 26,
+                                ends: ends)
     }
 
     /// The cable's geometry, quantised to `WireRouter.pitch`, for the route cache's dead zone.
@@ -354,14 +383,13 @@ public final class WireLayout {
     /// A connection with stored `POINTS` is followed verbatim and moves with its pins anyway, so it
     /// opts out too.
     private func routeSignature(conn: Connection, src: CGPoint, dst: CGPoint,
-                                obstacles: [Int: CGRect]) -> Int? {
+                                sortedObstacles: [(id: Int, rect: CGRect)]) -> Int? {
         guard snapToGrid, !followsStoredRoute(conn, src: src, dst: dst) else { return nil }
         func q(_ value: Double) -> Int { Int((value / Double(WireRouter.pitch)).rounded()) }
         var hasher = Hasher()
         hasher.combine(q(src.x)); hasher.combine(q(src.y))
         hasher.combine(q(dst.x)); hasher.combine(q(dst.y))
-        for (id, rect) in obstacles.sorted(by: { $0.key < $1.key })
-        where id != conn.outModuleId && id != conn.inModuleId {
+        for (id, rect) in sortedObstacles where id != conn.outModuleId && id != conn.inModuleId {
             hasher.combine(id)
             hasher.combine(q(rect.minX)); hasher.combine(q(rect.minY))
             hasher.combine(q(rect.maxX)); hasher.combine(q(rect.maxY))
@@ -369,26 +397,22 @@ public final class WireLayout {
         return hasher.finalize()
     }
 
-    /// Everything routing depends on, and nothing that a tick changes.
-    ///
-    /// Hashing this costs a walk of the page's modules and a connection's stored points — arithmetic
-    /// against a path search per cable.
-    private func routeKey(project: PCCProject, pageModuleIds: Set<Int>) -> Int {
+    /// Everything routing depends on except active drag offsets.
+    private func staticLayoutKey(sortedIds: [Int], modulesById: [Int: PCCModule], connections: [Connection]) -> Int {
         var hasher = Hasher()
         hasher.combine(selectedPage)
         hasher.combine(CardGeometry.pinPitch)
         hasher.combine(CardGeometry.defaultWidth)
-        for module in project.modules where pageModuleIds.contains(module.id) {
+        for id in sortedIds {
+            guard let module = modulesById[id] else { continue }
             hasher.combine(module.id)
             hasher.combine(module.x)
             hasher.combine(module.y)
+            hasher.combine(module.inPins.count)
+            hasher.combine(module.paramPins.count)
+            hasher.combine(module.outPins.count)
         }
-        for (id, offset) in dragOffsets {
-            hasher.combine(id)
-            hasher.combine(offset.width)
-            hasher.combine(offset.height)
-        }
-        for conn in project.inConnections + project.paramConnections {
+        for conn in connections {
             hasher.combine(conn.outModuleId)
             hasher.combine(conn.outPinId)
             hasher.combine(conn.inModuleId)
@@ -398,6 +422,19 @@ public final class WireLayout {
             for point in conn.points {
                 hasher.combine(point.x)
                 hasher.combine(point.y)
+            }
+        }
+        return hasher.finalize()
+    }
+
+    private func routeKey(staticKey: Int) -> Int {
+        var hasher = Hasher()
+        hasher.combine(staticKey)
+        if !dragOffsets.isEmpty {
+            for (id, offset) in dragOffsets.sorted(by: { $0.key < $1.key }) {
+                hasher.combine(id)
+                hasher.combine(offset.width)
+                hasher.combine(offset.height)
             }
         }
         return hasher.finalize()

@@ -22,26 +22,29 @@ struct MaraflowGraphicsLayer: View {
     }
 
     var body: some View {
-        // The timeline is the backstop that keeps indicators moving while the simulation plays even if no other
-        // observed value happens to change in a frame; snapshots and `version` still drive paused edits.
-        TimelineView(.animation(minimumInterval: 0.1, paused: !model.isPlaying)) { _ in
-            let _ = version
-            let graphics = graphics
-            let isActive = graphics.map { graphic in
-                graphic.indicatorEnabled && !graphic.indicatorPin.isEmpty
-                    && model.maraflowBooleanValue(graphic.indicatorPin)
-            }
-            ZStack(alignment: .topLeading) {
-                Canvas { context, _ in
-                    for (index, graphic) in graphics.enumerated() where graphic.kind != "VISUAL_BUTTON" {
-                        draw(graphic, active: isActive[index], in: &context)
-                    }
+        let graphics = graphics
+        if !graphics.isEmpty {
+            // The timeline is the backstop that keeps indicators moving while the simulation plays even if no other
+            // observed value happens to change in a frame; snapshots and `version` still drive paused edits.
+            TimelineView(.animation(minimumInterval: 0.1, paused: !model.isPlaying)) { _ in
+                let _ = version
+                let current = self.graphics
+                let isActive = current.map { graphic in
+                    graphic.indicatorEnabled && !graphic.indicatorPin.isEmpty
+                        && model.maraflowBooleanValue(graphic.indicatorPin)
                 }
-                .allowsHitTesting(false)
+                ZStack(alignment: .topLeading) {
+                    Canvas { context, _ in
+                        for (index, graphic) in current.enumerated() where graphic.kind != "VISUAL_BUTTON" {
+                            draw(graphic, active: isActive[index], in: &context)
+                        }
+                    }
+                    .allowsHitTesting(false)
 
-                ForEach(Array(graphics.enumerated()), id: \.offset) { _, graphic in
-                    if graphic.kind == "VISUAL_BUTTON" {
-                        MaraflowVisualButton(model: model, graphic: graphic, grid: grid)
+                    ForEach(Array(current.enumerated()), id: \.offset) { _, graphic in
+                        if graphic.kind == "VISUAL_BUTTON" {
+                            MaraflowVisualButton(model: model, graphic: graphic, grid: grid)
+                        }
                     }
                 }
             }

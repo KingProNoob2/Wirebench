@@ -31,6 +31,7 @@ struct LiveValuesLayer: View {
     /// a viewport that is getting smaller is already covered. Without this every frame of a sidebar or window resize was
     /// a new size, and so a redraw of every visible pin.
     @State private var drawnSize: CGSize = .zero
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         // Read here, so a pan, a zoom or a tick re-evaluates this view — and only the canvas redraws when it must.
@@ -41,7 +42,7 @@ struct LiveValuesLayer: View {
             // Half of it again on every side, so a shift reveals rows that are already drawn.
             let margin = CGSize(width: size.width / 2, height: size.height / 2)
             let base = anchor ?? pan
-            LiveValuesCanvas(zoom: zoom, anchor: base, margin: margin, modules: modules, snapshots: snapshots, drags: drags)
+            LiveValuesCanvas(zoom: zoom, anchor: base, margin: margin, modules: modules, snapshots: snapshots, drags: drags, colorScheme: colorScheme)
                 .equatable()
                 .frame(width: size.width + margin.width * 2, height: size.height + margin.height * 2)
                 .offset(x: pan.width - base.width - margin.width, y: pan.height - base.height - margin.height)
@@ -82,6 +83,7 @@ struct LiveValuesCanvas: View, Equatable {
     let modules: [PCCModule]
     let snapshots: [Int: BlockSnapshot]
     let drags: [Int: CGSize]
+    var colorScheme: ColorScheme = .dark
 
     /// Whether a pan has moved far enough from what was drawn that the drawing has to be made again.
     ///
@@ -96,19 +98,21 @@ struct LiveValuesCanvas: View, Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.zoom == rhs.zoom && lhs.anchor == rhs.anchor && lhs.margin == rhs.margin
             && lhs.modules == rhs.modules && lhs.snapshots == rhs.snapshots && lhs.drags == rhs.drags
+            && lhs.colorScheme == rhs.colorScheme
     }
 
     var body: some View {
         let zoom = zoom, anchor = anchor, margin = margin
-        let modules = modules, snapshots = snapshots, drags = drags
+        let modules = modules, snapshots = snapshots, drags = drags, colorScheme = colorScheme
         return Canvas { context, size in
             let pan = CGSize(width: anchor.width + margin.width, height: anchor.height + margin.height)
-            Self.draw(in: &context, size: size, zoom: zoom, pan: pan, modules: modules, snapshots: snapshots, drags: drags)
+            Self.draw(in: &context, size: size, zoom: zoom, pan: pan, modules: modules, snapshots: snapshots, drags: drags, colorScheme: colorScheme)
         }
     }
 
+    @MainActor
     private static func draw(in context: inout GraphicsContext, size: CGSize, zoom: CGFloat, pan: CGSize,
-                             modules: [PCCModule], snapshots: [Int: BlockSnapshot], drags: [Int: CGSize]) {
+                             modules: [PCCModule], snapshots: [Int: BlockSnapshot], drags: [Int: CGSize], colorScheme: ColorScheme) {
         guard zoom > 0 else { return }
         context.translateBy(x: pan.width, y: pan.height)
         context.scaleBy(x: zoom, y: zoom)
@@ -119,36 +123,63 @@ struct LiveValuesCanvas: View, Equatable {
                           width: ModuleCardView.cardWidth(for: module), height: ModuleCardView.cardHeight(for: module))
         }
         let top = CardGeometry.Metrics.headerHeight + CardGeometry.Metrics.bodyTopPadding
-        for (index, module) in modules.enumerated() where frames[index].intersects(visible) && ModuleCardView.drawsRowsInLayer(module) {
+
+        var globalHighBeads = Path()
+        var globalIdleFill = Path()
+        var globalIdleStroke = Path()
+
+        for index in modules.indices {
             let frame = frames[index]
-            let snapshot = snapshots[module.id]
-            let inputValues = snapshot?.inValues ?? module.inPins.map(\.value)
-            let outputValues = snapshot?.outValues ?? module.outPins.map(\.value)
-            let inputs = (0..<module.inPins.count).map {
-                PinRows.row(inputValues, $0, label: ModulePinCatalog.inputPinLabel(for: module, index: $0), inputOf: module.guid)
-            }
-            let outputs = (0..<module.outPins.count).map {
-                PinRows.row(outputValues, $0, label: ModulePinCatalog.outputPinLabel(for: module, index: $0))
-            }
-            // The parameters are pins too: rows under the inputs, with their live value (`Set` writes one at run time).
-            let paramValues = snapshot?.paramValues ?? module.paramPins.map(\.value)
-            let params = (0..<module.paramPins.count).map { index -> PinRows.Row in
-                var row = PinRows.row(paramValues, index, label: ModulePinCatalog.paramPinLabel(for: module, index: index))
-                row = PinRows.Row(label: row.label, valueText: row.valueText, isHigh: false, isParam: true)
-                return row
+            guard frame.intersects(visible) else { continue }
+            let module = modules[index]
+            guard ModuleCardView.drawsRowsInLayer(module) else { continue }
+
+            // Whatever a later card covers of this one is not drawn. Avoid array allocation unless an overlap exists.
+            var clip: Path?
+            for later in (index + 1)..<frames.count where frames[later].intersects(frame) {
+                if clip == nil {
+                    clip = Path(frame.insetBy(dx: -40, dy: -40))
+                }
+                clip!.addPath(Path(roundedRect: frames[later], cornerRadius: Theme.cardRadius, style: .continuous))
             }
 
-            var card = context
-            // Whatever a later card covers of this one is not drawn.
-            let covering = frames[(index + 1)...].filter { $0.intersects(frame) }
-            if !covering.isEmpty {
-                var clip = Path(frame.insetBy(dx: -40, dy: -40))
-                for cover in covering { clip.addPath(Path(roundedRect: cover, cornerRadius: Theme.cardRadius, style: .continuous)) }
+            let origin = CGPoint(x: frame.minX + 6, y: frame.minY + top)
+            let width = frame.width - 12
+            let clickableOutputs = BlockInteraction.classify(module) == .pinToggles
+            let snapshot = snapshots[module.id]
+
+            if let clip {
+                var card = context
                 card.clip(to: clip, style: FillStyle(eoFill: true))
+                var cardHigh = Path()
+                var cardIdleFill = Path()
+                var cardIdleStroke = Path()
+                PinRows.drawModule(
+                    module, snapshot: snapshot, origin: origin, width: width,
+                    clickableOutputs: clickableOutputs, colorScheme: colorScheme,
+                    in: &card, highBeads: &cardHigh, idleBeadsFill: &cardIdleFill, idleBeadsStroke: &cardIdleStroke
+                )
+                strokeAndFillBeads(in: &card, high: cardHigh, idleFill: cardIdleFill, idleStroke: cardIdleStroke, colorScheme: colorScheme)
+            } else {
+                PinRows.drawModule(
+                    module, snapshot: snapshot, origin: origin, width: width,
+                    clickableOutputs: clickableOutputs, colorScheme: colorScheme,
+                    in: &context, highBeads: &globalHighBeads, idleBeadsFill: &globalIdleFill, idleBeadsStroke: &globalIdleStroke
+                )
             }
-            card.translateBy(x: frame.minX + 6, y: frame.minY + top)
-            PinRows.draw(in: &card, width: frame.width - 12, inputs: inputs + params, outputs: outputs, scale: 1,
-                         clickableOutputs: BlockInteraction.classify(module) == .pinToggles)
+        }
+
+        strokeAndFillBeads(in: &context, high: globalHighBeads, idleFill: globalIdleFill, idleStroke: globalIdleStroke, colorScheme: colorScheme)
+    }
+
+    private static func strokeAndFillBeads(in context: inout GraphicsContext, high: Path, idleFill: Path, idleStroke: Path, colorScheme: ColorScheme) {
+        if !high.isEmpty {
+            context.fill(high, with: .color(Theme.signalHigh))
+            context.stroke(high, with: .color(Theme.pinBeadHighStroke(for: colorScheme)), lineWidth: 0.5)
+        }
+        if !idleFill.isEmpty {
+            context.fill(idleFill, with: .color(Theme.pinBeadIdleFill(for: colorScheme)))
+            context.stroke(idleStroke, with: .color(Theme.pinBeadIdleStroke(for: colorScheme)), lineWidth: 0.5)
         }
     }
 }

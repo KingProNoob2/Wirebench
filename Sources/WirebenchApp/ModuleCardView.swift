@@ -85,6 +85,7 @@ public struct ModuleCardView: View, Equatable {
     @State private var renameDraft: String = ""
     @FocusState private var isRenameFocused: Bool
     @State private var hoveredPinIndex: Int?
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(
         module: PCCModule,
@@ -217,13 +218,15 @@ public struct ModuleCardView: View, Equatable {
         .cardSurface(
             cornerRadius: Theme.cardRadius * s,
             tint: isSelected ? tint : nil,
-            tintOpacity: isSelected ? 0.22 : 0.10
+            tintOpacity: isSelected ? 0.22 : 0.10,
+            shadowColor: Theme.cardShadow(for: colorScheme, isSelected: isSelected),
+            shadowRadius: (isSelected ? 9 : 4) * s,
+            shadowY: (isSelected ? 4 : 2) * s
         )
         .overlay {
-            cardShape.strokeBorder(
-                isSelected ? tint.opacity(0.95) : Color.clear,
-                lineWidth: 1.8 * s
-            )
+            if isSelected {
+                cardShape.strokeBorder(tint.opacity(0.95), lineWidth: 1.8 * s)
+            }
         }
         .overlay {
             // Search highlight. Drawn with its own glow so it reads even on a card that is also
@@ -234,7 +237,6 @@ public struct ModuleCardView: View, Equatable {
                     .shadow(color: Theme.searchHighlight.opacity(0.6), radius: 5 * s)
             }
         }
-        .shadow(color: Theme.softShadow, radius: (isSelected ? 9 : 4) * s, x: 0, y: (isSelected ? 4 : 2) * s)
         .scaleEffect(1.0 / s)
         .frame(width: cardWidth, height: cardHeight)
         .animation(.easeOut(duration: 0.14), value: isSelected)
@@ -249,7 +251,7 @@ public struct ModuleCardView: View, Equatable {
             if isMacroCaller {
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 8 * s, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(colorScheme == .dark ? tint : Color.primary.opacity(0.78))
             }
             if isRenaming {
                 TextField("", text: $renameDraft)
@@ -273,15 +275,15 @@ public struct ModuleCardView: View, Equatable {
             Spacer(minLength: 2 * s)
             Text("#\(module.order)")
                 .font(.system(size: 7.5 * s, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.pinSecondaryText(for: colorScheme))
         }
         .padding(.horizontal, 8 * s)
         .frame(height: Metrics.headerHeight * s)
-        .background(tint.opacity(0.22))
+        .background(tint.opacity(colorScheme == .dark ? 0.30 : 0.24))
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.primary.opacity(0.10))
-                .frame(height: 0.5 * s)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.16))
+                .frame(height: max(0.5, 0.75 * s))
         }
         .contentShape(Rectangle())
         // Simultaneous, not an `onTapGesture(count: 2)` / `onTapGesture` pair: that pair makes the single tap
@@ -374,7 +376,7 @@ public struct ModuleCardView: View, Equatable {
                 .lineLimit(1)
             Text(text(for: current))
                 .font(.system(size: 7.5 * s, weight: isHigh ? .bold : .regular, design: .monospaced))
-                .foregroundStyle(isHigh ? Theme.signalHigh : Color.secondary)
+                .foregroundStyle(isHigh ? Theme.signalHigh : Theme.pinSecondaryText(for: colorScheme))
                 .lineLimit(1)
         }
         .frame(height: Metrics.pinRowHeight * s)
@@ -392,7 +394,7 @@ public struct ModuleCardView: View, Equatable {
         return HStack(spacing: 3 * s) {
             Text(text(for: current))
                 .font(.system(size: 7.5 * s, weight: isHigh ? .bold : .regular, design: .monospaced))
-                .foregroundStyle(isHigh ? Theme.signalHigh : Color.secondary)
+                .foregroundStyle(isHigh ? Theme.signalHigh : Theme.pinSecondaryText(for: colorScheme))
                 .lineLimit(1)
             Text(label)
                 .font(.system(size: 7.5 * s, weight: .semibold, design: .monospaced))
@@ -498,12 +500,16 @@ public struct ModuleCardView: View, Equatable {
         }
         .background {
             RoundedRectangle(cornerRadius: Theme.chipRadius * s, style: .continuous)
-                .fill(isHigh ? Theme.signalHigh.opacity(0.30) : Color.primary.opacity(0.10))
+                .fill(isHigh
+                    ? Theme.signalHigh.opacity(colorScheme == .dark ? 0.34 : 0.24)
+                    : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)))
         }
         .overlay {
             RoundedRectangle(cornerRadius: Theme.chipRadius * s, style: .continuous)
                 .strokeBorder(
-                    isHigh ? Theme.signalHigh.opacity(0.65) : Color.primary.opacity(0.18),
+                    isHigh
+                        ? Theme.signalHigh.opacity(0.80)
+                        : (colorScheme == .dark ? Color.white.opacity(0.28) : Color.black.opacity(0.26)),
                     lineWidth: 0.75 * s
                 )
         }
@@ -535,14 +541,14 @@ public struct ModuleCardView: View, Equatable {
                 .padding(.vertical, 2.5 * s)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(tint)
+            .foregroundStyle(colorScheme == .dark ? tint : Color.primary)
             .background {
                 RoundedRectangle(cornerRadius: Theme.chipRadius * s, style: .continuous)
-                    .fill(tint.opacity(0.16))
+                    .fill(tint.opacity(colorScheme == .dark ? 0.20 : 0.18))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.chipRadius * s, style: .continuous)
-                    .strokeBorder(tint.opacity(0.35), lineWidth: 0.75 * s)
+                    .strokeBorder(tint.opacity(colorScheme == .dark ? 0.48 : 0.55), lineWidth: 0.75 * s)
             }
             .padding(.horizontal, 4 * s)
             .padding(.vertical, 2 * s)
@@ -681,6 +687,64 @@ enum PinRows {
     private static var rowHeight: CGFloat { CardGeometry.Metrics.pinRowHeight }
     private static var rowSpacing: CGFloat { CardGeometry.Metrics.pinRowSpacing }
 
+    @MainActor
+    private static var resolvedCache: [TextCacheKey: CachedText] = [:]
+
+    private struct TextCacheKey: Hashable {
+        let label: String
+        let value: String
+        let scale: CGFloat
+        let isHigh: Bool
+        let isInput: Bool
+        let isDark: Bool
+    }
+
+    private struct CachedText {
+        let resolved: GraphicsContext.ResolvedText
+        var measuredWidth: CGFloat?
+    }
+
+    @MainActor
+    private static func cachedText(
+        label: String,
+        value: String,
+        scale s: CGFloat,
+        isHigh: Bool,
+        isInput: Bool,
+        colorScheme: ColorScheme,
+        context: GraphicsContext,
+        measureWidth: Bool = false
+    ) -> (resolved: GraphicsContext.ResolvedText, width: CGFloat) {
+        let key = TextCacheKey(label: label, value: value, scale: s, isHigh: isHigh, isInput: isInput, isDark: colorScheme == .dark)
+        if var hit = resolvedCache[key] {
+            if measureWidth && hit.measuredWidth == nil {
+                let w = hit.resolved.measure(in: CGSize(width: 1000, height: 100)).width
+                hit.measuredWidth = w
+                resolvedCache[key] = hit
+                return (hit.resolved, w)
+            }
+            return (hit.resolved, hit.measuredWidth ?? 0)
+        }
+        let labelText = Text(label)
+            .font(.system(size: 7.5 * s, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Theme.pinPrimaryText(for: colorScheme))
+        let spacerText = Text(" ")
+            .font(.system(size: 5 * s, design: .monospaced))
+        let valueText = Text(value)
+            .font(.system(size: 7.5 * s, weight: isHigh ? .bold : .regular, design: .monospaced))
+            .foregroundStyle(isHigh ? Theme.signalHigh : Theme.pinSecondaryText(for: colorScheme))
+        let combined = isInput
+            ? (labelText + spacerText + valueText)
+            : (valueText + spacerText + labelText)
+        let resolved = context.resolve(combined)
+        let w = measureWidth ? resolved.measure(in: CGSize(width: 1000, height: 100)).width : nil
+        if resolvedCache.count > 2048 {
+            resolvedCache.removeAll(keepingCapacity: true)
+        }
+        resolvedCache[key] = CachedText(resolved: resolved, measuredWidth: w)
+        return (resolved, w ?? 0)
+    }
+
     /// The rows' height at `scale`: the taller of the two columns.
     static func height(inputs: Int, outputs: Int, scale: CGFloat) -> CGFloat {
         let count = max(inputs, outputs)
@@ -698,53 +762,139 @@ enum PinRows {
         return Row(label: label, valueText: text, isHigh: current.asBool)
     }
 
-    private static func label(_ row: Row, _ context: GraphicsContext, _ s: CGFloat) -> GraphicsContext.ResolvedText {
-        context.resolve(Text(row.label).font(.system(size: 7.5 * s, weight: .semibold, design: .monospaced)).foregroundStyle(.primary))
+    private static func valueString(_ current: PinValue, index: Int, inputOf guid: UUID? = nil) -> (text: String, isHigh: Bool) {
+        if case .undefined = current { return ("\u{2013}", false) }
+        let text = guid.map { PinDisplay.inputText(current, index: index, guid: $0) } ?? current.description
+        return (text, current.asBool)
     }
 
-    private static func value(_ row: Row, _ context: GraphicsContext, _ s: CGFloat) -> GraphicsContext.ResolvedText {
-        context.resolve(Text(row.valueText)
-            .font(.system(size: 7.5 * s, weight: row.isHigh ? .bold : .regular, design: .monospaced))
-            .foregroundStyle(row.isHigh ? Theme.signalHigh : Color.secondary))
-    }
-
-    private static func measure(_ text: GraphicsContext.ResolvedText) -> CGFloat {
-        text.measure(in: CGSize(width: 1000, height: 100)).width
-    }
-
-    private static func bead(_ context: inout GraphicsContext, centreX: CGFloat, centreY: CGFloat, isHigh: Bool, _ s: CGFloat) {
+    private static func bead(_ context: inout GraphicsContext, centreX: CGFloat, centreY: CGFloat, isHigh: Bool, _ s: CGFloat, colorScheme: ColorScheme) {
         let rect = CGRect(x: centreX - 3 * s, y: centreY - 3 * s, width: 6 * s, height: 6 * s)
-        context.fill(Path(ellipseIn: rect), with: .color(isHigh ? Theme.signalHigh : Color.primary.opacity(0.18)))
+        context.fill(Path(ellipseIn: rect), with: .color(isHigh ? Theme.signalHigh : Theme.pinBeadIdleFill(for: colorScheme)))
         context.stroke(Path(ellipseIn: rect.insetBy(dx: 0.25 * s, dy: 0.25 * s)),
-                       with: .color(isHigh ? Color.white.opacity(0.50) : Color.primary.opacity(0.16)), lineWidth: 0.5 * s)
+                       with: .color(isHigh ? Theme.pinBeadHighStroke(for: colorScheme) : Theme.pinBeadIdleStroke(for: colorScheme)), lineWidth: 0.5 * s)
     }
 
     /// Draws the rows with their top-left corner at the context's origin, `width` wide.
-    static func draw(in context: inout GraphicsContext, width: CGFloat, inputs: [Row], outputs: [Row], scale s: CGFloat, clickableOutputs: Bool) {
+    @MainActor
+    static func draw(in context: inout GraphicsContext, width: CGFloat, inputs: [Row], outputs: [Row], scale s: CGFloat, clickableOutputs: Bool, colorScheme: ColorScheme = .dark) {
         let pitch = (rowHeight + rowSpacing) * s
+        let labelX = 14 * s
+        let right = width - (clickableOutputs ? 3 * s : 0)
+        let labelRight = right - 14 * s
         for (index, row) in inputs.enumerated() {
             let centreY = CGFloat(index) * pitch + rowHeight * s / 2
-            let name = label(row, context, s)
-            let valueText = value(row, context, s)
-            let labelX = 11 * s + 3 * s
+            let entry = cachedText(label: row.label, value: row.valueText, scale: s, isHigh: row.isHigh,
+                                   isInput: true, colorScheme: colorScheme, context: context, measureWidth: row.isParam)
             if row.isParam {
                 // The shaded cell Dirigo gives a parameter pin, as wide as the row's content.
-                let cell = CGRect(x: 0, y: centreY - rowHeight * s / 2, width: labelX + measure(name) + 3 * s + measure(valueText) + 5 * s,
-                                  height: rowHeight * s)
-                context.fill(Path(roundedRect: cell, cornerRadius: 3 * s, style: .continuous), with: .color(Color.primary.opacity(0.09)))
+                let cell = CGRect(x: 0, y: centreY - rowHeight * s / 2, width: labelX + entry.width + 5 * s, height: rowHeight * s)
+                let paramFill = colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.09)
+                context.fill(Path(roundedRect: cell, cornerRadius: 3 * s, style: .continuous), with: .color(paramFill))
             }
-            bead(&context, centreX: 5.5 * s, centreY: centreY, isHigh: row.isHigh, s)
-            context.draw(name, at: CGPoint(x: labelX, y: centreY), anchor: .leading)
-            context.draw(valueText, at: CGPoint(x: labelX + measure(name) + 3 * s, y: centreY), anchor: .leading)
+            bead(&context, centreX: 5.5 * s, centreY: centreY, isHigh: row.isHigh, s, colorScheme: colorScheme)
+            context.draw(entry.resolved, at: CGPoint(x: labelX, y: centreY), anchor: .leading)
         }
         for (index, row) in outputs.enumerated() {
             let centreY = CGFloat(index) * pitch + rowHeight * s / 2
-            let right = width - (clickableOutputs ? 3 * s : 0)
-            let name = label(row, context, s)
-            bead(&context, centreX: right - 5.5 * s, centreY: centreY, isHigh: row.isHigh, s)
-            let labelRight = right - 11 * s - 3 * s
-            context.draw(name, at: CGPoint(x: labelRight, y: centreY), anchor: .trailing)
-            context.draw(value(row, context, s), at: CGPoint(x: labelRight - measure(name) - 3 * s, y: centreY), anchor: .trailing)
+            bead(&context, centreX: right - 5.5 * s, centreY: centreY, isHigh: row.isHigh, s, colorScheme: colorScheme)
+            let entry = cachedText(label: row.label, value: row.valueText, scale: s, isHigh: row.isHigh,
+                                   isInput: false, colorScheme: colorScheme, context: context)
+            context.draw(entry.resolved, at: CGPoint(x: labelRight, y: centreY), anchor: .trailing)
+        }
+    }
+
+    /// Zero-allocation path used by `LiveValuesLayer`: draws a module's pins directly from its snapshot and
+    /// accumulates non-clipped beads into shared paths so all beads stroke/fill in a handful of draw calls.
+    @MainActor
+    static func drawModule(
+        _ module: PCCModule,
+        snapshot: BlockSnapshot?,
+        origin: CGPoint,
+        width: CGFloat,
+        clickableOutputs: Bool,
+        colorScheme: ColorScheme,
+        in context: inout GraphicsContext,
+        highBeads: inout Path,
+        idleBeadsFill: inout Path,
+        idleBeadsStroke: inout Path
+    ) {
+        let pitch = rowHeight + rowSpacing
+        let labelX = origin.x + 14
+        let right = origin.x + width - (clickableOutputs ? 3 : 0)
+        let labelRight = right - 14
+        let inCount = module.inPins.count
+        let snapIn = snapshot?.inValues
+        let snapParam = snapshot?.paramValues
+        let snapOut = snapshot?.outValues
+
+        for index in 0..<inCount {
+            let centreY = origin.y + CGFloat(index) * pitch + rowHeight / 2
+            let val: PinValue
+            if let snapIn {
+                val = index < snapIn.count ? snapIn[index] : .undefined
+            } else {
+                val = module.inPins[index].value
+            }
+            let (valueText, isHigh) = valueString(val, index: index, inputOf: module.guid)
+            let label = ModulePinCatalog.inputPinLabel(for: module, index: index)
+            let rect = CGRect(x: origin.x + 2.5, y: centreY - 3, width: 6, height: 6)
+            if isHigh {
+                highBeads.addEllipse(in: rect)
+            } else {
+                idleBeadsFill.addEllipse(in: rect)
+                idleBeadsStroke.addEllipse(in: rect.insetBy(dx: 0.25, dy: 0.25))
+            }
+            let entry = cachedText(label: label, value: valueText, scale: 1, isHigh: isHigh,
+                                   isInput: true, colorScheme: colorScheme, context: context)
+            context.draw(entry.resolved, at: CGPoint(x: labelX, y: centreY), anchor: .leading)
+        }
+
+        let paramCount = module.paramPins.count
+        if paramCount > 0 {
+            let paramFill = colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.09)
+            for pIndex in 0..<paramCount {
+                let rowIndex = inCount + pIndex
+                let centreY = origin.y + CGFloat(rowIndex) * pitch + rowHeight / 2
+                let val: PinValue
+                if let snapParam {
+                    val = pIndex < snapParam.count ? snapParam[pIndex] : .undefined
+                } else {
+                    val = module.paramPins[pIndex].value
+                }
+                let (valueText, _) = valueString(val, index: pIndex)
+                let label = ModulePinCatalog.paramPinLabel(for: module, index: pIndex)
+                let entry = cachedText(label: label, value: valueText, scale: 1, isHigh: false,
+                                       isInput: true, colorScheme: colorScheme, context: context, measureWidth: true)
+                let cell = CGRect(x: origin.x, y: centreY - rowHeight / 2, width: 14 + entry.width + 5, height: rowHeight)
+                context.fill(Path(roundedRect: cell, cornerRadius: 3, style: .continuous), with: .color(paramFill))
+                let rect = CGRect(x: origin.x + 2.5, y: centreY - 3, width: 6, height: 6)
+                idleBeadsFill.addEllipse(in: rect)
+                idleBeadsStroke.addEllipse(in: rect.insetBy(dx: 0.25, dy: 0.25))
+                context.draw(entry.resolved, at: CGPoint(x: labelX, y: centreY), anchor: .leading)
+            }
+        }
+
+        for index in 0..<module.outPins.count {
+            let centreY = origin.y + CGFloat(index) * pitch + rowHeight / 2
+            let val: PinValue
+            if let snapOut {
+                val = index < snapOut.count ? snapOut[index] : .undefined
+            } else {
+                val = module.outPins[index].value
+            }
+            let (valueText, isHigh) = valueString(val, index: index)
+            let label = ModulePinCatalog.outputPinLabel(for: module, index: index)
+            let rect = CGRect(x: right - 8.5, y: centreY - 3, width: 6, height: 6)
+            if isHigh {
+                highBeads.addEllipse(in: rect)
+            } else {
+                idleBeadsFill.addEllipse(in: rect)
+                idleBeadsStroke.addEllipse(in: rect.insetBy(dx: 0.25, dy: 0.25))
+            }
+            let entry = cachedText(label: label, value: valueText, scale: 1, isHigh: isHigh,
+                                   isInput: false, colorScheme: colorScheme, context: context)
+            context.draw(entry.resolved, at: CGPoint(x: labelRight, y: centreY), anchor: .trailing)
         }
     }
 }
@@ -803,14 +953,11 @@ private struct PinTaps: ViewModifier {
             }
             .contentShape(Rectangle())
             .onTapGesture(count: 1, coordinateSpace: .local) { location in tap(at: location) }
-            .onContinuousHover { phase in
-                guard clickableOutputs else { return }
-                switch phase {
-                case .active(let point): hoveredOutput = outputRow(at: point)
-                case .ended: hoveredOutput = nil
-                }
-            }
-            .help(clickableOutputs ? "Click to toggle this input" : "")
+            .modifier(ClickableOutputHover(
+                enabled: clickableOutputs,
+                outputRowAt: outputRow(at:),
+                hoveredOutput: $hoveredOutput
+            ))
     }
 
     /// The row at height `y`, if it is on a row and not in the gap between two.
@@ -834,5 +981,26 @@ private struct PinTaps: ViewModifier {
     private func tap(at location: CGPoint) {
         if let index = inputRow(at: location) { onToggle(index); return }
         if let index = outputRow(at: location) { onToggle(index) }
+    }
+}
+
+private struct ClickableOutputHover: ViewModifier {
+    let enabled: Bool
+    let outputRowAt: (CGPoint) -> Int?
+    @Binding var hoveredOutput: Int?
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point): hoveredOutput = outputRowAt(point)
+                    case .ended: hoveredOutput = nil
+                    }
+                }
+                .help("Click to toggle this input")
+        } else {
+            content
+        }
     }
 }

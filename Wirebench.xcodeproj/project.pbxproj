@@ -10,6 +10,7 @@
 		01642D257273433E82D194D3 /* PLCConfigurationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2002CE84CA8326D87EE2455C /* PLCConfigurationView.swift */; };
 		034C75A87F4985B069AADE8D /* PLCSymbolTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5524CBA5F6C3A016ED4428 /* PLCSymbolTable.swift */; };
 		03CCD7814185BBBBE4229A45 /* PhysicalIOBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99ADDD8902B2402419EB1497 /* PhysicalIOBlocks.swift */; };
+		03E021DE30A8647500186560 /* WireRouterOptimizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03E021DD30A8647500186560 /* WireRouterOptimizationTests.swift */; };
 		047E56E75E70BB4568DF2184 /* SourceParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DD871E4532E1E7C71B4FEC /* SourceParser.swift */; };
 		048A0AF615FBBC83EBF80019 /* SerializerCoordinateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38DA5B3CDD515265E062DBCB /* SerializerCoordinateTests.swift */; };
 		04B7A007D98F61602ED1476E /* AdvancedLogicAndBitBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4C71BB4552209B636940AB /* AdvancedLogicAndBitBlocks.swift */; };
@@ -547,6 +548,7 @@
 		01AE20A7140E95FDA4EDD4FA /* MaraflowExtrasInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowExtrasInspector.swift; sourceTree = "<group>"; };
 		01C85640D716ACA029392E58 /* PLCUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCUploader.swift; sourceTree = "<group>"; };
 		033177646C9EE6A072CE589F /* ProgramTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramTableTests.swift; sourceTree = "<group>"; };
+		03E021DD30A8647500186560 /* WireRouterOptimizationTests.swift */ = {isa = PBXFileReference; path = WireRouterOptimizationTests.swift; sourceTree = "<group>"; };
 		041B14FEB87342AB021FC91C /* AgentPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanelView.swift; sourceTree = "<group>"; };
 		04254240CA93E4024D4F54D5 /* PinChain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinChain.swift; sourceTree = "<group>"; };
 		06EE0047361C84F4BB3114E2 /* SwiftIDEView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftIDEView.swift; sourceTree = "<group>"; };
@@ -611,7 +613,7 @@
 		428A92865C6701E249926280 /* PLCConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCConfiguration.swift; sourceTree = "<group>"; };
 		4340CA34CCD3A3828DEE3361 /* SegmentDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentDisplayView.swift; sourceTree = "<group>"; };
 		43D184DB9E0227CD26EF5045 /* MaraflowPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowPaletteTests.swift; sourceTree = "<group>"; };
-		463F8B9E940072B65C7F72DF /* WirebenchCLI */ = {isa = PBXFileReference; includeInIndex = 0; path = WirebenchCLI; sourceTree = BUILT_PRODUCTS_DIR; };
+		463F8B9E940072B65C7F72DF /* WirebenchCLI */ = {isa = PBXFileReference; includeInIndex = 0; name = WirebenchCLI; path = "wirebench-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
 		47A824BCC5A9588423C46774 /* PlayLoopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayLoopTests.swift; sourceTree = "<group>"; };
 		49B56CB5D6ED2D0A9ED16C35 /* D3NetBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D3NetBlocks.swift; sourceTree = "<group>"; };
 		49BDBFA29CD7EE9AAB113E91 /* PinDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinDisplay.swift; sourceTree = "<group>"; };
@@ -1073,6 +1075,7 @@
 				3E5EE4E61E054E304A3B715A /* WirebenchTests.swift */,
 				B189D4E97A42CDF6624C42E8 /* WireSelectionTests.swift */,
 				5044D9AE24E00C9BA1E994BA /* WiringTests.swift */,
+				03E021DD30A8647500186560 /* WireRouterOptimizationTests.swift */,
 			);
 			path = WirebenchTests;
 			sourceTree = "<group>";
@@ -1218,14 +1221,6 @@
 				AD4CE7E9DC87C7B360E4C94A /* SecretStore.swift */,
 			);
 			path = Agent;
-			sourceTree = "<group>";
-		};
-		"TEMP_98759E14-00D4-48D8-846E-6651EBDA644A" /* Wirebench */ = {
-			isa = PBXGroup;
-			children = (
-				1A521C0652DDE7C0AFB37D41 /* Release.xcconfig */,
-			);
-			path = Wirebench;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1861,6 +1856,7 @@
 				2174936E5A01476290C3A582 /* RecoveryTests.swift in Sources */,
 				CB860994ED4BF36BA56A5849 /* RobustnessTests.swift in Sources */,
 				191116F1327F748B7680A65A /* SchedulingEditTests.swift in Sources */,
+				03E021DE30A8647500186560 /* WireRouterOptimizationTests.swift in Sources */,
 				EA50C70E0E39CFC351CC06EE /* SchemaConformanceTests.swift in Sources */,
 				53349133200F91397DE35BB3 /* SelectionResetTests.swift in Sources */,
 				5802CCEEF19FFC2254271652 /* SelfWiringTests.swift in Sources */,

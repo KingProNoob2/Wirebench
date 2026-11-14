@@ -7,6 +7,7 @@ import WirebenchLibrary
 
 public struct CanvasView: View {
     @Bindable var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     /// Live drag translation per module, applied on top of the model position until the drag ends.
     @State private var dragOffsets: [Int: CGSize] = [:]
     /// The wire currently being dragged, if any. `nil` means no wiring in progress.
@@ -98,17 +99,18 @@ public struct CanvasView: View {
                         }
 
                     if let project = model.project {
+                        let page = pageData(for: project)
                         // The pan and the zoom are read inside `SheetTransform`, not here: a body that read them
                         // would be rebuilt — every card, wire and shape of the schematic — at each step of a pan.
                         SheetTransform(model: model) {
-                            schematic(for: project)
-                                .frame(width: contentSize(for: project).width,
-                                       height: contentSize(for: project).height,
+                            schematic(for: project, page: page)
+                                .frame(width: page.contentSize.width,
+                                       height: page.contentSize.height,
                                        alignment: .topLeading)
                         }
 
                         // The pin values, drawn over the cards in one canvas; see `LiveValuesLayer`.
-                        liveValues(for: project)
+                        LiveValuesLayer(model: model, modules: page.modules, dragOffsets: dragOffsets)
 
                         if let pending = pendingWire {
                             wirePreview(pending, in: project)
@@ -245,16 +247,69 @@ public struct CanvasView: View {
                       height: max(900, maxY + 500))
     }
 
+    private struct PageData {
+        let modules: [PCCModule]
+        let moduleIds: Set<Int>
+        let byId: [Int: PCCModule]
+        let runtimeInfo: PageRuntimeInfo?
+        let contentSize: CGSize
+    }
+
+    private func pageData(for project: PCCProject) -> PageData {
+        let selected = model.selectedPage
+        var pageModules: [PCCModule] = []
+        var pageIds: Set<Int> = []
+        var byId: [Int: PCCModule] = [:]
+        byId.reserveCapacity(project.modules.count)
+        var runtimeModule: PCCModule?
+        var maxX: Double = 0
+        var maxY: Double = 0
+
+        for module in project.modules {
+            byId[module.id] = module
+            guard module.page == selected else { continue }
+            if BlockRole.isMaraflowPageRuntime(module) {
+                if runtimeModule == nil { runtimeModule = module }
+                continue
+            }
+            pageModules.append(module)
+            pageIds.insert(module.id)
+            maxX = max(maxX, module.x + Double(ModuleCardView.cardWidth(for: module)))
+            maxY = max(maxY, module.y + Double(ModuleCardView.cardHeight(for: module)))
+        }
+
+        if let extras = project.maraflow {
+            let index = project.pages.firstIndex { $0.caption == selected } ?? 0
+            for graphic in extras.graphics(onPageIndex: index) {
+                let x1 = Double(graphic.gridX) * 32
+                let y1 = Double(graphic.gridY) * 32
+                let x2 = Double(graphic.gridX + graphic.gridW) * 32
+                let y2 = Double(graphic.gridY + graphic.gridH) * 32
+                maxX = max(maxX, max(x1, x2))
+                maxY = max(maxY, max(y1, y2))
+            }
+        }
+        for graphic in project.graphics where graphic.page == selected {
+            for node in graphic.nodes {
+                maxX = max(maxX, node.x)
+                maxY = max(maxY, node.y)
+            }
+        }
+
+        let size = CGSize(width: max(1200, maxX + 600), height: max(900, maxY + 500))
+        return PageData(
+            modules: pageModules,
+            moduleIds: pageIds,
+            byId: byId,
+            runtimeInfo: runtimeModule.flatMap(pageRuntimeInfo(for:)),
+            contentSize: size
+        )
+    }
+
     @ViewBuilder
-
-    private func schematic(for project: PCCProject) -> some View {
-
-        let pageModules = project.modules.filter { $0.page == model.selectedPage && !BlockRole.isMaraflowPageRuntime($0) }
-        let pageModuleIds = Set(pageModules.map { $0.id })
-        let byId = Dictionary(project.modules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-
+    private func schematic(for project: PCCProject, page: PageData) -> some View {
         ZStack(alignment: .topLeading) {
-            containerRegions(pageModules)
+            containerRegions(page.modules)
 
             MaraflowGraphicsLayer(model: model, version: model.simulationVersion)
                 .allowsHitTesting(true)
@@ -264,8 +319,8 @@ public struct CanvasView: View {
             WireLayer(wires: wireLayout.wires(project: project,
                                               selectedPage: model.selectedPage,
                                               snapToGrid: model.snapToGrid,
-                                              pageModuleIds: pageModuleIds,
-                                              modulesById: byId,
+                                              pageModuleIds: page.moduleIds,
+                                              modulesById: page.byId,
                                               dragOffsets: dragOffsets,
                                               snapshots: model.snapshots),
                       picked: model.selectedWire,
@@ -283,8 +338,8 @@ public struct CanvasView: View {
             // which pushed cards hundreds of points away from their model position (most of them
             // off-screen). The cards are independent panes rather than a merging cluster, so the
             // container buys nothing here.
-            moduleLayer(pageModules)
-            if let runtime = pageRuntimeInfo(project) {
+            moduleLayer(page.modules, pageIds: page.moduleIds)
+            if let runtime = page.runtimeInfo {
                 let offset = pageRuntimeOffsets[model.selectedPage] ?? .zero
                 MaraflowPageRuntimeCard(kind: runtime.kind, detail: runtime.detail, code: runtime.code)
                     .position(x: 300 + offset.width, y: 190 + offset.height)
@@ -311,28 +366,22 @@ public struct CanvasView: View {
 
     /// A Maraflow ST/LD page has no ordinary blocks; it carries one hidden runtime module. Explain the empty sheet
     /// instead of drawing that module as a card.
-    private func pageRuntimeInfo(_ project: PCCProject) -> PageRuntimeInfo? {
-        let modules = project.modules.filter { $0.page == model.selectedPage }
-        if let st = modules.first(where: { $0.guid == MaraflowStPage.guid }) {
-            let code = st.rawAttributes["MARAFLOW_ST_CODE"] ?? ""
+    private func pageRuntimeInfo(for module: PCCModule) -> PageRuntimeInfo? {
+        if module.guid == MaraflowStPage.guid {
+            let code = module.rawAttributes["MARAFLOW_ST_CODE"] ?? ""
             let lines = code.split(separator: "\n", omittingEmptySubsequences: false).count
             return PageRuntimeInfo(kind: "Structured Text page",
                                    detail: "Executed by the native ST interpreter · \(lines) line\(lines == 1 ? "" : "s")",
                                    code: code)
         }
-        if let ld = modules.first(where: { $0.guid == MaraflowLdPage.guid }) {
-            let rungs = (ld.rawAttributes["MARAFLOW_LD_RUNGS"] ?? "")
+        if module.guid == MaraflowLdPage.guid {
+            let rungs = (module.rawAttributes["MARAFLOW_LD_RUNGS"] ?? "")
                 .split(separator: "\n").filter { $0.hasPrefix("R") }.count
             return PageRuntimeInfo(kind: "Ladder page",
                                    detail: "Executed by the native ladder evaluator · \(rungs) rung\(rungs == 1 ? "" : "s")",
                                    code: "")
         }
         return nil
-    }
-
-    /// The live pin values drawn over the cards. A function of its own, to keep `body` within the type-checker's budget.
-    private func liveValues(for project: PCCProject) -> some View {
-        LiveValuesLayer(model: model, modules: project.modules.filter { $0.page == model.selectedPage && !BlockRole.isMaraflowPageRuntime($0) }, dragOffsets: dragOffsets)
     }
 
     /// Converts a gesture location into canvas content coordinates.
@@ -420,36 +469,38 @@ public struct CanvasView: View {
     /// A dashed frame and label behind the blocks of each branch of each container on the page.
     @ViewBuilder
     private func containerRegions(_ pageModules: [PCCModule]) -> some View {
-        ForEach(pageModules.filter(ConstructContainers.isContainer), id: \.id) { owner in
-            ForEach(ConstructContainers.arms(of: owner), id: \.id) { arm in
-                let frames = pageModules
-                    .filter { $0.rawAttributes["IN_CONTAINER"] == "\(owner.id)" && $0.rawAttributes["ARM"] == arm.id }
-                    // Where the cards are drawn, drag included, so the frame moves with them.
-                    .map { CGRect(x: $0.x + (dragOffsets[$0.id]?.width ?? 0), y: $0.y + (dragOffsets[$0.id]?.height ?? 0),
-                                  width: ModuleCardView.cardWidth(for: $0), height: ModuleCardView.cardHeight(for: $0)) }
-                if let first = frames.first {
-                    let box = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -14, dy: -22)
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Theme.tint(forCategory: "Main"), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                        .background(Theme.tint(forCategory: "Main").opacity(0.05),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(alignment: .topLeading) {
-                            Text("\(owner.name) · \(arm.label)")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 10).padding(.top, 4)
-                        }
-                        .frame(width: box.width, height: box.height)
-                        .offset(x: box.minX, y: box.minY)
-                        .allowsHitTesting(false)
+        let containers = pageModules.filter(ConstructContainers.isContainer)
+        if !containers.isEmpty {
+            ForEach(containers, id: \.id) { owner in
+                ForEach(ConstructContainers.arms(of: owner), id: \.id) { arm in
+                    let frames = pageModules
+                        .filter { $0.rawAttributes["IN_CONTAINER"] == "\(owner.id)" && $0.rawAttributes["ARM"] == arm.id }
+                        // Where the cards are drawn, drag included, so the frame moves with them.
+                        .map { CGRect(x: $0.x + (dragOffsets[$0.id]?.width ?? 0), y: $0.y + (dragOffsets[$0.id]?.height ?? 0),
+                                      width: ModuleCardView.cardWidth(for: $0), height: ModuleCardView.cardHeight(for: $0)) }
+                    if let first = frames.first {
+                        let box = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -14, dy: -22)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Theme.tint(forCategory: "Main"), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                            .background(Theme.tint(forCategory: "Main").opacity(0.05),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(alignment: .topLeading) {
+                                Text("\(owner.name) · \(arm.label)")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 10).padding(.top, 4)
+                            }
+                            .frame(width: box.width, height: box.height)
+                            .offset(x: box.minX, y: box.minY)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func moduleLayer(_ pageModules: [PCCModule]) -> some View {
-        let pageIds = Set(pageModules.map(\.id))
+    private func moduleLayer(_ pageModules: [PCCModule], pageIds: Set<Int>) -> some View {
         // Follows the zoom in quarter steps; see `AppModel.cardRenderScale`.
         let renderScale = model.cardRenderScale
         // Read once for the whole layer rather than per card, so every card sees the same set.
@@ -462,6 +513,7 @@ public struct CanvasView: View {
                      mod: mod,
                      pageIds: pageIds,
                      renderScale: renderScale,
+                     colorScheme: colorScheme,
                      isSearchMatch: searchMatches.contains(mod.id),
                      isRenaming: model.renamingModuleId == mod.id,
                      isSelected: model.selectedModuleId == mod.id || model.selectedModuleIds.contains(mod.id),
@@ -648,10 +700,51 @@ struct WireLayer: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.wires == rhs.wires && lhs.picked == rhs.picked }
 
+    private struct StyleBucketKey: Hashable {
+        let isHigh: Bool
+        let isFeedback: Bool
+        let lineWidth: CGFloat
+    }
+
     var body: some View {
-        ZStack {
-            ForEach(wires, id: \.key) { wire in
-                WireShape(wire: wire, isPicked: wire.key == picked, onPick: onPick, onDelete: onDelete).equatable()
+        let batches = Self.batchedPaths(for: wires, picked: picked)
+        ZStack(alignment: .topLeading) {
+            if !batches.idleSolid.isEmpty {
+                batches.idleSolid
+                    .stroke(Theme.wireIdle, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                    .allowsHitTesting(false)
+            }
+            if !batches.idleDashed.isEmpty {
+                batches.idleDashed
+                    .stroke(Theme.wireIdle, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round, dash: [5, 4]))
+                    .allowsHitTesting(false)
+            }
+            if !batches.liveSolid.isEmpty {
+                batches.liveSolid
+                    .stroke(Theme.wireLive, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .allowsHitTesting(false)
+            }
+            if !batches.liveDashed.isEmpty {
+                batches.liveDashed
+                    .stroke(Theme.wireLive, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round, dash: [5, 4]))
+                    .allowsHitTesting(false)
+            }
+            ForEach(batches.custom, id: \.key) { bucket in
+                bucket.path
+                    .stroke(bucket.key.isHigh ? Theme.wireLive : Theme.wireIdle,
+                            style: StrokeStyle(lineWidth: bucket.key.lineWidth, lineCap: .round, lineJoin: .round,
+                                               dash: bucket.key.isFeedback ? [5, 4] : []))
+                    .allowsHitTesting(false)
+            }
+            if let pickedPath = batches.picked {
+                pickedPath.path
+                    .stroke(Color.accentColor,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round,
+                                               dash: pickedPath.isFeedback ? [5, 4] : []))
+                    .allowsHitTesting(false)
+            }
+            if onPick != nil || onDelete != nil {
+                WireHitView(wires: wires, onPick: onPick, onDelete: onDelete)
             }
         }
     }
@@ -660,50 +753,211 @@ struct WireLayer: View, Equatable {
     nonisolated static func path(for wire: RoutedWire) -> Path {
         Path(WireRouter.roundedPath(wire.points))
     }
+
+    @MainActor
+    private static var pathCache: [WirePointsKey: CGPath] = [:]
+
+    private struct WirePointsKey: Hashable {
+        let points: [CGPoint]
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.points == rhs.points
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(points.count)
+            for p in points {
+                hasher.combine(p.x.bitPattern)
+                hasher.combine(p.y.bitPattern)
+            }
+        }
+    }
+
+    @MainActor
+    private static func cachedCGPath(for wire: RoutedWire) -> CGPath {
+        let key = WirePointsKey(points: wire.points)
+        if let cached = pathCache[key] { return cached }
+        let cgPath = WireRouter.roundedPath(wire.points)
+        if pathCache.count > 2048 {
+            pathCache.removeAll(keepingCapacity: true)
+        }
+        pathCache[key] = cgPath
+        return cgPath
+    }
+
+    private struct BatchedPaths {
+        var idleSolid = Path()
+        var idleDashed = Path()
+        var liveSolid = Path()
+        var liveDashed = Path()
+        var custom: [(key: StyleBucketKey, path: Path)] = []
+        var picked: (path: Path, isFeedback: Bool)?
+    }
+
+    @MainActor
+    private static func batchedPaths(for wires: [RoutedWire], picked: RoutedWire.Key?) -> BatchedPaths {
+        var result = BatchedPaths()
+        var customIndices: [StyleBucketKey: Int] = [:]
+        for wire in wires {
+            let cgPath = cachedCGPath(for: wire)
+            if wire.key == picked {
+                result.picked = (Path(cgPath), wire.isFeedback)
+                continue
+            }
+            let baseWidth: CGFloat = wire.isHigh ? 1.8 : 1.2
+            let lineWidth = max(baseWidth, wire.width)
+            if lineWidth == baseWidth {
+                switch (wire.isHigh, wire.isFeedback) {
+                case (false, false): result.idleSolid.addPath(Path(cgPath))
+                case (false, true): result.idleDashed.addPath(Path(cgPath))
+                case (true, false): result.liveSolid.addPath(Path(cgPath))
+                case (true, true): result.liveDashed.addPath(Path(cgPath))
+                }
+            } else {
+                let bucketKey = StyleBucketKey(isHigh: wire.isHigh, isFeedback: wire.isFeedback, lineWidth: lineWidth)
+                if let idx = customIndices[bucketKey] {
+                    result.custom[idx].path.addPath(Path(cgPath))
+                } else {
+                    customIndices[bucketKey] = result.custom.count
+                    result.custom.append((bucketKey, Path(cgPath)))
+                }
+            }
+        }
+        return result
+    }
 }
 
-/// One wire: its stroke, and the wide invisible one that takes its right-click.
-///
-/// A view of its own, comparable on its route and look, so that a tick that changes the colour of a few wires
-/// re-evaluates those few and builds their paths — and not a path or two for every wire on the sheet, which is what one
-/// body over all of them did at every such tick.
-private struct WireShape: View, Equatable {
-    nonisolated let wire: RoutedWire
-    nonisolated let isPicked: Bool
+enum WireHitTesting {
+    static let defaultRadius: CGFloat = 7
+
+    struct Entry {
+        let key: RoutedWire.Key
+        let bounds: CGRect
+        let points: [CGPoint]
+    }
+
+    static func entries(from wires: [RoutedWire], radius: CGFloat = defaultRadius) -> [Entry] {
+        wires.compactMap { wire in
+            guard let first = wire.points.first else { return nil }
+            var minX = first.x, maxX = first.x
+            var minY = first.y, maxY = first.y
+            for p in wire.points.dropFirst() {
+                if p.x < minX { minX = p.x }
+                if p.x > maxX { maxX = p.x }
+                if p.y < minY { minY = p.y }
+                if p.y > maxY { maxY = p.y }
+            }
+            let bounds = CGRect(x: minX - radius, y: minY - radius,
+                                width: (maxX - minX) + radius * 2,
+                                height: (maxY - minY) + radius * 2)
+            return Entry(key: wire.key, bounds: bounds, points: wire.points)
+        }
+    }
+
+    static func hitWire(at point: CGPoint, in entries: [Entry], radius: CGFloat = defaultRadius) -> RoutedWire.Key? {
+        let radiusSq = radius * radius
+        for entry in entries.reversed() {
+            guard entry.bounds.contains(point) else { continue }
+            let pts = entry.points
+            if pts.count == 1 {
+                let dx = pts[0].x - point.x
+                let dy = pts[0].y - point.y
+                if dx * dx + dy * dy <= radiusSq { return entry.key }
+                continue
+            }
+            for i in 0..<(pts.count - 1) {
+                let a = pts[i], b = pts[i + 1]
+                let dx = b.x - a.x
+                let dy = b.y - a.y
+                let lenSq = dx * dx + dy * dy
+                let t: CGFloat = lenSq > 0
+                    ? max(0, min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq))
+                    : 0
+                let px = a.x + t * dx - point.x
+                let py = a.y + t * dy - point.y
+                if px * px + py * py <= radiusSq { return entry.key }
+            }
+        }
+        return nil
+    }
+}
+
+private struct WireHitView: NSViewRepresentable {
+    let wires: [RoutedWire]
     var onPick: ((RoutedWire.Key) -> Void)?
     var onDelete: ((RoutedWire.Key) -> Void)?
 
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.wire == rhs.wire && lhs.isPicked == rhs.isPicked }
+    func makeNSView(context: Context) -> WireHitNSView {
+        let view = WireHitNSView()
+        view.update(wires: wires, onPick: onPick, onDelete: onDelete)
+        return view
+    }
 
-    /// How far either side of a wire still counts as touching it. A 1 pt line is far too thin to
-    /// right-click reliably, so the menu hangs off a wide invisible stroke instead of the drawn one.
-    private static let hitWidth: CGFloat = 14
+    func updateNSView(_ nsView: WireHitNSView, context: Context) {
+        nsView.update(wires: wires, onPick: onPick, onDelete: onDelete)
+    }
+}
 
-    var body: some View {
-        let path = WireLayer.path(for: wire)
-        ZStack {
-            // Picked reads as Qt's: the accent colour and a heavier line, so the wire under the pointer is
-            // unmistakably the one Delete will remove.
-            path.stroke(
-                isPicked ? Color.accentColor : (wire.isHigh ? Theme.wireLive : Theme.wireIdle),
-                style: StrokeStyle(
-                    lineWidth: isPicked ? 3 : (wire.isHigh ? max(1.8, wire.width) : max(1.2, wire.width)),
-                    lineCap: .round,
-                    lineJoin: .round,
-                    dash: wire.isFeedback ? [5, 4] : []
-                )
-            )
-            // Invisible, but hit-testable: a clear view whose hit area is the wide band along the wire, so nothing is
-            // drawn for it. It was a second, near-transparent stroke, which the renderer drew like any other — a wide
-            // stroke per wire at every frame of a pan or a zoom, for something nobody sees. Above the visible stroke,
-            // so it wins the hit.
-            Color.clear
-                .contentShape(path.strokedPath(StrokeStyle(lineWidth: Self.hitWidth, lineCap: .round, lineJoin: .round)))
-                .onTapGesture { onPick?(wire.key) }
-                .contextMenu {
-                    Button("Delete Connection", role: .destructive) { onDelete?(wire.key) }
-                }
+private final class WireHitNSView: NSView {
+    private var lastWires: [RoutedWire] = []
+    private var entries: [WireHitTesting.Entry] = []
+    private var onPick: ((RoutedWire.Key) -> Void)?
+    private var onDelete: ((RoutedWire.Key) -> Void)?
+    private var pendingDeleteKey: RoutedWire.Key?
+
+    override var isFlipped: Bool { true }
+
+    func update(wires: [RoutedWire], onPick: ((RoutedWire.Key) -> Void)?, onDelete: ((RoutedWire.Key) -> Void)?) {
+        self.onPick = onPick
+        self.onDelete = onDelete
+        if wires != lastWires {
+            lastWires = wires
+            entries = WireHitTesting.entries(from: wires)
         }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let type = NSApp.currentEvent?.type {
+            switch type {
+            case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp:
+                break
+            default:
+                return nil
+            }
+        }
+        let local = convert(point, from: superview)
+        guard bounds.contains(local), WireHitTesting.hitWire(at: local, in: entries) != nil else {
+            return nil
+        }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        guard let key = WireHitTesting.hitWire(at: local, in: entries) else {
+            super.mouseDown(with: event)
+            return
+        }
+        onPick?(key)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let local = convert(event.locationInWindow, from: nil)
+        guard onDelete != nil, let key = WireHitTesting.hitWire(at: local, in: entries) else {
+            return nil
+        }
+        pendingDeleteKey = key
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "Delete Connection", action: #selector(deleteMenuAction(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func deleteMenuAction(_ sender: NSMenuItem) {
+        guard let key = pendingDeleteKey else { return }
+        pendingDeleteKey = nil
+        onDelete?(key)
     }
 }
 
@@ -782,7 +1036,7 @@ public struct CanvasGrid: View, Equatable {
 
             // Fine cells recede as the grid compresses so the surface never looks noisy.
             // Light mode needs more: dark lines on a light page vanish at the dark-mode strengths.
-            let boost = colorScheme == .light ? 2.4 : 1.0
+            let boost = colorScheme == .light ? 1.65 : 1.0
             let minorOpacity = min(0.055, max(0.014, 0.055 * (pitch - 14) / 40)) * boost
             context.stroke(minor, with: .color(Color.primary.opacity(minorOpacity)), lineWidth: 1)
             context.stroke(major, with: .color(Color.primary.opacity(0.085 * boost)), lineWidth: 1)
@@ -1015,6 +1269,7 @@ private struct CardHost: View, Equatable {
     let mod: PCCModule
     let pageIds: Set<Int>
     let renderScale: CGFloat
+    let colorScheme: ColorScheme
     let isSearchMatch: Bool
     let isRenaming: Bool
     let isSelected: Bool
@@ -1032,6 +1287,7 @@ private struct CardHost: View, Equatable {
             && lhs.isSearchMatch == rhs.isSearchMatch
             && lhs.isRenaming == rhs.isRenaming
             && lhs.renderScale == rhs.renderScale
+            && lhs.colorScheme == rhs.colorScheme
             && lhs.pageIds == rhs.pageIds
     }
 

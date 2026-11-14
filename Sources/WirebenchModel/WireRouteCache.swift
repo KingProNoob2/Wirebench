@@ -9,15 +9,18 @@ package final class WireRouteCache {
     package init() {}
 
     private var key: Int?
-    private var routes: [String: [CGPoint]] = [:]
+    private var routes: [RoutedWire.Key: [CGPoint]] = [:]
     /// The last path routed for each cable, which survives `beginFrame`. A cable that is holding still
     /// through a drag does not overwrite it, so the held path stays the one it was checked against.
-    private var settled: [String: [CGPoint]] = [:]
+    private var settled: [RoutedWire.Key: [CGPoint]] = [:]
     /// Whether the previous frame was drawn mid-drag, so the frame a drag ends on can be told apart
     /// from a frame where the sheet itself changed.
     private var lastFrameWasDrag = false
     /// The quantised geometry each held interior was routed for; see `points(for:holdSettled:signature:)`.
-    private var anchors: [String: (signature: Int, path: [CGPoint])] = [:]
+    private var anchors: [RoutedWire.Key: (signature: Int, path: [CGPoint])] = [:]
+    /// Temporary detours computed while another block is dragged across a stationary cable, keyed
+    /// by quantised geometry so small drag steps reuse the temporary route until the dragged block moves on.
+    private var temporaryAnchors: [RoutedWire.Key: (signature: Int, path: [CGPoint])] = [:]
 
     /// Number of paths actually computed, for tests and for anyone profiling this later.
     private(set) var routeCount = 0
@@ -33,13 +36,19 @@ package final class WireRouteCache {
         lastFrameWasDrag = dragging
         guard self.key != key else { return }
         self.key = key
-        routes.removeAll()
-        if !dragging && !dragJustEnded { settled.removeAll(); anchors.removeAll() }
+        routes.removeAll(keepingCapacity: true)
+        if !dragging {
+            temporaryAnchors.removeAll(keepingCapacity: true)
+            if !dragJustEnded {
+                settled.removeAll(keepingCapacity: true)
+                anchors.removeAll(keepingCapacity: true)
+            }
+        }
     }
 
     /// The path a cable last settled on, so a drag of some *other* block can hold it — and check
     /// whether it is still clear of what moved — instead of recomputing it every frame.
-    package func settledPoints(for id: String) -> [CGPoint]? { settled[id] }
+    package func settledPoints(for id: RoutedWire.Key) -> [CGPoint]? { settled[id] }
 
     /// - Parameters:
     ///   - holdSettled: reuse the cable's last settled path instead of routing it again. For
@@ -53,16 +62,22 @@ package final class WireRouteCache {
     ///     that stops a small drag from making the wire swim left and right. `nil` opts out, for a
     ///     connection whose stored `POINTS` are followed verbatim and move with their pins anyway.
     ///   - src, dst: the true pin positions, for re-anchoring a held interior.
-    package func points(for id: String, holdSettled: Bool = false, temporary: Bool = false,
-                signature: Int? = nil,
-                src: CGPoint = .zero, dst: CGPoint = .zero, _ build: () -> [CGPoint]) -> [CGPoint] {
+    package func points(for id: RoutedWire.Key, holdSettled: Bool = false, temporary: Bool = false,
+                        signature: () -> Int?,
+                        src: CGPoint = .zero, dst: CGPoint = .zero, _ build: () -> [CGPoint]) -> [CGPoint] {
         if let cached = routes[id] { return cached }
         if holdSettled, let held = settled[id] {
             routes[id] = held
             return held
         }
-        if let signature, let anchor = anchors[id], anchor.signature == signature,
-           let held = Self.reanchored(anchor.path, src: src, dst: dst) {
+        let sig = signature()
+        if temporary {
+            if let sig, let temp = temporaryAnchors[id], temp.signature == sig {
+                routes[id] = temp.path
+                return temp.path
+            }
+        } else if let sig, let anchor = anchors[id], anchor.signature == sig,
+                  let held = Self.reanchored(anchor.path, src: src, dst: dst) {
             routes[id] = held
             return held
         }
@@ -70,7 +85,9 @@ package final class WireRouteCache {
         routes[id] = made
         if !holdSettled && !temporary {
             settled[id] = made
-            if let signature { anchors[id] = (signature, made) }
+            if let sig { anchors[id] = (sig, made) }
+        } else if temporary, let sig {
+            temporaryAnchors[id] = (sig, made)
         }
         routeCount += 1
         return made
