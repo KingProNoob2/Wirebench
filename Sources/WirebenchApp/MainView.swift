@@ -1,6 +1,7 @@
 import WirebenchModel
 import SwiftUI
 import WirebenchCore
+import AppKit
 
 public struct MainView: View {
     @Bindable var model: AppModel
@@ -121,7 +122,7 @@ public struct MainView: View {
         }
         .coordinateSpace(name: "AppWindow")
         .navigationTitle(model.projectTitle)
-        .background { shortcutsBackground }
+        .background { shortcutsBackground.priorityGuard() }
         .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
             toggleInspector()
         }
@@ -677,6 +678,41 @@ private struct TickCountBadge: View {
                 .foregroundStyle(.secondary)
         }
         .fixedSize()
+    }
+}
+
+/// Keeps our toolbar items out of the overflow menu while the sidebar animates. AppKit decides which items to fold
+/// based on their visibility priority; SwiftUI gives every item the default, so a temporary narrowing could turn the
+/// trailing controls into a chevron and then right back. Raising the priority settles that.
+private struct ToolbarPriorityGuard: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        schedule(view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        schedule(view)
+    }
+
+    private func schedule(_ view: NSView) {
+        for delay in [0.0, 0.08, 0.25] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard let toolbar = view.window?.toolbar else { return }
+                for item in toolbar.items {
+                    item.visibilityPriority = .high
+                    if let group = item as? NSToolbarItemGroup {
+                        for subitem in group.subitems { subitem.visibilityPriority = .high }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private extension View {
+    func priorityGuard() -> some View {
+        background { ToolbarPriorityGuard().frame(width: 0, height: 0) }
     }
 }
 
