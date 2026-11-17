@@ -569,9 +569,11 @@ public struct MainView: View {
         }
 #endif
 
-        ToolbarItemGroup(placement: .primaryAction) {
-            // One capsule: the prominent +, the grid switch, the ST editor and the inspector. Keeping them in a
-            // single group stops macOS from dropping the grid switch into a chevron menu on its own.
+        ToolbarItem(placement: .primaryAction) {
+            // One atomic toolbar item: AppKit cannot fold individual buttons from inside it into the overflow
+            // chevron while the sidebar animates. Keeping this as a group still let it split, which is what made
+            // the trailing controls compact and then jump back.
+            HStack(spacing: 2) {
             Button {
                 showingPalette = true
             } label: {
@@ -609,6 +611,7 @@ public struct MainView: View {
             }
             .toggleStyle(.button)
             .help(showInspector ? "Hide Inspector" : "Show Inspector")
+            }
         }
     }
 
