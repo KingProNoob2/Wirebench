@@ -439,8 +439,8 @@ public final class PCCSerializer: @unchecked Sendable {
         var a = Attrs()
         if let module = g.inputModuleId { a.int("IN_MODULE_ID", module) }
         if let pin = g.inputPinId { a.int("IN_PIN_ID", pin) }
-        if let low = g.lowValue { a.str("LOW", String(coordinate(low))) }
-        if let high = g.highValue { a.str("HIGH", String(coordinate(high))) }
+        if let low = g.lowValue { a.dbl("LOW", low) }
+        if let high = g.highValue { a.dbl("HIGH", high) }
         if let pen = g.activePenColor { a.str("PEN_COLOR", pen) }
         if let brush = g.activeBrushColor { a.str("BRUSH_COLOR", brush) }
         return .leaf(name: "INPUT", attrs: a.result)

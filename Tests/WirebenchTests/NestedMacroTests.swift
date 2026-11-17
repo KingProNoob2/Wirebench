@@ -3,7 +3,7 @@ import Foundation
 import WirebenchCore
 import WirebenchLibrary
 import WirebenchEngine
-import WirebenchHardware
+@testable import WirebenchHardware
 
 /// A macro that calls another macro: `Main` calls `*A`, which calls `*B`, which inverts its input.
 ///
@@ -200,5 +200,74 @@ struct NestedMacroTests {
             resolved.contains { $0.inModule == id && $0.inPin == 1 } ? nil : resolvedModules.first { $0.umisteni == id }?.inValues[1]
         }
         #expect(constants == [1], "the chain under A2 reads A2's constant: \(constants)")
+    }
+
+    @Test("Compiler and symbol table match macro page names case-insensitively")
+    func caseInsensitiveMacroCompilation() throws {
+        var project = PCCProject(name: "case-macro")
+        project.pages = [ProjectPage(caption: "Main"), ProjectPage(caption: "*MyMacro")]
+        project.modules = [
+            PCCModule(id: 1, guid: BoolVarBlock.guid, name: "Src", x: 0, y: 0, order: 10, threadId: 1, page: "Main",
+                      inPins: [], outPins: [Pin(id: 0, value: .bool(true))]),
+            PCCModule(id: 2, guid: MacroBlock.guid, name: "Call1", x: 0, y: 0, order: 20, threadId: 1, page: "Main",
+                      inPins: [Pin(id: 0, value: .bool(false))], outPins: [Pin(id: 0, value: .bool(false))],
+                      rawAttributes: ["MACRO_NAME": "mymacro"]),
+            PCCModule(id: 10, guid: InputsBlock.guid, name: "Inputs10", x: 0, y: 0, order: 10, threadId: 0, page: "*MyMacro",
+                      inPins: [], outPins: [Pin(id: 0, value: .bool(false))],
+                      rawAttributes: ["MACRO_NAME": "Inputs", "KIND": "0"]),
+            PCCModule(id: 11, guid: NotBlock.guid, name: "InsideNot", x: 0, y: 0, order: 20, threadId: 0, page: "*MyMacro",
+                      inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .bool(false))],
+                      outPins: [Pin(id: 0, value: .bool(false))]),
+            PCCModule(id: 12, guid: OutputsBlock.guid, name: "Outputs12", x: 0, y: 0, order: 90, threadId: 0, page: "*MyMacro",
+                      inPins: [Pin(id: 0, value: .bool(false))], outPins: [],
+                      rawAttributes: ["MACRO_NAME": "Outputs", "KIND": "1"]),
+        ]
+        project.inConnections = [
+            Connection(inModuleId: 2, inPinId: 0, outModuleId: 1, outPinId: 0, isParam: false),
+            Connection(inModuleId: 11, inPinId: 1, outModuleId: 10, outPinId: 0, isParam: false),
+            Connection(inModuleId: 12, inPinId: 0, outModuleId: 11, outPinId: 0, isParam: false),
+        ]
+        let xml = PCCSerializer().serialize(project: project)
+        let modules = PLCProjectCompiler.modules(in: xml)
+        let wires = PLCProjectCompiler.wires(in: xml)
+        #expect(PLCProjectCompiler.programModules(modules).map(\.name).contains("InsideNot"))
+        #expect(PLCProjectCompiler.expansionOrder(modules).map(\.name).contains("InsideNot"))
+
+        let classes = SymbolTableGenerationTests.allClasses()
+        let symbols = PLCSymbolTable(modules: modules, wires: wires,
+                                     classForGUID: classes, shapes: PLCProjectCompiler.classShapes)
+        let (_, resolvedWires) = PLCProjectCompiler.expandingMacroInterfaces(modules: modules, wires: wires)
+        #expect(resolvedWires.contains { $0.inModule == 11 && $0.inPin == 1 && $0.outModule == 1 && $0.outPin == 0 },
+                "expandingMacroInterfaces links case-insensitively across call -> *MyMacro")
+        #expect(symbols.addresses[UInt16(2) << 8 | 0] == symbols.addresses[UInt16(11) << 8 | 0],
+                "throughMacros aliases macro outputs case-insensitively")
+        #expect(PLCProgramOptimizer.cycles(of: [], readers: [:]) == 0)
+    }
+
+    @Test("TMDigitalOutputs respects hidden pin mask bits beyond channel 15")
+    func digitalOutputsWideMask() throws {
+        var mod = PCCModule(
+            id: 1,
+            guid: BlockTypeCatalog.all.first { $0.blockName == "8xDO" }!.guid,
+            name: "DO20", x: 0, y: 0, order: 10, threadId: 1, page: "Main",
+            inPins: Array(repeating: Pin(id: 0, value: .bool(true)), count: 21),
+            outPins: []
+        )
+        mod.rawAttributes["PIN_COUNT"] = "20"
+        mod.rawAttributes["HIDDEN_PIN_MASK"] = "$\(String(1 << 19, radix: 16, uppercase: true))"
+        var project = PCCProject(name: "wide-do")
+        project.pages = [ProjectPage(caption: "Main")]
+        project.modules = [mod]
+
+        let xml = PCCSerializer().serialize(project: project)
+        let parsed = PLCProjectCompiler.modules(in: xml)
+        let classes = SymbolTableGenerationTests.allClasses()
+        let compiler = PLCProjectCompiler(shapes: PLCProjectCompiler.classShapes, classForGUID: classes)
+        let alloc = PLCSymbolTable(modules: parsed, wires: [], classForGUID: classes,
+                                   shapes: PLCProjectCompiler.classShapes)
+        let bytes = try compiler.records(modules: parsed, wires: [], allocation: alloc)
+        // Header (2 bytes) + 20 channel words (40 bytes) = 42 bytes; channel 19 (last word) is constant 0 (0xC000).
+        #expect(bytes.count == 42)
+        #expect(bytes[40] == 0x00 && bytes[41] == 0xC0)
     }
 }

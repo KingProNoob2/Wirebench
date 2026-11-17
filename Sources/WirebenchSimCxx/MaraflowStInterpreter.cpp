@@ -385,6 +385,7 @@ struct StInterpreter::Impl {
         std::map<std::string, double>* vars = nullptr;
         const std::function<double(const std::string&)>* readCb = nullptr;
         const std::function<void(const std::string&, double)>* writeCb = nullptr;
+        double deltaMs = 10.0;
         bool exitFlag = false;
         bool returnFlag = false;
 
@@ -414,6 +415,7 @@ struct StInterpreter::Impl {
         int scope = 0;
         int type = 1;
         double initial = 0.0;
+        std::string typeName;
     };
 
     enum {
@@ -1023,7 +1025,8 @@ struct StInterpreter::Impl {
                         return result ? 1.0 : 0.0;
                     });
                 }
-                return impl->makeExpr(line, [use](EvalContext& ctx) -> double {
+                return impl->makeExpr(line, [en, use](EvalContext& ctx) -> double {
+                    if (en && !isTruthy(en->eval(ctx))) return 0.0;
                     bool result = false;
                     for (const ExprPtr& operand : use) {
                         result = (result != isTruthy(operand->eval(ctx)));
@@ -1353,7 +1356,8 @@ struct StInterpreter::Impl {
         return it == declIndex.end() ? -1 : it->second;
     }
 
-    void addDecl(const std::string& name, int scope, int type, double initial) {
+    void addDecl(const std::string& name, int scope, int type, double initial,
+                 const std::string& typeName = "") {
         const int idx = findDecl(name);
         const int normalizedType = sanitizeType(type);
         const double normalizedInitial = convertValue(initial, normalizedType);
@@ -1362,10 +1366,11 @@ struct StInterpreter::Impl {
             declarations[idx].scope = scope;
             declarations[idx].type = normalizedType;
             declarations[idx].initial = normalizedInitial;
+            if (!typeName.empty()) declarations[idx].typeName = typeName;
             return;
         }
         declIndex[lowerAscii(name)] = static_cast<int>(declarations.size());
-        declarations.push_back(DeclVar{name, scope, normalizedType, normalizedInitial});
+        declarations.push_back(DeclVar{name, scope, normalizedType, normalizedInitial, typeName});
     }
 
     void updateDecl(const std::string& name, int type, double initial) {
@@ -1388,7 +1393,7 @@ struct StInterpreter::Impl {
 
     void execute(const std::function<double(const std::string&)>& read,
                  const std::function<void(const std::string&, double)>& write,
-                 std::map<std::string, double>& variables);
+                 std::map<std::string, double>& variables, double deltaMs = 10.0);
 
     void execCall(EvalContext& ctx, const std::string& targetName,
                   const std::vector<CallArg>& args);
@@ -1605,8 +1610,10 @@ void StInterpreter::Impl::parseDeclBlock(const std::vector<Token>& tokens, size_
         ++j; // ':'
 
         int type = 1;
+        std::string declTypeName;
         if (j < end && tokens[j].type == TokType::Ident) {
             const std::string typeName = upperAscii(tokens[j].text);
+            declTypeName = typeName;
             if (typeName == "BOOL") type = 0;
             else if (typeName == "LONG" || typeName == "LINT" || typeName == "DINT") type = 2;
             else if (typeName == "FLOAT" || typeName == "REAL" || typeName == "LREAL") type = 3;
@@ -1651,7 +1658,7 @@ void StInterpreter::Impl::parseDeclBlock(const std::vector<Token>& tokens, size_
         if (j < end && tokens[j].type == TokType::Semi) ++j;
 
         for (const std::string& name : names) {
-            addDecl(name, scope, type, initial);
+            addDecl(name, scope, type, initial, declTypeName);
         }
     }
 }
@@ -1663,7 +1670,7 @@ void StInterpreter::Impl::parseDeclBlock(const std::vector<Token>& tokens, size_
 void StInterpreter::Impl::execute(
     const std::function<double(const std::string&)>& read,
     const std::function<void(const std::string&, double)>& write,
-    std::map<std::string, double>& variables) {
+    std::map<std::string, double>& variables, double deltaMs) {
     instancePins.clear();
 
     EvalContext ctx;
@@ -1671,6 +1678,7 @@ void StInterpreter::Impl::execute(
     ctx.vars = &variables;
     ctx.readCb = &read;
     ctx.writeCb = &write;
+    ctx.deltaMs = deltaMs > 0.0 ? deltaMs : 10.0;
 
     for (const DeclVar& decl : declarations) {
         if (decl.scope == kScopeInput) {
@@ -1796,11 +1804,19 @@ void StInterpreter::Impl::execCall(EvalContext& ctx, const std::string& targetNa
             "SR", "RS", "TON", "TOF", "TP", "CTU", "CTD", "CTUD",
             "R_TRIG", "F_TRIG", "RANDOM", "RND", "SINGLEPULSE", "ONESHOT",
             "COUNTER", "CNTR"};
+        bool matched = false;
         for (const char* candidate : known) {
             const std::string name(candidate);
             if (fbType == name || endsWith(fbType, "_" + name)) {
                 fbType = name;
+                matched = true;
                 break;
+            }
+        }
+        if (!matched) {
+            const int idx = findDecl(targetName);
+            if (idx >= 0 && !declarations[idx].typeName.empty()) {
+                fbType = declarations[idx].typeName;
             }
         }
     }
@@ -1896,7 +1912,7 @@ std::map<std::string, double> StInterpreter::Impl::runFunctionBlock(
         const bool input = getIn("IN", 0.0) != 0.0;
         const double pt = getIn("PT", 0.0);
         double et = stateOf(fbState, base + "._et", 0.0);
-        if (input) et = std::min(pt, et + 10.0);
+        if (input) et = std::min(pt, et + ctx.deltaMs);
         else et = 0.0;
         fbState[base + "._et"] = et;
         out["Q"] = (input && et >= pt) ? 1.0 : 0.0;
@@ -1908,7 +1924,7 @@ std::map<std::string, double> StInterpreter::Impl::runFunctionBlock(
         const double pt = getIn("PT", 0.0);
         double et = stateOf(fbState, base + "._et", 0.0);
         if (input) et = 0.0;
-        else if (et < pt) et = std::min(pt, et + 10.0);
+        else if (et < pt) et = std::min(pt, et + ctx.deltaMs);
         fbState[base + "._et"] = et;
         out["Q"] = (input || et < pt) ? 1.0 : 0.0;
         out["ET"] = et;
@@ -1925,7 +1941,7 @@ std::map<std::string, double> StInterpreter::Impl::runFunctionBlock(
             et = 0.0;
         }
         if (active) {
-            et += 10.0;
+            et += ctx.deltaMs;
             if (et >= pt) {
                 active = false;
                 et = pt;
@@ -2045,8 +2061,8 @@ bool StInterpreter::compile(const std::string& code,
 }
 
 void StInterpreter::execute(const ReadOperand& read, const WriteOperand& write,
-                            std::map<std::string, double>& variables) {
-    impl_->execute(read, write, variables);
+                            std::map<std::string, double>& variables, double deltaMs) {
+    impl_->execute(read, write, variables, deltaMs);
 }
 
 void StInterpreter::reset() {

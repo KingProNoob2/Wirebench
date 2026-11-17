@@ -222,8 +222,9 @@ public struct PLCSymbolTable: Sendable {
                 guard let call = byID[current.module],
                       PLCProjectCompiler.normaliseGUID(call.guid) == PLCProjectCompiler.macroCallGUID,
                       let name = call.macroName else { break }
+                let targetPage = "*" + name.lowercased()
                 let interfaces = Set(modules.filter {
-                    $0.page == "*" + name && PLCProjectCompiler.normaliseGUID($0.guid) == PLCProjectCompiler.macroInterfaceGUID
+                    $0.page.lowercased() == targetPage && PLCProjectCompiler.normaliseGUID($0.guid) == PLCProjectCompiler.macroInterfaceGUID
                 }.map(\.umisteni))
                 guard let w = wires.first(where: { interfaces.contains($0.inModule) && $0.inPin == current.pin && !$0.isParam })
                 else { break }
@@ -352,8 +353,9 @@ public struct PLCSymbolTable: Sendable {
             placedAny = false
             for call in modules where PLCProjectCompiler.normaliseGUID(call.guid) == PLCProjectCompiler.macroCallGUID {
                 guard let name = call.macroName else { continue }
+                let targetPage = "*" + name.lowercased()
                 let interfaces = Set(modules.filter {
-                    $0.page == "*" + name
+                    $0.page.lowercased() == targetPage
                         && PLCProjectCompiler.normaliseGUID($0.guid) == PLCProjectCompiler.macroInterfaceGUID
                 }.map(\.umisteni))
                 for (k, pin) in call.outPins.enumerated() {

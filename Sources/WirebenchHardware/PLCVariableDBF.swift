@@ -172,7 +172,9 @@ public enum PLCVariableDBF {
             let bits = UInt32(bitPattern: Int32(truncatingIfNeeded: number)) ^ 0x8000_0000
             appendBigEndian(UInt64(bits), count: 4, into: &out)
         case .double(let number):
-            appendBigEndian(number.bitPattern ^ 0x8000_0000_0000_0000, count: 8, into: &out)
+            let bits = number.bitPattern
+            let encoded = (bits & 0x8000_0000_0000_0000) != 0 ? ~bits : (bits ^ 0x8000_0000_0000_0000)
+            appendBigEndian(encoded, count: 8, into: &out)
         case .text(let string):
             var bytes = Array(string.utf8)
             if bytes.count > width { bytes = Array(bytes.prefix(width)) }

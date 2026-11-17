@@ -435,11 +435,11 @@ public struct ModuleConfigDialog: View {
                     get: { current?.selectionTag ?? "" },
                     set: { tag in
                         model.setSystemCommand(moduleId: moduleId,
-                                               to: catalogue.first { $0.selectionTag == tag })
+                                               to: options.first { $0.selectionTag == tag })
                     }
                 )) {
                     Text("None — set the command word on the Cmd pin").tag("")
-                    ForEach(options, id: \.mnemonic) { info in
+                    ForEach(options, id: \.selectionTag) { info in
                         Text("\(info.title)  ·  \(info.text)").tag(info.selectionTag)
                     }
                 }
@@ -660,7 +660,7 @@ public struct ModuleConfigDialog: View {
     private func applyChanges() {
         guard let mod = targetModule else { return }
         func setParam(_ index: Int, _ value: Int) {
-            model.updateModuleParam(id: moduleId, paramIndex: index, value: .int32(Int32(value)))
+            model.updateModuleParam(id: moduleId, paramIndex: index, value: .int32(Int32(clamping: value)))
         }
         func showAttribute(_ keys: [String], _ on: Bool) {
             for key in keys { model.setModuleRawAttribute(id: moduleId, key: key, value: on ? "True" : "False") }
@@ -702,12 +702,15 @@ public struct ModuleConfigDialog: View {
         case .intVar:
             // `IntVar` has no parameters — the help gives it a single output — so the initial
             // value is stored as an attribute and pushed into the live block.
-            model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(intVarValue)")
-            model.setVariableValue(moduleId: moduleId, value: intVarValue)
+            let clamped = Int32(clamping: intVarValue)
+            model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(clamped)")
+            model.setVariableValue(moduleId: moduleId, value: Int(clamped))
             model.setSliderMax(id: moduleId, max: intVarSliderMax)
         case .floatVar:
-            model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(floatVarValue)")
-            model.setFloatVariableValue(moduleId: moduleId, value: Float(floatVarValue))
+            if floatVarValue.isFinite {
+                model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(floatVarValue)")
+                model.setFloatVariableValue(moduleId: moduleId, value: Float(floatVarValue))
+            }
         case .div:
             model.updateDivModuloVisible(id: moduleId, isVisible: divModuloVisible)
         case .rs:
@@ -738,9 +741,9 @@ public struct ModuleConfigDialog: View {
         case .digitalOutputs:
             model.update8xDOConfig(id: moduleId, pinCount: doPinCount,
                                    hiddenMaskHex: mask(doVisibleBits, count: doPinCount, where: false))
-        case .macroInterface, .macroCall:
+        case .macroInterface, .macroCall, .systemCmd:
             break
-        case .parameters, .none, .systemCmd:
+        case .parameters, .none:
             for (index, text) in genericParamValues {
                 model.updateModuleParam(id: moduleId, paramIndex: index, value: PinValue.parse(text))
             }

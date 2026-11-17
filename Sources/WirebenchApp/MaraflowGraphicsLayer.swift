@@ -169,7 +169,7 @@ struct MaraflowGraphicsLayer: View {
     }
 
     private func color(_ rgb: Int) -> Color {
-        let value = UInt32(bitPattern: Int32(rgb))
+        let value = UInt32(truncatingIfNeeded: rgb)
         let alpha = Double((value >> 24) & 0xFF) / 255
         return Color(red: Double((value >> 16) & 0xFF) / 255,
                      green: Double((value >> 8) & 0xFF) / 255,

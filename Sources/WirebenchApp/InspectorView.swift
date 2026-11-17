@@ -179,9 +179,9 @@ public struct InspectorView: View {
                                value: PinValue) -> Binding<Int>? {
         func kind(_ int: Int) -> PinValue {
             switch value {
-            case .int16: return .int16(Int16(truncatingIfNeeded: int))
+            case .int16: return .int16(Int16(clamping: int))
             case .int64: return .int64(Int64(int))
-            default: return .int32(Int32(truncatingIfNeeded: int))
+            default: return .int32(Int32(clamping: int))
             }
         }
         switch value {

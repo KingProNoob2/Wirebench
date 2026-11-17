@@ -103,6 +103,17 @@ struct VariableDBFTests {
         var minusOne: [UInt8] = []
         PLCVariableDBF.append(.integer(-1), width: 4, into: &minusOne)
         #expect(minusOne == [0x7F, 0xFF, 0xFF, 0xFF], "OWNER is -1 for a module's own row")
+
+        var minusTwoDouble: [UInt8] = []
+        PLCVariableDBF.append(.double(-2.0), width: 8, into: &minusTwoDouble)
+        var minusOneDouble: [UInt8] = []
+        PLCVariableDBF.append(.double(-1.0), width: 8, into: &minusOneDouble)
+        #expect(minusTwoDouble.lexicographicallyPrecedes(minusOneDouble),
+                "negative doubles sort below less-negative doubles")
+        #expect(minusOneDouble.lexicographicallyPrecedes(zeroDouble),
+                "negative doubles sort below zero")
+        #expect(zeroDouble.lexicographicallyPrecedes(one),
+                "zero sorts below positive doubles")
     }
 
     @Test("The descriptors are the twenty columns the csv has, in its order")

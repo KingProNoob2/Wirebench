@@ -658,7 +658,7 @@ public final class CxxSimulationCore {
     /// (0 = Monday), and this only moves its answers across the C boundary.
     static func wallClock(from date: Date) -> WirebenchWallClock {
         let parts = DirigoEpoch.calendar.dateComponents([.hour, .minute, .second], from: date)
-        return WirebenchWallClock(days: Int32(DirigoEpoch.days(from: date)),
+        return WirebenchWallClock(days: Int32(clamping: DirigoEpoch.days(from: date)),
                                hour: Int32(parts.hour ?? 0),
                                minute: Int32(parts.minute ?? 0),
                                second: Int32(parts.second ?? 0),

@@ -72,7 +72,7 @@ public:
     // typed double value); inputs from VAR_INPUT come from the caller map, outputs
     // are written back through writeOperand.
     void execute(const ReadOperand& read, const WriteOperand& write,
-                 std::map<std::string, double>& variables);
+                 std::map<std::string, double>& variables, double deltaMs = 10.0);
 
     // Clears the persistent function-block / edge / RANDOM state. The compiled
     // program and the caller's variable storage are left untouched.

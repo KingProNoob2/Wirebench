@@ -1130,4 +1130,149 @@ struct MaraflowImportTests {
             try ProjectFile.read(data: data)
         }
     }
+
+    @Test("ST XNOR enable gating, TON deltaMs timing, and %QX output writes")
+    func stXnorDeltaMsAndHardwareWrite() throws {
+        let code = """
+        VAR
+            disabledXnor : BOOL := TRUE;
+            t : TON;
+        END_VAR
+        disabledXnor := XNOR(EN := FALSE, IN1 := FALSE, IN2 := FALSE);
+        t(IN := TRUE, PT := 100);
+        do0 := t.Q;
+        REG_0 := BOOL_TO_INT(disabledXnor);
+        REG_1 := BOOL_TO_INT(t.Q);
+        """
+        var entries: [(String, String)] = [
+            ("project.name", "STDelta"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", code),
+            ("page.0.stVarCount", "0"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.0.stThreadId", "2"),
+            ("page.0.stOrder", "10"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "2"),
+            ("page.1.wireCount", "0"),
+        ]
+        entries += Self.block("page.1.block.0.", id: "r0", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read0", gridX: 2, gridY: 2, order: 100,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_0")])
+        entries += Self.block("page.1.block.1.", id: "r1", definition: "Main.Execution.ReadReg",
+                              type: "ReadReg", name: "Read1", gridX: 10, gridY: 2, order: 110,
+                              inputs: [("En", "Enable", "BOOL", "1")],
+                              outputs: [("Out", "Value", "INT", "0")],
+                              properties: [("RegisterName", "REG_1")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stdelta")
+        let read0 = try #require(outcome.project.modules.first { $0.name == "Read0" })
+        let read1 = try #require(outcome.project.modules.first { $0.name == "Read1" })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+
+        for step in 1...3 {
+            core.step(deltaMs: 25, now: Date(timeIntervalSince1970: 0))
+            #expect(core.outPins(moduleId: read0.id)[0].asInt == 0, "XNOR with EN := FALSE must return FALSE")
+            #expect(core.outPins(moduleId: read1.id)[0].asInt == 0, "TON not yet elapsed at \(step * 25)ms")
+            #expect(core.operandValue("DO0") == 0)
+        }
+        core.step(deltaMs: 25, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: read1.id)[0].asInt == 1, "TON reaches 100ms in 4 steps at deltaMs = 25")
+        #expect(core.operandValue("DO0") == 1, "do0 write propagates case-insensitively via ldWrite")
+    }
+
+    @Test("Maraflow Timer accumulates fractional deltaMs steps")
+    func fractionalDeltaMsTimer() throws {
+        var entries: [(String, String)] = [
+            ("project.name", "FracTimer"),
+            ("project.pageCount", "1"),
+            ("page.0.name", "Main"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "1"),
+            ("page.0.wireCount", "0"),
+        ]
+        entries += Self.block("page.0.block.0.", id: "t1", definition: "Main.Timers.Timer",
+                              type: "Timer", name: "Timer1", gridX: 2, gridY: 2, order: 10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Input", "BOOL", "1"), ("PT", "Preset", "INT", "2")],
+                              outputs: [("Q", "Done", "BOOL", "0"), ("ET", "Elapsed", "INT", "0")])
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "fractimer")
+        let timer = try #require(outcome.project.modules.first { $0.name == "Timer1" })
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+
+        for _ in 0..<4 {
+            core.step(deltaMs: 0.4, now: Date(timeIntervalSince1970: 0))
+        }
+        #expect(core.outPins(moduleId: timer.id)[0].asBool == false)
+        core.step(deltaMs: 0.4, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: timer.id)[0].asBool == true, "5 * 0.4ms reaches 2ms preset")
+        #expect(core.outPins(moduleId: timer.id)[1].asInt == 2)
+    }
+
+    @Test("E-Stop mode 2 preserves container bookkeeping across skipped pages")
+    func eStopMode2WithContainerOnSkippedPage() throws {
+        var project = PCCProject(name: "estop-container")
+        project.pages = [ProjectPage(caption: "Normal"), ProjectPage(caption: "!EStop")]
+        project.maraflow = MaraflowExtras(properties: [
+            "project.estop.enabled": "true",
+            "project.estop.mode": "DEDICATED_ESTOP_PAGE",
+            "project.estop.pageName": "!EStop",
+            "project.estop.ruleCount": "1",
+            "project.estop.rule.0.channel": "DI0",
+            "project.estop.rule.0.activeLow": "false",
+            "project.estop.rule.0.enabled": "true",
+        ])
+        let diDriver = PCCModule(
+            id: 1,
+            guid: MaraflowCatalog.byId["Main.Execution.WriteReg"]!.guid,
+            name: "DriveDI0", x: 0, y: 0, order: -100, threadId: 1, page: "Normal",
+            inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .int32(1))],
+            outPins: [Pin(id: 0, value: .int32(0))],
+            rawAttributes: ["MARAFLOW_DEF": "Main.Execution.WriteReg", "MARAFLOW_PROP_RegisterName": "DI0"]
+        )
+        // False `If` container on the skipped page with an inner block; its skip count must still be balanced.
+        let skippedIf = PCCModule(
+            id: 2,
+            guid: IfBlock.guid,
+            name: "SkippedIf", x: 0, y: 0, order: 10, threadId: 1, page: "Normal",
+            inPins: [Pin(id: 0, value: .bool(false))],
+            outPins: []
+        )
+        var innerBlock = PCCModule(
+            id: 3,
+            guid: MaraflowCatalog.byId["Main.Execution.WriteReg"]!.guid,
+            name: "InnerDO", x: 0, y: 0, order: 20, threadId: 1, page: "Normal",
+            inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .int32(1))],
+            outPins: [Pin(id: 0, value: .int32(0))],
+            rawAttributes: ["MARAFLOW_DEF": "Main.Execution.WriteReg", "MARAFLOW_PROP_RegisterName": "DO0"]
+        )
+        innerBlock.rawAttributes["OWNER_ID"] = "2"
+        innerBlock.rawAttributes["CASE_ID"] = "0"
+        let skippedEndIf = PCCModule(
+            id: 5,
+            guid: EndIfBlock.guid,
+            name: "SkippedEndIf", x: 0, y: 0, order: 25, threadId: 1, page: "Normal",
+            inPins: [], outPins: []
+        )
+        let safeDO = PCCModule(
+            id: 4,
+            guid: MaraflowCatalog.byId["Main.Execution.WriteReg"]!.guid,
+            name: "SafeDO", x: 0, y: 0, order: 30, threadId: 1, page: "!EStop",
+            inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .int32(1))],
+            outPins: [Pin(id: 0, value: .int32(0))],
+            rawAttributes: ["MARAFLOW_DEF": "Main.Execution.WriteReg", "MARAFLOW_PROP_RegisterName": "DO5"]
+        )
+        project.modules = [diDriver, skippedIf, innerBlock, skippedEndIf, safeDO]
+
+        let core = CxxSimulationCore(project: project, profileScheduling: false)
+        // Scan 1 trips E-Stop via DI0=1.
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        // Scan 2 skips `Normal` (including `SkippedIf`), yet `SafeDO` on `!EStop` still runs.
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.operandValue("DO5") == 1, "dedicated E-Stop page must still execute after skipped page If")
+    }
 }

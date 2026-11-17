@@ -1112,8 +1112,17 @@ public final class AppModel: @unchecked Sendable {
         guard project.deleteModule(id: id) != nil else { return false }
 
         self.project = project
-        if selectedModuleId == id { selectedModuleId = nil }
+        if let key = selectedWire, key.outModule == id || key.inModule == id {
+            selectedWire = nil
+        }
+        if selectedModuleId == id {
+            selectedModuleId = nil
+        } else {
+            selectedModuleIds.remove(id)
+        }
         if configuringModuleId == id { configuringModuleId = nil }
+        if renamingModuleId == id { renamingModuleId = nil }
+        heldButtons.remove(id)
         self.engine = installEngine(project: project)
         self.isDocumentEdited = true
         return true
@@ -1136,6 +1145,8 @@ public final class AppModel: @unchecked Sendable {
         }
         self.selectedModuleId = nil
         if let configuringModuleId, onPage.contains(configuringModuleId) { self.configuringModuleId = nil }
+        if let renamingModuleId, onPage.contains(renamingModuleId) { self.renamingModuleId = nil }
+        heldButtons.subtract(onPage)
         self.engine = installEngine(project: project)
         self.isDocumentEdited = true
     }
@@ -1845,7 +1856,7 @@ public final class AppModel: @unchecked Sendable {
     /// it into the variable itself, not only onto the output pin the variable would overwrite on its next pass.
     public func setVariableValue(moduleId: Int, value: Int) {
         guard let module = module(id: moduleId), BlockRole.isIntVariable(module) else { return }
-        engine?.setOut(moduleId: moduleId, pin: 0, value: .int32(Int32(truncatingIfNeeded: value)))
+        engine?.setOut(moduleId: moduleId, pin: 0, value: .int32(Int32(clamping: value)))
         refreshAfterPinEdit()
     }
 
@@ -1914,12 +1925,12 @@ public final class AppModel: @unchecked Sendable {
     }
 
     public func updatePulseGenTiming(id: Int, tOn: Int, tOff: Int) {
-        updateModuleParam(id: id, paramIndex: 0, value: .int32(Int32(tOn)))
-        updateModuleParam(id: id, paramIndex: 1, value: .int32(Int32(tOff)))
+        updateModuleParam(id: id, paramIndex: 0, value: .int32(Int32(clamping: tOn)))
+        updateModuleParam(id: id, paramIndex: 1, value: .int32(Int32(clamping: tOff)))
     }
 
     public func updateCounterStep(id: Int, step: Int) {
-        updateModuleParam(id: id, paramIndex: 0, value: .int32(Int32(step)))
+        updateModuleParam(id: id, paramIndex: 0, value: .int32(Int32(clamping: step)))
     }
 
     // MARK: - Presenting
@@ -2093,8 +2104,7 @@ public final class AppModel: @unchecked Sendable {
         guard var project, project.graphics.indices.contains(index) else { return }
         project.graphics.remove(at: index)
         self.project = project
-        selectedAnnotationIndex = nil
-        editingAnnotationIndex = nil
+        clearAnnotationSelection()
         isDocumentEdited = true
     }
 
@@ -2103,11 +2113,18 @@ public final class AppModel: @unchecked Sendable {
     /// share one selection because they share one array of indices.
     public func deleteSelectedAnnotation() {
         guard let index = selectedAnnotationIndex,
-              let project,
+              var project,
               project.graphics.indices.contains(index),
               project.graphics[index].page == selectedPage else { return }
         // Highest index first, so the removals do not shift the ones still to go.
-        for i in selectedAnnotationIndices.union([index]).sorted(by: >) { deleteAnnotation(at: i) }
+        let targets = selectedAnnotationIndices.union([index])
+            .filter { project.graphics.indices.contains($0) && project.graphics[$0].page == selectedPage }
+            .sorted(by: >)
+        guard !targets.isEmpty else { return }
+        for i in targets { project.graphics.remove(at: i) }
+        self.project = project
+        clearAnnotationSelection()
+        isDocumentEdited = true
     }
 
     // MARK: - Graphic shapes
@@ -2291,6 +2308,7 @@ public final class AppModel: @unchecked Sendable {
         project.graphics.removeAll { $0.page == caption }
         project.pages.remove(at: index)
         self.project = project
+        clearAnnotationSelection()
         if let key = selectedWire, project.modules.first(where: { $0.id == key.outModule }) == nil
             || project.modules.first(where: { $0.id == key.inModule }) == nil {
             selectedWire = nil
@@ -2299,9 +2317,19 @@ public final class AppModel: @unchecked Sendable {
         if selectedPage == caption {
             selectedPage = project.pages.first?.caption ?? "main"
         }
-        if let selectedModuleId, project.modules.first(where: { $0.id == selectedModuleId }) == nil {
+        let survivingIds = Set(project.modules.map(\.id))
+        if let selectedModuleId, !survivingIds.contains(selectedModuleId) {
             self.selectedModuleId = nil
+        } else {
+            selectedModuleIds.formIntersection(survivingIds)
         }
+        if let configuringModuleId, !survivingIds.contains(configuringModuleId) {
+            self.configuringModuleId = nil
+        }
+        if let renamingModuleId, !survivingIds.contains(renamingModuleId) {
+            self.renamingModuleId = nil
+        }
+        heldButtons.formIntersection(survivingIds)
         isDocumentEdited = true
         runtimeDidChangeStructure()
         return true

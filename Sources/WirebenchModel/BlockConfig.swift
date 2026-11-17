@@ -246,7 +246,7 @@ public struct BlockConfig: Codable, Sendable {
     public static func apply(_ values: [String: String], to moduleId: Int, in model: AppModel) {
         guard let mod = model.module(id: moduleId) else { return }
         func number(_ key: String) -> Int? { values[key].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) } }
-        func on(_ key: String) -> Bool { values[key] == "1" }
+        func boolOpt(_ key: String) -> Bool? { values[key].map { $0 == "1" } }
         func setParam(_ index: Int, _ key: String) {
             if let v = number(key) { model.updateModuleParam(id: moduleId, paramIndex: index, value: .int32(Int32(clamping: v))) }
         }
@@ -257,9 +257,10 @@ public struct BlockConfig: Codable, Sendable {
         switch BlockConfigKind(mod) {
         case .boolVar:
             if let raw = number("mode"), let mode = BoolVarBlock.Mode(rawValue: raw) { model.updateBoolVarMode(id: moduleId, mode: mode) }
-            model.setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(on("initial")))
+            if let initial = boolOpt("initial") { model.setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(initial)) }
         case .pulseGen:
-            if let a = number("tOn"), let b = number("tOff") { model.updatePulseGenTiming(id: moduleId, tOn: a, tOff: b) }
+            setParam(0, "tOn")
+            setParam(1, "tOff")
         case .singlePulse: setParam(0, "tOn")
         case .counter:
             if let step = number("step") { model.updateCounterStep(id: moduleId, step: step) }
@@ -276,20 +277,23 @@ public struct BlockConfig: Codable, Sendable {
         case .mean: setParam(0, "window")
         case .intVar:
             if let v = number("value") {
-                model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(v)")
-                model.setVariableValue(moduleId: moduleId, value: v)
+                let clamped = Int32(clamping: v)
+                model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(clamped)")
+                model.setVariableValue(moduleId: moduleId, value: Int(clamped))
             }
             if let m = number("sliderMax") { model.setSliderMax(id: moduleId, max: m) }
         case .floatVar:
-            if let text = values["value"], let v = Double(text) {
+            if let text = values["value"], let v = Double(text), v.isFinite {
                 model.setModuleRawAttribute(id: moduleId, key: "INIT_VALUE", value: "\(v)")
                 model.setFloatVariableValue(moduleId: moduleId, value: Float(v))
             }
-        case .div: model.updateDivModuloVisible(id: moduleId, isVisible: on("modulo"))
-        case .rs: model.updateRSPriority(id: moduleId, higherPriorityS: values["priority"] == "S")
+        case .div:
+            if let modulo = boolOpt("modulo") { model.updateDivModuloVisible(id: moduleId, isVisible: modulo) }
+        case .rs:
+            if let priority = values["priority"] { model.updateRSPriority(id: moduleId, higherPriorityS: priority == "S") }
         case .dateTime:
-            showAttribute(["SHOW_OFFSET", "OFFSET_VISIBLE"], on("offset"))
-            showAttribute(["SHOW_SOD", "SOD_VISIBLE"], on("sod"))
+            if let offset = boolOpt("offset") { showAttribute(["SHOW_OFFSET", "OFFSET_VISIBLE"], offset) }
+            if let sod = boolOpt("sod") { showAttribute(["SHOW_SOD", "SOD_VISIBLE"], sod) }
         case .pwm:
             setParam(0, "steps")
             if let v = number("steps") { model.setModuleRawAttribute(id: moduleId, key: "PWM_STEPS", value: "\(v)") }
@@ -300,27 +304,51 @@ public struct BlockConfig: Codable, Sendable {
         case .int2Bits, .demux:
             if let c = number("outputs") { model.updateModuleOutputCount(id: moduleId, count: c) }
         case .digitalInputs:
-            let word = (0..<16).reduce(0) { $0 | ((values["mask"]?.dropFirst($1).first == "1") ? 1 << $1 : 0) }
-            model.update8xDIMask(id: moduleId, maskHex: String(format: "$%04X", word), showWord: on("showWord"))
-        case .digitalOutputs:
-            let count = number("pinCount") ?? 8
-            let hidden = (0..<min(count, 16)).reduce(0) { $0 | ((values["visible"]?.dropFirst($1).first == "1") ? 0 : 1 << $1) }
-            model.update8xDOConfig(id: moduleId, pinCount: count, hiddenMaskHex: String(format: "$%04X", hidden))
-        case .switchCases:
-            let raw = (values["cases"]?.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: String]] ?? []
-            // `|` and `:` are the format's separators, never part of a value list; a case left empty is removed.
-            var cases: [ConstructContainers.Case] = []
-            for item in raw {
-                let clean = (item["values"] ?? "").filter { $0 != "|" && $0 != ":" }.trimmingCharacters(in: .whitespaces)
-                guard !clean.isEmpty else { continue }
-                // A case added in the form has no id yet; the id is what a member's `ARM` holds, so it is permanent.
-                let id = (item["id"] ?? "").isEmpty ? ConstructContainers.newCaseId(among: cases) : item["id"]!
-                cases.append(ConstructContainers.Case(id: id, values: clean))
+            let maskHex: String
+            if let maskText = values["mask"] {
+                let word = (0..<16).reduce(0) { $0 | ((maskText.dropFirst($1).first == "1") ? 1 << $1 : 0) }
+                maskHex = String(format: "$%04X", word)
+            } else {
+                let existing = mod.rawAttributes["PIN_MASK"].map(PinMask.parse) ?? 0xFF
+                maskHex = String(format: "$%04X", existing)
             }
-            model.setSwitchCases(of: moduleId, to: cases, hasDefault: on("default"))
+            let showWord = boolOpt("showWord") ?? (mod.rawAttributes["PIN_ALL_VISIBLE"]?.lowercased() == "true")
+            model.update8xDIMask(id: moduleId, maskHex: maskHex, showWord: showWord)
+        case .digitalOutputs:
+            let count = number("pinCount") ?? mod.rawAttributes["PIN_COUNT"].flatMap { Int($0) } ?? max(mod.inPins.count, 8)
+            let hiddenHex: String
+            if let visibleText = values["visible"] {
+                let hidden = (0..<min(count, 16)).reduce(0) { $0 | ((visibleText.dropFirst($1).first == "1") ? 0 : 1 << $1) }
+                hiddenHex = String(format: "$%04X", hidden)
+            } else {
+                let existing = mod.rawAttributes["HIDDEN_PIN_MASK"].map(PinMask.parse) ?? 0
+                hiddenHex = String(format: "$%04X", existing)
+            }
+            model.update8xDOConfig(id: moduleId, pinCount: count, hiddenMaskHex: hiddenHex)
+        case .switchCases:
+            let cases: [ConstructContainers.Case]
+            if let casesText = values["cases"] {
+                let raw = (casesText.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: String]] ?? []
+                // `|` and `:` are the format's separators, never part of a value list; a case left empty is removed.
+                var parsed: [ConstructContainers.Case] = []
+                for item in raw {
+                    let clean = (item["values"] ?? "").filter { $0 != "|" && $0 != ":" }.trimmingCharacters(in: .whitespaces)
+                    guard !clean.isEmpty else { continue }
+                    // A case added in the form has no id yet; the id is what a member's `ARM` holds, so it is permanent.
+                    let id = (item["id"] ?? "").isEmpty ? ConstructContainers.newCaseId(among: parsed) : item["id"]!
+                    parsed.append(ConstructContainers.Case(id: id, values: clean))
+                }
+                cases = parsed
+            } else {
+                cases = ConstructContainers.cases(of: mod)
+            }
+            let hasDefault = boolOpt("default") ?? (mod.rawAttributes["DEFAULT"] == "1")
+            model.setSwitchCases(of: moduleId, to: cases, hasDefault: hasDefault)
         case .systemCmd:
             let catalogue = model.systemCommandCatalogue
-            if let tag = values["command"] { model.setSystemCommand(moduleId: moduleId, to: catalogue.first { $0.selectionTag == tag }) }
+            let current = model.systemCommand(of: mod)
+            let known = current.map { c in catalogue.contains { $0.command == c.command && $0.text == c.text } ? catalogue : [c] + catalogue } ?? catalogue
+            if let tag = values["command"] { model.setSystemCommand(moduleId: moduleId, to: known.first { $0.selectionTag == tag }) }
             for (key, text) in values where key.hasPrefix("param") {
                 if let index = Int(key.dropFirst(5)) {
                     model.updateModuleParam(id: moduleId, paramIndex: index, value: PinValue.parse(text))

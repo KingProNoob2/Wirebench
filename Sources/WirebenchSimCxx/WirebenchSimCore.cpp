@@ -234,6 +234,7 @@ struct Module {
     bool flagA = false;            /* WaterRegulator's open latch, HystComparator's "greater", StepDriver's commanded */
     bool flagB = false;            /* WaterRegulator's close latch, HystComparator's "less" */
     int64_t s[3] = {0, 0, 0};      /* StepDriver: position, speed, target */
+    double f[3] = {0.0, 0.0, 0.0}; /* floating-point timer/random state */
     double floatVar = 0;           /* FloatVar: the variable itself, not a pin */
     std::vector<std::pair<int64_t, int64_t>> caseRanges;   /* Case */
     std::map<std::string, std::string> strings;             /* native Maraflow string configuration */
@@ -532,6 +533,7 @@ void resetLadder(LdProgram &program) {
             block.flagA = false;
             block.flagB = false;
             block.s[0] = block.s[1] = block.s[2] = 0;
+            block.f[0] = block.f[1] = block.f[2] = 0.0;
             std::fill(block.outPins.begin(), block.outPins.end(), boolean(false));
         };
         for (auto &element : rung.main) resetBlock(element);
@@ -599,7 +601,7 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
         }
         if (!m.stCompiled) return;
         auto read = [sim](const std::string &name) -> double { return ldOperand(sim, name); };
-        auto write = [sim](const std::string &name, double value) { sim->operands[name] = value; };
+        auto write = [sim](const std::string &name, double value) { ldWrite(sim, name, value); };
         // ST macro: seed VAR_INPUT operands from the Inputs interface, then publish VAR_OUTPUT to Outputs.
         auto names = [](const std::string &text) {
             std::vector<std::string> result;
@@ -620,10 +622,10 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
             if (Module *input = moduleById(m.strings["STInputModule"])) {
                 const auto variables = names(m.strings["STInputs"]);
                 for (size_t i = 0; i < variables.size() && i < input->outPins.size(); ++i)
-                    sim->operands[variables[i]] = asFloat(input->outPins[i]);
+                    ldWrite(sim, variables[i], asFloat(input->outPins[i]));
             }
         }
-        m.stInterpreter->execute(read, write, m.stVariables);
+        m.stInterpreter->execute(read, write, m.stVariables, sample.deltaMs);
         if (m.strings.count("STOutputModule") && m.strings.count("STOutputs")) {
             if (Module *output = moduleById(m.strings["STOutputModule"])) {
                 const auto variables = names(m.strings["STOutputs"]);
@@ -1509,9 +1511,9 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                 case MARAFLOW_Main_Timers_Timer: {
                     const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
                     const double preset = std::max(0.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0);
-                    double elapsed = m.s[0];
+                    double elapsed = m.f[0];
                     elapsed = input ? std::min(preset, elapsed + sample.deltaMs) : 0.0;
-                    m.s[0] = elapsed;
+                    m.f[0] = elapsed;
                     if (!m.outPins.empty()) m.outPins[0] = boolean(input && elapsed >= preset);
                     if (m.outPins.size() > 1) m.outPins[1] = maraflowNumber(static_cast<double>(static_cast<int64_t>(elapsed)), m.outPins[1]);
                     return;
@@ -1520,8 +1522,8 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     const double high = std::max(1.0, m.inPins.size() > 1 ? static_cast<double>(asFloat(m.inPins[1])) : 500.0);
                     const double low = std::max(1.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 500.0);
                     const double cycle = high + low;
-                    m.s[0] = std::fmod(m.s[0] + sample.deltaMs, cycle);
-                    if (!m.outPins.empty()) m.outPins[0] = boolean(m.s[0] < high);
+                    m.f[0] = std::fmod(m.f[0] + sample.deltaMs, cycle);
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(m.f[0] < high);
                     return;
                 }
                 case MARAFLOW_Main_Timers_PulseLen: {
@@ -1529,13 +1531,13 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     const double length = std::max(0.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0);
                     const bool previous = m.flagA;
                     m.flagA = input;
-                    bool active = m.s[1] != 0.0;
-                    if (!active && input && !previous) { active = true; m.s[0] = 0.0; }
+                    bool active = m.s[1] != 0;
+                    if (!active && input && !previous) { active = true; m.f[0] = 0.0; }
                     if (active) {
-                        m.s[0] += sample.deltaMs;
-                        if (m.s[0] >= length) { active = false; m.s[0] = length; }
+                        m.f[0] += sample.deltaMs;
+                        if (m.f[0] >= length) { active = false; m.f[0] = length; }
                     }
-                    m.s[1] = active ? 1.0 : 0.0;
+                    m.s[1] = active ? 1 : 0;
                     if (!m.outPins.empty()) m.outPins[0] = boolean(active);
                     return;
                 }
@@ -1700,10 +1702,10 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                             std::uniform_real_distribution<double> distribution(low, high);
                             sample = distribution(maraflowRng());
                         }
-                        m.s[0] = sample;
+                        m.f[0] = sample;
                         m.s[1] = 1;
                     }
-                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(m.s[0], m.outPins[0]);
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(m.f[0], m.outPins[0]);
                     return;
                 }
                 case MARAFLOW_Math_Scale: {
@@ -1899,6 +1901,7 @@ void resetModule(Module &m) {
     m.flagA = false;
     m.flagB = false;
     m.s[0] = m.s[1] = m.s[2] = 0;
+    m.f[0] = m.f[1] = m.f[2] = 0.0;
     /* `m.floatVar`, like `intValue`, is the variable's data and survives a reset. */
     /* `m.intValue` is deliberately *not* cleared: `IntVar.reset` restores its stored value, because a
        variable is data, not transient state. */
@@ -1932,6 +1935,7 @@ void resetModule(Module &m) {
         case WIREBENCH_BLOCK_MARAFLOW:
             m.flagA = false;
             m.s[0] = m.s[1] = m.s[2] = 0;
+            m.f[0] = m.f[1] = m.f[2] = 0.0;
             std::fill(m.outPins.begin(), m.outPins.end(), boolean(false));
             return;
         case WIREBENCH_BLOCK_SYSTEMCMD:
@@ -2449,7 +2453,7 @@ static int32_t stepImpl(WirebenchSim *sim, double deltaMs, bool forceAll) {
         if (!isDue) continue;
         ranAny = true;
         sim->threadRunCounts[tid] += 1;
-        Sample sample{sim->tickCount, interval};
+        Sample sample{sim->tickCount, (sim->profileScheduling && !forceAll) ? interval : stepMs};
         updateMaraflowEStop(sim);
         if (sim->maraflowEStopActive && sim->maraflowEStopMode == 1) {
             for (int channel = 0; channel < 16; ++channel) ldWrite(sim, "DO" + std::to_string(channel), 0.0);
@@ -2460,6 +2464,9 @@ static int32_t stepImpl(WirebenchSim *sim, double deltaMs, bool forceAll) {
             continue;
         }
         for (size_t index : sim->schedule[tid]) {
+            /* One module, in this order: construct bookkeeping (never gated), then the gate,
+               then pull, process, write-through and push. */
+            constructBookkeeping(sim, index);
             if (sim->maraflowEStopActive && sim->maraflowEStopMode == 2) {
                 const Module &module = sim->modules[index];
                 auto page = module.strings.find("Page");
@@ -2468,9 +2475,6 @@ static int32_t stepImpl(WirebenchSim *sim, double deltaMs, bool forceAll) {
                         || (!page->second.empty() && page->second.front() == '!'));
                 if (!isEStopPage) continue;
             }
-            /* One module, in this order: construct bookkeeping (never gated), then the gate,
-               then pull, process, write-through and push. */
-            constructBookkeeping(sim, index);
             /* The engine-level gate: a module inside a false branch, or whose first in pin reads 0, does
                not run and does not push, so all its outputs hold. That is not each block's own `En` rule —
                it applies even where pin 0 is an operand (`Int2Bits`'s `X`) — and it reads pin 0 *before*

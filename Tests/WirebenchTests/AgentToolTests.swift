@@ -504,6 +504,28 @@ struct ToolTests {
         let b = AgentModel(store: InMemorySecretStore(), client: AgentClient(session: StubProtocol.session()), defaults: defaults)
         #expect(b.canEdit)
     }
+
+    @Test("Numeric agent tools clamp huge values instead of wrapping or trapping")
+    func numericToolsClamp() throws {
+        let (model, keep) = make(); defer { withExtendedLifetime(keep) {} }
+        let box = AgentToolbox(model: model)
+        #expect(!run(box, "add_block", ["type": "IntVar", "name": "IV1", "x": 40, "y": 40]).failed)
+        #expect(!run(box, "add_block", ["type": "PulseGen", "name": "PG1", "x": 200, "y": 40]).failed)
+        #expect(!run(box, "add_block", ["type": "IAdd", "name": "ADD1", "x": 360, "y": 40]).failed)
+        let iv = try #require(model.project?.modules.first { $0.name == "IV1" })
+        let pg = try #require(model.project?.modules.first { $0.name == "PG1" })
+        let add = try #require(model.project?.modules.first { $0.name == "ADD1" })
+
+        let huge = Double(Int32.max) * 10
+        #expect(!run(box, "set_variable", ["block": iv.id, "value": huge]).failed)
+        #expect(model.getNode(id: iv.id)?.block.outPins.first?.asInt32 == Int32.max)
+
+        #expect(!run(box, "set_param", ["block": pg.id, "pin": 0, "value": Int(Int32.max) + 50]).failed)
+        #expect(model.module(id: pg.id)?.paramPins[0].value.asInt32 == Int32.max)
+
+        #expect(!run(box, "set_input_value", ["block": add.id, "pin": 1, "value": -huge]).failed)
+        #expect(model.getNode(id: add.id)?.block.inPins[1].asInt32 == Int32.min)
+    }
 }
 }
 #endif

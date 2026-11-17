@@ -146,6 +146,7 @@ public enum PLCProgramOptimizer {
     /// How many cycles the slowest value takes to cross the program: a link costs one cycle when the module that
     /// reads comes before the module that makes (in the same thread), nothing otherwise. A loop counts once.
     static func cycles(of modules: [PLCProjectCompiler.Module], readers: [UInt8: [UInt8]]) -> Int {
+        guard !modules.isEmpty else { return 0 }
         var position: [UInt8: (thread: Int, place: Int)] = [:]
         for (place, module) in modules.enumerated() { position[module.umisteni] = (module.threadId, place) }
         var feeders: [UInt8: [UInt8]] = [:]

@@ -211,7 +211,7 @@ public final class ReadArrayBlock: FunctionBlock, @unchecked Sendable {
     }
 
     public func reset() {
-        outPins[0] = .int32(0)
+        outPins[0] = element == .floating ? .float(0) : .int32(0)
     }
 }
 
@@ -251,7 +251,7 @@ public final class WriteArrayBlock: FunctionBlock, @unchecked Sendable {
     }
 
     public func reset() {
-        outPins[0] = .int32(0)
+        outPins[0] = element == .floating ? .float(0) : .int32(0)
     }
 }
 

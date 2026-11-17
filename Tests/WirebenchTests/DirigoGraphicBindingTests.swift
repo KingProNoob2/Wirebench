@@ -64,6 +64,21 @@ struct DirigoGraphicBindingTests {
         #expect(cleared.graphics.first?.inputModuleId == nil)
     }
 
+    @Test("Fractional LOW and HIGH thresholds round-trip through PCC serialization")
+    func serializesFractionalThresholds() throws {
+        var project = PCCProject(name: "fractional-graphic")
+        project.pages = [ProjectPage(caption: "P1")]
+        project.graphics = [
+            ProjectGraphic(type: 3, page: "P1",
+                           nodes: [RoutePoint(x: 10, y: 20), RoutePoint(x: 30, y: 40)],
+                           inputModuleId: 7, inputPinId: 2, lowValue: 0.25, highValue: 1.75)
+        ]
+        let reparsed = try PCCParser().parse(xmlString: PCCSerializer().serialize(project: project))
+        let graphic = try #require(reparsed.graphics.first)
+        #expect(graphic.lowValue == 0.25)
+        #expect(graphic.highValue == 1.75)
+    }
+
     @MainActor
     @Test("A connected graphic is active while its output is high")
     func followsOutput() throws {

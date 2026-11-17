@@ -473,20 +473,24 @@ public final class AgentToolbox: @unchecked Sendable {
 
         case "set_input_value":
             guard let module = module(int(args, "block")), let pin = int(args, "pin"), let number = double(args, "value"),
-                  pin >= 0, pin < module.inPins.count else { return failure("Needs block, a valid input pin and value.", summary: "Bad arguments") }
+                  number.isFinite,
+                  pin >= 0, pin < module.inPins.count else { return failure("Needs block, a valid input pin and finite value.", summary: "Bad arguments") }
             if case .bool = model.getNode(id: module.id)?.block.inPins[safe: pin] {
                 model.setModuleInput(moduleId: module.id, pinIndex: pin, value: .bool(number != 0))
             } else {
-                model.setModuleInput(moduleId: module.id, pinIndex: pin, value: .int32(Int32(truncatingIfNeeded: Int(number))))
+                let clamped = Int32(Swift.max(Double(Int32.min), Swift.min(Double(Int32.max), number.rounded())))
+                model.setModuleInput(moduleId: module.id, pinIndex: pin, value: .int32(clamped))
             }
             return done("Set \(module.name) input \(pin) to \(number).", summary: "Set \(module.name) input \(pin) = \(number)")
 
         case "set_variable":
-            guard let module = module(int(args, "block")), let number = double(args, "value") else { return failure("Needs block and value.", summary: "Bad arguments") }
+            guard let module = module(int(args, "block")), let number = double(args, "value"),
+                  number.isFinite else { return failure("Needs block and finite value.", summary: "Bad arguments") }
             if BlockRole.boolVarMode(of: module) != nil {
                 model.setModuleOutput(moduleId: module.id, pinIndex: 0, value: .bool(number != 0))
             } else if BlockRole.isIntVariable(module) {
-                model.setVariableValue(moduleId: module.id, value: Int(number))
+                let clamped = Int(Swift.max(Double(Int32.min), Swift.min(Double(Int32.max), number.rounded())))
+                model.setVariableValue(moduleId: module.id, value: clamped)
             } else {
                 return failure("\(module.name) is not a BoolVar, IntVar or LongVar. Use set_input_value or configure_block.", summary: "Not a variable")
             }
@@ -495,7 +499,7 @@ public final class AgentToolbox: @unchecked Sendable {
         case "set_param":
             guard let module = module(int(args, "block")), let pin = int(args, "pin"), let number = int(args, "value"),
                   pin >= 0, pin < module.paramPins.count else { return failure("Needs block, a valid parameter index and value.", summary: "Bad arguments") }
-            model.updateModuleParam(id: module.id, paramIndex: pin, value: .int32(Int32(truncatingIfNeeded: number)))
+            model.updateModuleParam(id: module.id, paramIndex: pin, value: .int32(Int32(clamping: number)))
             return done("Set parameter \(pin) of \(module.name) to \(number).", summary: "Set \(module.name) parameter \(pin) = \(number)")
 
         case "configure_block":

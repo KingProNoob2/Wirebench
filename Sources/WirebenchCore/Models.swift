@@ -110,32 +110,49 @@ public enum PinValue: Hashable, Sendable, Codable, CustomStringConvertible {
     public static func parse(_ string: String) -> PinValue {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .undefined }
-        
+
         // Check for hex ($1234 or 0x1234)
-        if trimmed.hasPrefix("$") {
-            let hexStr = String(trimmed.dropFirst())
+        if trimmed.hasPrefix("$") || trimmed.hasPrefix("0x") || trimmed.hasPrefix("0X") {
+            let hexStr = String(trimmed.dropFirst(trimmed.hasPrefix("$") ? 1 : 2))
             if let val = Int32(hexStr, radix: 16) {
                 return .int32(val)
             }
-        }
-        if trimmed.hasPrefix("0x") || trimmed.hasPrefix("0X") {
-            let hexStr = String(trimmed.dropFirst(2))
-            if let val = Int32(hexStr, radix: 16) {
-                return .int32(val)
+            if hexStr.count <= 8, let uval = UInt32(hexStr, radix: 16) {
+                return .int32(Int32(bitPattern: uval))
             }
+            if let val = Int64(hexStr, radix: 16) {
+                return .int64(val)
+            }
+            if let uval = UInt64(hexStr, radix: 16) {
+                return .int64(Int64(bitPattern: uval))
+            }
+            return .undefined
         }
-        
+
         // Check for binary (0b11110000 or 0B11110000)
         if trimmed.hasPrefix("0b") || trimmed.hasPrefix("0B") {
             let binStr = String(trimmed.dropFirst(2))
             if let val = Int32(binStr, radix: 2) {
                 return .int32(val)
             }
+            if binStr.count <= 32, let uval = UInt32(binStr, radix: 2) {
+                return .int32(Int32(bitPattern: uval))
+            }
+            if let val = Int64(binStr, radix: 2) {
+                return .int64(val)
+            }
+            if let uval = UInt64(binStr, radix: 2) {
+                return .int64(Int64(bitPattern: uval))
+            }
+            return .undefined
         }
-        
-        // Integer
+
+        // Integer (32-bit first, then 64-bit so Long constants keep integer precision)
         if let val = Int32(trimmed) {
             return .int32(val)
+        }
+        if let val = Int64(trimmed) {
+            return .int64(val)
         }
         // Float
         if let val = Float(trimmed) {
@@ -144,8 +161,33 @@ public enum PinValue: Hashable, Sendable, Codable, CustomStringConvertible {
         // Boolean
         if trimmed.lowercased() == "true" { return .bool(true) }
         if trimmed.lowercased() == "false" { return .bool(false) }
-        
+
         return .undefined
+    }
+
+    /// Parses user input while preserving the existing pin's value kind when known (so typing `"0"` or `"5"`
+    /// on a float, 64-bit, or boolean pin does not silently turn it into `.int32`).
+    public static func parse(_ string: String, preservingTypeOf current: PinValue) -> PinValue {
+        let parsed = parse(string)
+        switch current {
+        case .bool:
+            if case .undefined = parsed { return parsed }
+            return .bool(parsed.asBool)
+        case .int16:
+            if case .undefined = parsed { return parsed }
+            return .int16(Int16(clamping: parsed.asInt))
+        case .int32:
+            if case .undefined = parsed { return parsed }
+            return .int32(parsed.asInt32)
+        case .int64:
+            if case .undefined = parsed { return parsed }
+            return .int64(Int64(parsed.asInt))
+        case .float:
+            if case .undefined = parsed { return parsed }
+            return .float(parsed.asFloat)
+        case .undefined:
+            return parsed
+        }
     }
 }
 

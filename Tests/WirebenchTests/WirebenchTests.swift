@@ -760,5 +760,68 @@ struct WirebenchTests {
             }
         }
     }
+
+    @Test("PinValue.parse handles hex, binary, 64-bit, invalid literals, and type preservation")
+    func testPinValueParseAndPreservingType() {
+        #expect(PinValue.parse("$80000000") == .int32(.min))
+        #expect(PinValue.parse("0x100000000") == .int64(0x1_0000_0000))
+        #expect(PinValue.parse("$ZZZZ") == .undefined)
+        #expect(PinValue.parse("0b10000000000000000000000000000000") == .int32(.min))
+        #expect(PinValue.parse("0b100000000000000000000000000000000") == .int64(1 << 32))
+        #expect(PinValue.parse("0b102") == .undefined)
+
+        #expect(PinValue.parse("5", preservingTypeOf: .float(0)) == .float(5))
+        #expect(PinValue.parse("5", preservingTypeOf: .int64(0)) == .int64(5))
+        #expect(PinValue.parse("50000", preservingTypeOf: .int16(0)) == .int16(.max))
+        #expect(PinValue.parse("1", preservingTypeOf: .bool(false)) == .bool(true))
+        #expect(PinValue.parse("not-a-number", preservingTypeOf: .float(1)) == .undefined)
+    }
+
+    @Test("Type-name factories honor OP and INIT_VALUE, and float array blocks reset to float(0)")
+    func testRegistryTypeNameFactoriesAndArrayReset() throws {
+        let floatMul = BlockRegistry.shared.create(for: PCCModule(
+            id: 1, guid: UUID(), name: "FloatMath1", x: 0, y: 0, order: 1, threadId: 1, page: "main",
+            rawAttributes: ["OP": "mul"]
+        ))
+        floatMul.inPins = [.float(3), .float(4)]
+        floatMul.process(sample: SampleContext())
+        #expect(floatMul.outPins[0] == .float(12))
+
+        let intVar = BlockRegistry.shared.create(for: PCCModule(
+            id: 2, guid: UUID(), name: "IntVar1", x: 0, y: 0, order: 2, threadId: 1, page: "main",
+            rawAttributes: ["INIT_VALUE": "42"]
+        ))
+        #expect(intVar.outPins[0] == .int32(42))
+
+        let floatVar = BlockRegistry.shared.create(for: PCCModule(
+            id: 3, guid: UUID(), name: "FloatVar1", x: 0, y: 0, order: 3, threadId: 1, page: "main",
+            rawAttributes: ["INIT_VALUE": "3.5"]
+        ))
+        #expect(floatVar.outPins[0] == .float(3.5))
+
+        let readFloat = ReadArrayBlock(element: .floating)
+        readFloat.outPins[0] = .float(9.25)
+        readFloat.reset()
+        #expect(readFloat.outPins[0] == .float(0))
+
+        let writeFloat = WriteArrayBlock(element: .floating)
+        writeFloat.outPins[0] = .float(9.25)
+        writeFloat.reset()
+        #expect(writeFloat.outPins[0] == .float(0))
+    }
+
+    @Test("CxxSimulationCore clamps extreme TMDateTime epoch day offsets without trapping")
+    func testCxxDateTimeClamping() {
+        var project = PCCProject(name: "extreme-date")
+        project.pages = [ProjectPage(caption: "main")]
+        project.modules = [
+            PCCModule(id: 1, guid: DateTimeBlock.guid, name: "DT1", x: 0, y: 0, order: 1, threadId: 1, page: "main",
+                      inPins: [], outPins: Array(repeating: Pin(id: 0, value: .int32(0)), count: 8))
+        ]
+        let core = CxxSimulationCore(project: project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date.distantFuture)
+        core.step(deltaMs: 10, now: Date.distantPast)
+        #expect(core.outValue(moduleId: 1, pin: 0) != nil)
+    }
 }
 

@@ -366,7 +366,8 @@ extension DbNetFrame {
         if data.isEmpty {
             out = [Command.short.rawValue] + payload
         } else {
-            let length = UInt8(truncatingIfNeeded: payload.count)
+            precondition(payload.count <= Int(UInt8.max), "DbNet serial frame payload exceeds 255 bytes")
+            let length = UInt8(payload.count)
             out = [Command.long.rawValue, length, length, Command.long.rawValue] + payload
         }
         out.append(checksum(payload))

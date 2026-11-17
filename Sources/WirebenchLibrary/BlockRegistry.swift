@@ -486,7 +486,7 @@ public final class BlockRegistry: @unchecked Sendable {
         register(typeName: "calibtransf") { _ in CalibratedTransformBlock() }
 
         // FloatMath
-        register(guid: FloatMathBlock.guid) { mod in
+        let makeFloatMath: Factory = { mod in
             let opStr = mod.rawAttributes["OP"]?.lowercased() ?? "add"
             let op: FloatMathBlock.Operation
             switch opStr {
@@ -500,7 +500,8 @@ public final class BlockRegistry: @unchecked Sendable {
             }
             return FloatMathBlock(operation: op)
         }
-        register(typeName: "floatmath") { _ in FloatMathBlock() }
+        register(guid: FloatMathBlock.guid, factory: makeFloatMath)
+        register(typeName: "floatmath", factory: makeFloatMath)
         // The Dirigo float-math family (FAdd, FSub, FMul, FDiv, FSqrt, ...) are separate block
         // types whose pin layout includes an `En` pin this class does not model. Aliasing them
         // here would simulate them with the wrong operands, so they are deliberately left
@@ -583,25 +584,21 @@ public final class BlockRegistry: @unchecked Sendable {
         }
 
         // IntVar, FloatVar
-register(guid: IntVarBlock.guid) { mod in
+        let makeIntVar: Factory = { mod in
             // No parameter pin any more, so the initial value lives in an attribute.
             let raw = mod.paramPins.first?.value.asInt ?? mod.rawAttributes["INIT_VALUE"].flatMap { Int($0) } ?? 0
             return IntVarBlock(initialValue: Int32(clamping: raw))
         }
-        register(typeName: "intvar") { mod in
-            let initVal = mod.paramPins.first?.value.asInt32 ?? 0
-            return IntVarBlock(initialValue: initVal)
-        }
+        register(guid: IntVarBlock.guid, factory: makeIntVar)
+        register(typeName: "intvar", factory: makeIntVar)
 
-register(guid: FloatVarBlock.guid) { mod in
+        let makeFloatVar: Factory = { mod in
             let raw = mod.paramPins.first?.value.asFloat
                 ?? mod.rawAttributes["INIT_VALUE"].flatMap { Float($0) } ?? 0
             return FloatVarBlock(initialValue: raw)
         }
-        register(typeName: "floatvar") { mod in
-            let initVal = mod.paramPins.first?.value.asFloat ?? 0.0
-            return FloatVarBlock(initialValue: initVal)
-        }
+        register(guid: FloatVarBlock.guid, factory: makeFloatVar)
+        register(typeName: "floatvar", factory: makeFloatVar)
 
         // Array Management
         register(guid: CreateArrayBlock.guid) { _ in CreateArrayBlock() }

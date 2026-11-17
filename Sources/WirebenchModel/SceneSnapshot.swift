@@ -254,7 +254,7 @@ public struct SceneSnapshot: Codable, Sendable {
     }
 
     private static func maraflowColour(_ value: Int) -> String {
-        let rgb = UInt32(bitPattern: Int32(value)) & 0xFF_FFFF
+        let rgb = UInt32(truncatingIfNeeded: value) & 0xFF_FFFF
         return String(format: "#%02X%02X%02X", (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
     }
 

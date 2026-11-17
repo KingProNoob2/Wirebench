@@ -338,7 +338,7 @@ public struct PLCProjectCompiler {
     public static func programModules(_ modules: [Module]) -> [Module] {
         let calls = calledSheets(modules)
         return modules.filter { m in
-            if m.page.hasPrefix("*") { return calls.contains(String(m.page.dropFirst())) }
+            if m.page.hasPrefix("*") { return calls.contains(String(m.page.dropFirst()).lowercased()) }
             return m.threadId > 0
         }
     }
@@ -352,8 +352,10 @@ public struct PLCProjectCompiler {
         var frontier = modules.filter { isCall($0) && $0.threadId > 0 && !$0.page.hasPrefix("*") }
             .compactMap(\.macroName)
         while let name = frontier.popLast() {
-            guard reached.insert(name).inserted else { continue }
-            frontier += modules.filter { isCall($0) && $0.page == "*" + name }.compactMap(\.macroName)
+            let key = name.lowercased()
+            guard reached.insert(key).inserted else { continue }
+            let targetPage = "*" + key
+            frontier += modules.filter { isCall($0) && $0.page.lowercased() == targetPage }.compactMap(\.macroName)
         }
         return reached
     }
@@ -419,12 +421,15 @@ public struct PLCProjectCompiler {
     /// The modules a call stands for, in expansion order: its sheet's modules by `(ORDER, ID)`, each nested call
     /// replaced in place by its own sheet's, and so on down. `seen` stops a sheet that calls itself.
     private static func inlined(_ call: Module, in program: [Module], seen: Set<String> = []) -> [Module] {
-        guard isCall(call), let name = call.macroName, !seen.contains(name) else { return [] }
+        guard isCall(call), let name = call.macroName else { return [] }
+        let key = name.lowercased()
+        guard !seen.contains(key) else { return [] }
+        let targetPage = "*" + key
         var out: [Module] = []
-        for inner in program.filter({ $0.page == "*" + name })
+        for inner in program.filter({ $0.page.lowercased() == targetPage })
                             .sorted(by: { ($0.order, $0.umisteni) < ($1.order, $1.umisteni) }) {
             out.append(inner)
-            out += inlined(inner, in: program, seen: seen.union([name]))
+            out += inlined(inner, in: program, seen: seen.union([key]))
         }
         return out
     }
@@ -582,9 +587,11 @@ public struct PLCProjectCompiler {
             let name = String(interface.page.dropFirst())
             // A call on a `*` sheet is a nested macro; one that sits on the sheet it calls is a loop, not a caller.
             guard let call = modules.first(where: {
-                normaliseGUID($0.guid) == macroCallGUID && $0.macroName == name && $0.page != interface.page
+                normaliseGUID($0.guid) == macroCallGUID
+                    && $0.macroName?.lowercased() == name.lowercased()
+                    && $0.page.lowercased() != interface.page.lowercased()
             }) else { return nil }
-            let params = interface.macroName == "Params"
+            let params = interface.macroName?.lowercased() == "params"
             if let w = wires.first(where: { $0.isParam == params && $0.inModule == call.umisteni && $0.inPin == pin }) {
                 return .wire(w.outModule, w.outPin)
             }
@@ -795,7 +802,7 @@ public struct PLCProjectCompiler {
                     let hidden = m.hiddenPinMask ?? 0
                     var pin = 1
                     for channel in 0..<channels {
-                        if channel < 16, hidden & (1 << channel) != 0 {
+                        if channel < Int.bitWidth, hidden & (1 << channel) != 0 {
                             put(PLCProgramBuilder.Module.constant(0))
                         } else {
                             put(inValue(pin))

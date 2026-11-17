@@ -124,7 +124,7 @@ enum BridgeCommands {
                 ids = [module.id]
             }
             model.selectedModuleIds = ids
-            model.selectedModuleId = ids.first
+            model.selectedModuleId = ids.sorted().first
             model.selectedAnnotationIndices = []
             model.selectedAnnotationIndex = nil
         case "move":
@@ -149,14 +149,14 @@ enum BridgeCommands {
             model.selectedModuleIds = []
             model.selectedModuleId = nil
             model.selectedAnnotationIndices = indices
-            model.selectedAnnotationIndex = indices.first
+            model.selectedAnnotationIndex = indices.sorted().first
         case "dragGraphic":
             let delta = CGSize(width: double(arguments, "dx") ?? 0, height: double(arguments, "dy") ?? 0)
             session.graphicDrag = Dictionary(uniqueKeysWithValues: ((arguments["indices"] as? [Int]) ?? []).map { ($0, delta) })
         case "moveGraphic":
             let indices = Set((arguments["indices"] as? [Int]) ?? [])
             session.graphicDrag = [:]
-            if let lead = indices.first {
+            if let lead = indices.min() {
                 model.moveShapes(indices, lead: lead, deltaX: double(arguments, "dx") ?? 0, deltaY: double(arguments, "dy") ?? 0)
             }
         case "resizeShape":
@@ -245,9 +245,9 @@ enum BridgeCommands {
             guard let m = int(arguments, "module"), let p = int(arguments, "pin"), let v = int(arguments, "value") else { return ["ok": false] }
             // Keep the pin's own width, as the SwiftUI inspector does.
             switch model.getNode(id: m)?.block.inPins[safe: p] {
-            case .int16: model.setModuleInput(moduleId: m, pinIndex: p, value: .int16(Int16(truncatingIfNeeded: v)))
+            case .int16: model.setModuleInput(moduleId: m, pinIndex: p, value: .int16(Int16(clamping: v)))
             case .int64: model.setModuleInput(moduleId: m, pinIndex: p, value: .int64(Int64(v)))
-            default: model.setModuleInput(moduleId: m, pinIndex: p, value: .int32(Int32(truncatingIfNeeded: v)))
+            default: model.setModuleInput(moduleId: m, pinIndex: p, value: .int32(Int32(clamping: v)))
             }
         case "setVariable":
             guard let m = int(arguments, "module"), let v = int(arguments, "value") else { return ["ok": false] }
