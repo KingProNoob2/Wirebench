@@ -12,8 +12,6 @@ public struct MainView: View {
     @State private var inspectorWidth: CGFloat = MainView.inspectorIdealWidth
     /// The width the current divider drag started from, so the panes do not creep.
     @State private var dragStartWidth: CGFloat?
-    /// The width of the detail area, used to choose between the full speed slider and its compact menu.
-    @State private var detailWidth: CGFloat = 0
     /// The height of the toolbar — the top safe-area inset of the detail area — which the top bar's material fills.
     @State private var topInset: CGFloat = 0
     @State private var showingPalette = false
@@ -39,10 +37,9 @@ public struct MainView: View {
     /// The divider's grab area. The line drawn inside it stays a hairline.
     private static let inspectorDividerWidth: CGFloat = 6
 
-    /// In a narrow window the speed slider, the tick badge and the trailing buttons cannot all fit; the slider
-    /// becomes a small menu so the buttons stay out of the toolbar's overflow. Hysteresis keeps that swap from
-    /// happening back and forth while the sidebar is animating through the threshold.
-    @State private var compactToolbar = false
+    /// The speed popover. Keeping the slider out of the toolbar itself leaves a stable, narrow set of toolbar items,
+    /// so the sidebar animation cannot make the right-hand buttons fold into the overflow menu.
+    @State private var showingSpeed = false
 
     /// Opens or closes the inspector: the pane's width and the content's slide run in one animation.
     private func toggleInspector() {
@@ -269,11 +266,6 @@ public struct MainView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-            detailWidth = width
-            if width < 600 { compactToolbar = true }
-            else if width > 700 { compactToolbar = false }
-        }
         .onGeometryChange(for: CGFloat.self) { proxy in
             // The toolbar is the inset above this view; where the system does not report it as one, it is how far down
             // the window this view starts.
@@ -530,35 +522,35 @@ public struct MainView: View {
             HStack(spacing: 8) {
                 TickCountBadge(model: model)
 
-                if compactToolbar {
-                    // The same choices as the slider, as a menu, so a narrow toolbar keeps the trailing buttons.
-                    Menu("\(Int((model.simulationSpeed * 100).rounded()))%") {
-                        ForEach(Array(AppModel.speedSteps.enumerated()), id: \.offset) { _, step in
-                            Button("\(Int((step * 100).rounded()))%") { model.simulationSpeed = step }
-                        }
-                        Divider()
-                        Button("Reset to 100%") { model.simulationSpeed = 1 }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .disabled(model.project == nil)
-                    .help("Simulation speed. 100% is the base pace; 1000% is real time, as the PLC would run it.")
-                } else {
-                    // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
-                    // stay the profile's, and this only changes how fast time passes.
-                    Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
-                        .controlSize(.small)
-                        .frame(width: 150)
-                        .disabled(model.project == nil)
-                        .help("Simulation speed. 100% is the base pace; 1000% is real time, as the PLC would run it.")
-
+                Button {
+                    showingSpeed = true
+                } label: {
                     Text("\(Int((model.simulationSpeed * 100).rounded()))%")
                         .font(.caption)
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(width: 38, alignment: .trailing)
-                        .onTapGesture(count: 2) { model.simulationSpeed = 1 }
-                        .help("Double-click to return to 100%.")
+                        .frame(minWidth: 38, alignment: .trailing)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.project == nil)
+                .help("Simulation speed. 100% is the base pace; 1000% is real time, as the PLC would run it.")
+                .popover(isPresented: $showingSpeed, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Simulation speed")
+                            .font(.headline)
+                        Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
+                            .frame(width: 220)
+                        HStack {
+                            Text("\(Int((model.simulationSpeed * 100).rounded()))%")
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Reset to 100%") { model.simulationSpeed = 1 }
+                                .disabled(model.simulationSpeed == 1)
+                        }
+                    }
+                    .padding(14)
+                    .frame(width: 248)
                 }
             }
             // The capsule hugs this row, so these are its margins: the same on both sides. The label has a fixed
