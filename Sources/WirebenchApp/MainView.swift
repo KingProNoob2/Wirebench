@@ -51,6 +51,10 @@ public struct MainView: View {
     private static let runControlsWidth: CGFloat = 410
     private static let toolbarSideReserve: CGFloat = 140
 
+    /// In a narrow window the speed slider, the tick badge and the trailing buttons cannot all fit; the slider
+    /// becomes a small menu so the buttons stay out of the toolbar's overflow.
+    private var compactToolbar: Bool { detailWidth < 640 }
+
     /// Opens or closes the inspector: the pane's width and the content's slide run in one animation.
     private func toggleInspector() {
         withAnimation(.easeInOut(duration: 0.22)) { showInspector.toggle() }
@@ -519,37 +523,6 @@ public struct MainView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItemGroup(placement: .automatic) {
-            // The prominent "+" is the block library, matching how these editors usually work:
-            // adding to the document is the common action, creating a document is not.
-            Button {
-                showingPalette = true
-            } label: {
-                Label("Add Block", systemImage: "plus")
-            }
-            .disabled(model.project == nil)
-            .help("Add Block (⌘K)")
-            .popover(isPresented: $showingPalette, arrowEdge: .bottom) {
-                BlockPaletteView(
-                    onInsert: { guid in model.addBlock(guid: guid) },
-                    dismiss: { showingPalette = false },
-                    macros: model.callableMacros,
-                    interfaces: model.missingMacroInterfaces,
-                    onInsertMacro: { model.addMacroCall(sheet: $0) },
-                    onInsertInterface: { model.addMacroInterface($0) },
-                    usage: model.blockUsage,
-                    context: model.blockSuggestionContext
-                )
-            }
-
-            Toggle(isOn: $model.snapToGrid) {
-                Label("Snap to Grid", systemImage: "squareshape.split.3x3")
-            }
-            .help("Snap blocks to the grid when moving or adding them")
-            // Open and Save live in the File menu (⌘O, ⌘S), as in other document apps; the toolbar
-            // keeps to what is used while editing.
-        }
-
         ToolbarItemGroup(placement: .principal) {
             ControlGroup {
                 Button {
@@ -577,21 +550,36 @@ public struct MainView: View {
             HStack(spacing: 8) {
                 TickCountBadge(model: model)
 
-                // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
-                // stay the profile's, and this only changes how fast time passes.
-                Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
-                    .controlSize(.small)
-                    .frame(width: 150)
+                if compactToolbar {
+                    // The same choices as the slider, as a menu, so a narrow toolbar keeps the trailing buttons.
+                    Menu("\(Int((model.simulationSpeed * 100).rounded()))%") {
+                        ForEach(Array(AppModel.speedSteps.enumerated()), id: \.offset) { _, step in
+                            Button("\(Int((step * 100).rounded()))%") { model.simulationSpeed = step }
+                        }
+                        Divider()
+                        Button("Reset to 100%") { model.simulationSpeed = 1 }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                     .disabled(model.project == nil)
                     .help("Simulation speed. 100% is the base pace; 1000% is real time, as the PLC would run it.")
+                } else {
+                    // Simulation speed, as a percentage of real time, in the steps worth having: the thread periods
+                    // stay the profile's, and this only changes how fast time passes.
+                    Slider(value: speedIndex, in: 0...Double(AppModel.speedSteps.count - 1), step: 1)
+                        .controlSize(.small)
+                        .frame(width: 150)
+                        .disabled(model.project == nil)
+                        .help("Simulation speed. 100% is the base pace; 1000% is real time, as the PLC would run it.")
 
-                Text("\(Int((model.simulationSpeed * 100).rounded()))%")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 38, alignment: .trailing)
-                    .onTapGesture(count: 2) { model.simulationSpeed = 1 }
-                    .help("Double-click to return to 100%.")
+                    Text("\(Int((model.simulationSpeed * 100).rounded()))%")
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 38, alignment: .trailing)
+                        .onTapGesture(count: 2) { model.simulationSpeed = 1 }
+                        .help("Double-click to return to 100%.")
+                }
             }
             // The capsule hugs this row, so these are its margins: the same on both sides. The label has a fixed
             // width (it used to have a minimum, which left a gap before short values like "5%") and the slider is
@@ -609,14 +597,39 @@ public struct MainView: View {
         }
 #endif
 
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
+            // One capsule: the prominent +, the grid switch, the ST editor and the inspector. Keeping them in a
+            // single group stops macOS from dropping the grid switch into a chevron menu on its own.
+            Button {
+                showingPalette = true
+            } label: {
+                Label("Add Block", systemImage: "plus")
+            }
+            .disabled(model.project == nil)
+            .help("Add Block (⌘K)")
+            .popover(isPresented: $showingPalette, arrowEdge: .bottom) {
+                BlockPaletteView(
+                    onInsert: { guid in model.addBlock(guid: guid) },
+                    dismiss: { showingPalette = false },
+                    macros: model.callableMacros,
+                    interfaces: model.missingMacroInterfaces,
+                    onInsertMacro: { model.addMacroCall(sheet: $0) },
+                    onInsertInterface: { model.addMacroInterface($0) },
+                    usage: model.blockUsage,
+                    context: model.blockSuggestionContext
+                )
+            }
+
+            Toggle(isOn: $model.snapToGrid) {
+                Label("Snap to Grid", systemImage: "squareshape.split.3x3")
+            }
+            .help("Snap blocks to the grid when moving or adding them")
+
             Button { openWindow(id: "swift") } label: {
                 Label("Structured Text", systemImage: "text.alignleft")
             }
             .help("Structured Text Editor (⌥⌘E)")
-        }
 
-        ToolbarItem(placement: .primaryAction) {
             // The pane animates in and out; the button only starts it. A toggle, so it is drawn pressed — highlighted
             // — while the inspector is open.
             Toggle(isOn: Binding(get: { showInspector }, set: { _ in toggleInspector() })) {
