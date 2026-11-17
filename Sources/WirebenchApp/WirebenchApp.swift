@@ -6,13 +6,15 @@ struct WirebenchApp: App {
     @State private var model = AppModel()
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @Environment(\.openWindow) private var openWindow
+#if WIREBENCH_AI
     @Environment(\.dismissWindow) private var dismissWindow
+#endif
 
     var body: some Scene {
         WindowGroup {
             MainView(model: model)
                 .frame(minWidth: 1000, minHeight: 650)
-                .preferredColorScheme(model.appearance.colorScheme)
+                .wirebenchAppearance(model)
                 // Documents opened from Finder or `open` arrive here.
                 .onOpenURL { url in
                     model.openProjectFromFinder(url)
@@ -28,7 +30,7 @@ struct WirebenchApp: App {
         // `WIREBENCH_AI`, which is off by default.
         Window("Agent", id: "agent") {
             AgentPanelView(agent: model.agent)
-                .preferredColorScheme(model.appearance.colorScheme)
+                .wirebenchAppearance(model)
                 // A window that comes back at launch (macOS restores the ones that were open), or is open when the project goes, closes with no project.
                 .onAppear { if model.project == nil { dismissWindow(id: "agent") } }
                 .onChange(of: model.project == nil) { _, none in if none { dismissWindow(id: "agent") } }
@@ -38,51 +40,66 @@ struct WirebenchApp: App {
         // The Structured Text editor: its own window, since it is a source buffer beside the sheet rather than a pane of it.
         Window("Structured Text", id: "swift") {
             SwiftIDEView(model: model)
-                .preferredColorScheme(model.appearance.colorScheme)
+                .wirebenchAppearance(model)
         }
         .defaultSize(width: 1040, height: 620)
         // The block reference, one window at a time like the agent's.
         Window("Block Reference", id: "help") {
             HelpView(help: model.help)
-                .preferredColorScheme(model.appearance.colorScheme)
+                .wirebenchAppearance(model)
         }
         .defaultSize(width: 900, height: 640)
         Settings {
             SettingsView(model: model)
-                .preferredColorScheme(model.appearance.colorScheme)
+                .wirebenchAppearance(model)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
-            // View ▸ Show/Hide Sidebar (⌃⌘S) and Show/Hide Inspector (⌃⌘I): a hidden pane can come
-            // back from the menu and the keyboard, not only from its toolbar button. The inspector is a
-            // plain split pane rather than `.inspector`, so its command is ours rather than `InspectorCommands`.
-            SidebarCommands()
-            CommandGroup(after: .sidebar) {
-                Button("Toggle Inspector") {
-                    NotificationCenter.default.post(name: .toggleInspector, object: nil)
-                }
-                .keyboardShortcut("i", modifiers: [.control, .command])
+            viewCommands
+            editCommands
+            buildCommands
+            exportCommands
+            fileCommands
+        }
+    }
+
+    // MARK: - Menu bar
+
+    @CommandsBuilder
+    private var viewCommands: some Commands {
+        // View ▸ Show/Hide Sidebar (⌃⌘S) and Show/Hide Inspector (⌃⌘I): a hidden pane can come
+        // back from the menu and the keyboard, not only from its toolbar button. The inspector is a
+        // plain split pane rather than `.inspector`, so its command is ours rather than `InspectorCommands`.
+        SidebarCommands()
+        CommandGroup(after: .sidebar) {
+            Button("Toggle Inspector") {
+                NotificationCenter.default.post(name: .toggleInspector, object: nil)
+            }
+            .keyboardShortcut("i", modifiers: [.control, .command])
 
 #if WIREBENCH_AI
-                // The agent works on the open project, so it is not offered without one.
-                Button("Agent Panel") { openWindow(id: "agent") }
-                    .keyboardShortcut("a", modifiers: [.command, .shift])
-                    .disabled(model.project == nil)
+            // The agent works on the open project, so it is not offered without one.
+            Button("Agent Panel") { openWindow(id: "agent") }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(model.project == nil)
 #endif
 
-                // The source editor makes its own project, so it does not need one open.
-                Button("Structured Text Editor") { openWindow(id: "swift") }
-                    .keyboardShortcut("e", modifiers: [.option, .command])
-            }
+            // The source editor makes its own project, so it does not need one open.
+            Button("Structured Text Editor") { openWindow(id: "swift") }
+                .keyboardShortcut("e", modifiers: [.option, .command])
+        }
 
-            // Help ▸ Block Reference (⌘?), in place of the empty help the system adds.
-            CommandGroup(replacing: .help) {
-                Button("Block Reference") { openWindow(id: "help") }
-                    .keyboardShortcut("/", modifiers: [.command, .shift])
-            }
+        // Help ▸ Block Reference (⌘?), in place of the empty help the system adds.
+        CommandGroup(replacing: .help) {
+            Button("Block Reference") { openWindow(id: "help") }
+                .keyboardShortcut("/", modifiers: [.command, .shift])
+        }
+    }
 
-            CommandGroup(replacing: .undoRedo) {
+    @CommandsBuilder
+    private var editCommands: some Commands {
+        CommandGroup(replacing: .undoRedo) {
             Button("Undo") { model.undo() }
                 .keyboardShortcut("z", modifiers: .command)
                 .disabled(!model.canUndo)
@@ -101,8 +118,11 @@ struct WirebenchApp: App {
                 .keyboardShortcut(.delete, modifiers: [.command, .option])
                 .disabled(model.selectedAnnotationIndex == nil)
         }
+    }
 
-        // The build menu: what the compiler makes of the project.
+    @CommandsBuilder
+    private var buildCommands: some Commands {
+        // What the compiler makes of the project.
         CommandMenu("Build") {
             Button("Build Project") { model.buildAndShowReport() }
                 .keyboardShortcut("b", modifiers: .command)
@@ -117,7 +137,10 @@ struct WirebenchApp: App {
             Button("Use Program Binary as Build Template\u{2026}") { model.chooseBuildTemplate() }
                 .disabled(model.project == nil)
         }
+    }
 
+    @CommandsBuilder
+    private var exportCommands: some Commands {
         // What a build produces. Both are also buttons on the build report, which is where you reach
         // them with a report already open; from here they compile first if nothing is built yet.
         //
@@ -144,67 +167,58 @@ struct WirebenchApp: App {
                 .keyboardShortcut("m", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
         }
+    }
 
+    @CommandsBuilder
+    private var fileCommands: some Commands {
+        // File stays about the document: New/Open/Save and the things that add to or tidy the sheet
+        // are here too, matching the order the editor grew up with.
         CommandGroup(replacing: .newItem) {
-                Button("New Project") {
-                    model.createNewProject()
-                }
+            Button("New Project") { model.createNewProject() }
                 .keyboardShortcut("n", modifiers: .command)
 
-                Button("Open Project\u{2026}") {
-                    model.openProjectFile()
-                }
+            Button("Open Project\u{2026}") { model.openProjectFile() }
                 .keyboardShortcut("o", modifiers: .command)
 
-                Divider()
+            Divider()
 
-                Button("Save") {
-                    model.saveProject()
-                }
+            Button("Save") { model.saveProject() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(model.project == nil)
 
-                Button("Save As\u{2026}") {
-                    model.saveProjectAs()
-                }
+            Button("Save As\u{2026}") { model.saveProjectAs() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
 
-                Divider()
+            Divider()
 
-                Button("Add Block\u{2026}") {
-                    NotificationCenter.default.post(name: .showBlockPalette, object: nil)
-                }
-                .keyboardShortcut("k", modifiers: .command)
+            Button("Add Block\u{2026}") {
+                NotificationCenter.default.post(name: .showBlockPalette, object: nil)
+            }
+            .keyboardShortcut("k", modifiers: .command)
+            .disabled(model.project == nil)
+
+            Button("Add Text") { model.addTextAnnotation() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
 
-                Button("Add Text") { model.addTextAnnotation() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-                    .disabled(model.project == nil)
+            Button("Add Rectangle") { model.addShape(.rectangle) }
+                .keyboardShortcut("r", modifiers: [.control, .command])
+                .disabled(model.project == nil)
 
-                Button("Add Rectangle") { model.addShape(.rectangle) }
-                    .keyboardShortcut("r", modifiers: [.control, .command])
-                    .disabled(model.project == nil)
+            Button("Add Circle") { model.addShape(.ellipse) }
+                .keyboardShortcut("c", modifiers: [.control, .command])
+                .disabled(model.project == nil)
 
-                Button("Add Circle") { model.addShape(.ellipse) }
-                    .keyboardShortcut("c", modifiers: [.control, .command])
-                    .disabled(model.project == nil)
+            Divider()
 
-                Divider()
-
-                Button("Organize Blocks") {
-                    model.organizeBlocks()
-                }
+            Button("Organize Blocks") { model.organizeBlocks() }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
 
-                Button("Reset Wire Routing") {
-                    model.resetWireRouting()
-                }
+            Button("Reset Wire Routing") { model.resetWireRouting() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model.project == nil)
-
-            }
         }
     }
 }
@@ -225,4 +239,11 @@ public extension Notification.Name {
     static let showInspector = Notification.Name("com.wirebench.showInspector")
     /// Asks for the block reference to open at a block type; `userInfo["block"]` is its name.
     static let showHelp = Notification.Name("com.wirebench.showHelp")
+}
+
+private extension View {
+    /// Every window follows the appearance picked in Settings, including the auxiliary windows.
+    func wirebenchAppearance(_ model: AppModel) -> some View {
+        preferredColorScheme(model.appearance.colorScheme)
+    }
 }
