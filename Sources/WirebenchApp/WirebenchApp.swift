@@ -13,7 +13,7 @@ struct WirebenchApp: App {
     var body: some Scene {
         WindowGroup {
             MainView(model: model)
-                .frame(minWidth: 1000, minHeight: 650)
+                .frame(minWidth: 760, minHeight: 650)
                 .wirebenchAppearance(model)
                 // Documents opened from Finder or `open` arrive here.
                 .onOpenURL { url in
