@@ -52,8 +52,9 @@ public struct MainView: View {
     private static let toolbarSideReserve: CGFloat = 140
 
     /// In a narrow window the speed slider, the tick badge and the trailing buttons cannot all fit; the slider
-    /// becomes a small menu so the buttons stay out of the toolbar's overflow.
-    private var compactToolbar: Bool { detailWidth < 640 }
+    /// becomes a small menu so the buttons stay out of the toolbar's overflow. Hysteresis keeps that swap from
+    /// happening back and forth while the sidebar is animating through the threshold.
+    @State private var compactToolbar = false
 
     /// Opens or closes the inspector: the pane's width and the content's slide run in one animation.
     private func toggleInspector() {
@@ -285,7 +286,11 @@ public struct MainView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            detailWidth = width
+            if width < 600 { compactToolbar = true }
+            else if width > 700 { compactToolbar = false }
+        }
         .onGeometryChange(for: CGFloat.self) { proxy in
             // The toolbar is the inset above this view; where the system does not report it as one, it is how far down
             // the window this view starts.
@@ -662,12 +667,16 @@ public struct MainView: View {
         }
     }
 
-    /// How far the run controls move left: the pane's width, or less when the window is too narrow for the toolbar
-    /// to hold the controls and the space beside them — a toolbar that runs out of room hides its buttons.
+    /// How far the run controls move left so they stay centred over the canvas.
+    ///
+    /// The balance is itself a toolbar item; asking for a partial shift in a narrow window made the toolbar too
+    /// wide and pushed the trailing buttons into its overflow menu. Only shift when the whole pane width fits,
+    /// and otherwise leave the controls centred over the detail area.
     private var inspectorShift: CGFloat {
         guard showInspector else { return 0 }
-        let room = max(0, detailWidth - Self.runControlsWidth - 2 * Self.toolbarSideReserve)
-        return min(inspectorWidth + Self.inspectorDividerWidth, room)
+        let target = inspectorWidth + Self.inspectorDividerWidth
+        let room = detailWidth - Self.runControlsWidth - 2 * Self.toolbarSideReserve
+        return room >= target ? target : 0
     }
 
     /// The shift as the one width to show — none for no shift. In steps of 8 pt, so that dragging a window edge
