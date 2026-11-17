@@ -12,18 +12,10 @@ public struct MainView: View {
     @State private var inspectorWidth: CGFloat = MainView.inspectorIdealWidth
     /// The width the current divider drag started from, so the panes do not creep.
     @State private var dragStartWidth: CGFloat?
-    /// The width of the detail area, which is what the toolbar spans. Measured, so the run controls know how
-    /// far they have room to move (`inspectorShift`).
+    /// The width of the detail area, used to choose between the full speed slider and its compact menu.
     @State private var detailWidth: CGFloat = 0
     /// The height of the toolbar — the top safe-area inset of the detail area — which the top bar's material fills.
     @State private var topInset: CGFloat = 0
-    /// The shift the toolbar shows right now. It eases to `inspectorShift` when the inspector opens or closes
-    /// (`easeShift`), where the pane itself slides in the same time.
-    @State private var shownShift: CGFloat = 0
-    @State private var shiftEasing: Task<Void, Never>?
-    /// True while the inspector's own slide is what is moving the balance, so the width-driven path stays out of it.
-    @State private var easingShiftForToggle = false
-    @State private var shiftSettle: Task<Void, Never>?
     @State private var showingPalette = false
     @State private var newPageName: String = ""
     @State private var newPageIsMacro = false
@@ -46,10 +38,6 @@ public struct MainView: View {
     private static let inspectorMaxWidth: CGFloat = 340
     /// The divider's grab area. The line drawn inside it stays a hairline.
     private static let inspectorDividerWidth: CGFloat = 6
-    /// About how wide the run controls are, and how much of each end of the toolbar is taken by the title and the
-    /// trailing buttons. Estimates: the toolbar will not take more than they leave room for.
-    private static let runControlsWidth: CGFloat = 410
-    private static let toolbarSideReserve: CGFloat = 140
 
     /// In a narrow window the speed slider, the tick badge and the trailing buttons cannot all fit; the slider
     /// becomes a small menu so the buttons stay out of the toolbar's overflow. Hysteresis keeps that swap from
@@ -59,11 +47,6 @@ public struct MainView: View {
     /// Opens or closes the inspector: the pane's width and the content's slide run in one animation.
     private func toggleInspector() {
         withAnimation(.easeInOut(duration: 0.22)) { showInspector.toggle() }
-        easingShiftForToggle = true
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(400))
-            easingShiftForToggle = false
-        }
     }
 
     /// The handle that resizes the inspector — what `HSplitView` used to provide.
@@ -297,14 +280,6 @@ public struct MainView: View {
             let inset = proxy.safeAreaInsets.top
             return inset > 0 ? inset : proxy.frame(in: .global).minY
         } action: { topInset = $0 }
-        .onChange(of: inspectorShift) { _, target in
-            // The balance is a toolbar item (see `inspectorBalance`), so changing it makes the toolbar lay itself out
-            // again. The inspector opening or closing is one such change and is eased, a frame at a time. The sidebar
-            // opening, or the window being resized, changes the width once a frame for as long as the animation runs —
-            // easing each of those laid the toolbar out that often, and it briefly folded the trailing buttons into its
-            // overflow while it did. Those wait for the width to settle and then take the new balance in one step.
-            if easingShiftForToggle { easeShift(to: target) } else { settleShift(to: target) }
-        }
     }
 
     /// Whether the save question is up. It is **model-driven and read-only**: each button answers the
@@ -592,7 +567,6 @@ public struct MainView: View {
             .padding(.horizontal, 10)
         }
 
-        inspectorBalance
 
 #if WIREBENCH_AI
         ToolbarItem(placement: .primaryAction) {
@@ -643,89 +617,6 @@ public struct MainView: View {
             .toggleStyle(.button)
             .help(showInspector ? "Hide Inspector" : "Show Inspector")
         }
-    }
-
-    /// Empty space in the toolbar as wide as the inspector pane, so the run controls centre over the canvas.
-    ///
-    /// The toolbar spans the whole detail area (see `detailContent`), and the controls centre in it. With the
-    /// inspector open the canvas is narrower than that, so the controls would sit right of the canvas's middle.
-    /// This item sits in the centre group, so the group is as much wider as the pane is — and the controls, which
-    /// are centred as a whole, move left by half of it.
-    ///
-    /// The toolbar widens an item when its content grows but does not narrow it again: one resized item left the
-    /// controls off to the left after the inspector closed. So each width is an item of its own — a change of width
-    /// removes one and inserts the next, and with no shift there is no item at all.
-    @ToolbarContentBuilder
-    private var inspectorBalance: some ToolbarContent {
-        ForEach(inspectorShiftSteps, id: \.self) { width in
-            if #available(macOS 26.0, *) {
-                ToolbarItem(placement: .principal) { inspectorBalanceSpace(width) }
-                    .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .principal) { inspectorBalanceSpace(width) }
-            }
-        }
-    }
-
-    /// How far the run controls move left so they stay centred over the canvas.
-    ///
-    /// The balance is itself a toolbar item; asking for a partial shift in a narrow window made the toolbar too
-    /// wide and pushed the trailing buttons into its overflow menu. Only shift when the whole pane width fits,
-    /// and otherwise leave the controls centred over the detail area.
-    private var inspectorShift: CGFloat {
-        guard showInspector else { return 0 }
-        let target = inspectorWidth + Self.inspectorDividerWidth
-        let room = detailWidth - Self.runControlsWidth - 2 * Self.toolbarSideReserve
-        return room >= target ? target : 0
-    }
-
-    /// The shift as the one width to show — none for no shift. In steps of 8 pt, so that dragging a window edge
-    /// or the inspector's divider swaps the item a few times and not on every pixel.
-    private var inspectorShiftSteps: [CGFloat] {
-        let width = (shownShift / 8).rounded(.down) * 8
-        return width >= 8 ? [width] : []
-    }
-
-    /// Moves `shownShift` to `target`. A big move — the inspector opening or closing — eases over the pane's
-    /// 0.22 s; a small one (a window edge or the divider being dragged) just follows.
-    ///
-    /// SwiftUI cannot animate this itself: each width is a toolbar item of its own (see `inspectorBalance`), and
-    /// one item cannot turn into another. So the width is stepped, about once a frame.
-    private func easeShift(to target: CGFloat) {
-        shiftEasing?.cancel()
-        let start = shownShift
-        guard abs(target - start) > 24 else {
-            shownShift = target
-            return
-        }
-        shiftEasing = Task { @MainActor in
-            let frames = 14
-            for frame in 1..<frames {
-                try? await Task.sleep(for: .milliseconds(16))
-                if Task.isCancelled { return }
-                let t = Double(frame) / Double(frames)
-                let eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) * (-2 * t + 2) / 2
-                shownShift = start + (target - start) * CGFloat(eased)
-            }
-            if !Task.isCancelled { shownShift = target }
-        }
-    }
-
-    /// Takes a new balance once the width has stopped moving. A change of 8 pt or less is not worth a toolbar relayout.
-    private func settleShift(to target: CGFloat) {
-        shiftSettle?.cancel()
-        shiftSettle = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(160))
-            guard !Task.isCancelled, abs(target - shownShift) > 8 else { return }
-            shownShift = target
-        }
-    }
-
-    private func inspectorBalanceSpace(_ width: CGFloat) -> some View {
-        Color.clear
-            .frame(width: width, height: 1)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
     }
 
     @ViewBuilder
