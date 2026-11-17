@@ -115,6 +115,8 @@ public struct MainView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
         } detail: {
             detailContent
+                .toolbar { toolbarContent }
+                .modifier(OwnToolbarBackground())
         }
         .onChange(of: model.isShowingBuildReport) { _, showing in
             // The popover hangs from the sidebar's Build button, so a build from the menu or ⌘B opens the sidebar first.
@@ -122,8 +124,6 @@ public struct MainView: View {
         }
         .coordinateSpace(name: "AppWindow")
         .navigationTitle(model.projectTitle)
-        .toolbar { toolbarContent }
-        .modifier(OwnToolbarBackground())
         .background { shortcutsBackground }
         .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
             toggleInspector()
