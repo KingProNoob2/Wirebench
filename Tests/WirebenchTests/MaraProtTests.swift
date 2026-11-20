@@ -1,6 +1,20 @@
 import Testing
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 @testable import WirebenchHardware
+
+#if !canImport(Darwin)
+@_silgen_name("posix_openpt") private func posix_openpt(_ flags: Int32) -> Int32
+@_silgen_name("grantpt") private func grantpt(_ fd: Int32) -> Int32
+@_silgen_name("unlockpt") private func unlockpt(_ fd: Int32) -> Int32
+@_silgen_name("ptsname") private func ptsname(_ fd: Int32) -> UnsafeMutablePointer<CChar>?
+#endif
 
 @Suite("MaraProt v1")
 struct MaraProtTests {
@@ -36,6 +50,19 @@ struct MaraProtTests {
         }
     }
 
+    @Test("The USB CDC transport carries a frame over a serial port and back")
+    func serialTransport() throws {
+        let device = try FakeSerialDuino()
+        defer { device.stop() }
+        let transport = MaraSerialTransport(path: device.slavePath)
+        let client = MaraProtClient(transport: transport)
+        try client.connect()
+        defer { client.close() }
+        let ping = try client.ping(echo: 0x01020304)
+        #expect(ping.echo == 0x01020304)
+        #expect(ping.uptimeMilliseconds == 99)
+    }
+
     @Test("The client performs PING, GET_INFO and a chunked image upload")
     func clientOperations() throws {
         let device = FakeDuino()
@@ -62,6 +89,45 @@ struct MaraProtTests {
         #expect(device.receivedChunks == 200)
         #expect(progress.last == 1)
         #expect(device.started)
+    }
+}
+
+/// The Duino-S end of a pty pair: complete MaraProt frames in, PING replies out.
+private final class FakeSerialDuino: @unchecked Sendable {
+    let slavePath: String
+    private let master: Int32
+    private var running = true
+
+    init() throws {
+        let m = posix_openpt(O_RDWR | O_NOCTTY)
+        guard m >= 0, grantpt(m) == 0, unlockpt(m) == 0, let name = ptsname(m) else { throw POSIXError(.EIO) }
+        master = m
+        slavePath = String(cString: name)
+        _ = fcntl(m, F_SETFL, fcntl(m, F_GETFL) | O_NONBLOCK)
+        Thread.detachNewThread { [self] in serve() }
+    }
+
+    func stop() { running = false; _ = close(master) }
+
+    private func serve() {
+        var pending: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while running {
+            let n = read(master, &buffer, buffer.count)
+            if n > 0 { pending += buffer.prefix(n) } else { usleep(500) }
+            while let total = MaraProtFrame.frameLength(from: pending), pending.count >= total {
+                let request = try? MaraProtFrame.decode(Array(pending.prefix(total)))
+                pending.removeFirst(total)
+                guard let request, request.opcode == MaraProt.Opcode.ping.rawValue else { continue }
+                let reply = MaraProtFrame(sequence: request.sequence, stationId: request.stationId,
+                                          opcode: request.opcode,
+                                          payload: request.payload + [99, 0, 0, 0],
+                                          isResponse: true)
+                if let bytes = try? reply.encoded() {
+                    _ = bytes.withUnsafeBytes { write(master, $0.baseAddress, bytes.count) }
+                }
+            }
+        }
     }
 }
 
@@ -115,7 +181,7 @@ private final class FakeDuino: MaraProtTransport {
                 bytes += chunk
                 receivedChunks += chunk.count
             }
-            var next = UInt32(bytes.count)
+            let next = UInt32(bytes.count)
             payload = [UInt8(truncatingIfNeeded: next), UInt8(truncatingIfNeeded: next >> 8),
                        UInt8(truncatingIfNeeded: next >> 16), UInt8(truncatingIfNeeded: next >> 24)]
         case .uploadCommit:

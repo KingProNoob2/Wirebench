@@ -803,7 +803,7 @@
 		F9A42D656A9C7A4D8C4BCD9B /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		FAFAA9C136EA927854F270D1 /* AppModel+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Clipboard.swift"; sourceTree = "<group>"; };
 		FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraProtFrame.swift; sourceTree = "<group>"; };
-		"TEMP_FC53B8C3-A9E4-42DD-BC6F-797BAD3D561A" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		"TEMP_A34A6E99-75EA-454D-8CD9-479C70CAB111" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1258,10 +1258,10 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_7B4D0A3E-9D9E-488D-BCF5-04362CA8F091" /* Wirebench */ = {
+		"TEMP_75E329E2-AC91-4655-B9F0-7F600107ADED" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_FC53B8C3-A9E4-42DD-BC6F-797BAD3D561A" /* Release.xcconfig */,
+				"TEMP_A34A6E99-75EA-454D-8CD9-479C70CAB111" /* Release.xcconfig */,
 			);
 			path = Wirebench;
 			sourceTree = "<group>";
@@ -2309,7 +2309,7 @@
 		};
 		425F11E043331A2F28A2B6AF /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_FC53B8C3-A9E4-42DD-BC6F-797BAD3D561A" /* Release.xcconfig */;
+			baseConfigurationReference = "TEMP_A34A6E99-75EA-454D-8CD9-479C70CAB111" /* Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

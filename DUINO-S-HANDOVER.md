@@ -144,7 +144,9 @@ swift test --disable-sandbox --filter 'DuinoCompilerTests|MaraProtTests'
 3. ST/LD pages (Maraflow's `StBytecodeCompiler`/ladder) are not ported.
 4. Broad native Dirigo block coverage; many `TM*` blocks still have no Duino-S mapping.
 5. `IO.8xDI`/`IO.8xDO` and PulseGen: importer/bridge exists, emitter case/VM support still missing.
-6. Firmware update/DFU entry.
-7. No physical Duino-S has been tested yet. The protocol and image path are validated against the
-   firmware VM and a frame-level fake, not real hardware.
-8. Project target/profile is a global Hardware Link choice; it is not yet stored in the project.
+6. E-stop configuration, retentive/EEPROM parameters and the project's declared target model are not
+   carried into the image yet; the compiler always emits model 0x0407.
+7. Firmware update/DFU entry.
+8. No physical Duino-S has been tested yet. The protocol and image path are validated against the
+   firmware VM, a frame-level fake, and a pseudo-terminal serial pair, not real hardware.
+9. Project target/profile is a global Hardware Link choice; it is not yet stored in the project.
