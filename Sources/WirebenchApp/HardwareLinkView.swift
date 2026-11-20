@@ -51,13 +51,6 @@ struct HardwareLinkSection<Report: View>: View {
             if model.hardwareFamily == .duinoS {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        if model.duinoTransport == .usbCDC {
-                            Button("Find") { Task { await model.discoverDuinoDevices() } }
-                                .glassButtonStyle()
-                                .controlSize(.small)
-                                .disabled(model.isDiscoveringDuino || model.isWatchingDuino)
-                                .help("Probe the serial ports and use the one that identifies as a Duino-S")
-                        }
                         Spacer(minLength: 4)
                         if let info = model.duinoInfo {
                             Text("\(info.modelName) · 0x\(String(format: "%04X", info.modelId))")
