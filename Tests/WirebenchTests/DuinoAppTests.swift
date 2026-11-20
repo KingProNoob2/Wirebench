@@ -1,7 +1,8 @@
 import Testing
 import Foundation
 @testable import WirebenchCore
-@testable import WirebenchModel
+@testable import WirebenchLibrary
+import WirebenchModel
 
 @Suite("Duino-S app path")
 @MainActor
@@ -33,6 +34,22 @@ struct DuinoAppTests {
         #expect(!model.isUploading)
         #expect(model.uploadStatus.contains("No serial port"))
         #expect(model.uploadPhase.isEmpty)
+    }
+
+    @Test("Build Project produces the Duino-S report when that family is selected")
+    func buildShowsDuinoReport() throws {
+        let model = model()
+        let definition = try #require(MaraflowCatalog.byId["Bool.And"])
+        model.project?.modules = [PCCModule(
+            id: 1, guid: definition.guid, name: "And1", x: 0, y: 0, order: 10, threadId: 1, page: "Main",
+            inPins: [Pin(id: 0, value: .bool(true)), Pin(id: 1, value: .bool(true)),
+                     Pin(id: 2, value: .bool(true))],
+            paramPins: [], outPins: [Pin(id: 0, value: .bool(false))],
+            rawAttributes: AttributeBag([("MARAFLOW_DEF", "Bool.And")]))]
+        model.buildAndShowReport()
+        #expect(model.duinoBuildResult != nil)
+        #expect(model.isBuildReportVisible)
+        #expect(model.buildReport == nil)
     }
 
     @Test("Watch without a port does not open a session")

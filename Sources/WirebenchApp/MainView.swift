@@ -469,7 +469,14 @@ public struct MainView: View {
     /// The report sheet, out of `body` so the body stays quick to type-check.
     @ViewBuilder
     private var buildReportSheet: some View {
-        if let report = model.buildReport {
+        if model.hardwareFamily == .duinoS, let result = model.duinoBuildResult {
+            DuinoBuildReportSheet(result: result,
+                                  onUpload: {
+                                      model.isShowingBuildReport = false
+                                      Task { await model.uploadDuinoProgram(compiled: result) }
+                                  },
+                                  onClose: { model.isShowingBuildReport = false })
+        } else if let report = model.buildReport {
             BuildReportSheet(report: report,
                              notice: model.buildReportNotice,
                              onExportProgram: { model.exportCompiledProgram() },

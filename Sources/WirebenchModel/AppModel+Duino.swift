@@ -48,7 +48,7 @@ public extension AppModel {
 
     /// Compiles the current project to MFLW and uploads it over USB CDC. The VM is started by the
     /// commit command, matching the way the Dirigo uploader starts the PLC after a table write.
-    func uploadDuinoProgram() async {
+    func uploadDuinoProgram(compiled ready: DuinoCompiler.Result? = nil) async {
         guard let project, !project.modules.isEmpty else {
             uploadStatus = "There is no project to compile for the Duino-S."
             uploadPhase = ""
@@ -72,15 +72,19 @@ public extension AppModel {
         defer { Task { @MainActor [weak self] in self?.isUploading = false } }
 
         let compiled: DuinoCompiler.Result
-        do {
-            compiled = try DuinoCompiler.compile(project: project)
-        } catch {
-            await MainActor.run {
-                self.uploadPhase = "Compile failed"
-                self.uploadStatus = "Duino-S compile failed: \(error.localizedDescription)"
+        if let ready {
+            compiled = ready
+        } else {
+            do {
+                compiled = try DuinoCompiler.compile(project: project)
+            } catch {
+                await MainActor.run {
+                    self.uploadPhase = "Compile failed"
+                    self.uploadStatus = "Duino-S compile failed: \(error.localizedDescription)"
+                }
+                logUpload("Duino-S compile failed: \(error)", kind: .error)
+                return
             }
-            logUpload("Duino-S compile failed: \(error)", kind: .error)
-            return
         }
         await MainActor.run {
             self.uploadPhase = "Image ready · \(compiled.image.count) bytes"
@@ -166,6 +170,8 @@ public extension AppModel {
         isWatchingDuino = false
         duinoWatchStatus = "Watch stopped."
         duinoWatchValues.removeAll()
+        duinoWatchSlotNames.removeAll()
+        duinoWatchSlotTypes.removeAll()
     }
 
     private func runDuinoWatch(project: PCCProject, port: String) async {

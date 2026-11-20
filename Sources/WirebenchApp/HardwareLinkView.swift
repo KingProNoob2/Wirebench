@@ -137,20 +137,11 @@ struct HardwareLinkSection<Report: View>: View {
             .controlSize(.regular)
             .disabled(model.project == nil)
             .padding(.top, 6)
-            .help("Build the project and show the report, with Upload to PLC (⌘B)")
+            .help(model.hardwareFamily == .duinoS
+                  ? "Build the FBD project and show the Duino-S image report, with Upload to Duino-S (⌘B)"
+                  : "Build the project and show the report, with Upload to PLC (⌘B)")
 
             if model.hardwareFamily == .duinoS {
-                Button {
-                    model.uploadCompiledProgram()
-                } label: {
-                    Text(model.isUploading ? "Uploading…" : "Upload to Duino-S")
-                        .frame(maxWidth: .infinity)
-                }
-                .glassButtonStyle()
-                .controlSize(.regular)
-                .disabled(model.project == nil || model.isUploading || model.isWatchingDuino)
-                .help("Compile this FBD project to MFLW and upload it over the selected USB CDC port")
-
                 if model.isWatchingDuino {
                     Button("Stop Watch") { model.stopDuinoWatch() }
                         .glassButtonStyle()

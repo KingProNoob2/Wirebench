@@ -128,3 +128,63 @@ private struct BuildStatTile: View {
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
+
+/// The Duino-S build report: what the FBD project compiled to, and the one action that matters next.
+struct DuinoBuildReportSheet: View {
+    let result: DuinoCompiler.Result
+    let onUpload: () -> Void
+    let onClose: () -> Void
+
+    private var usedSlots: Int { Set(result.slots.values).count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Duino-S Build")
+                .font(.title2)
+                .bold()
+            Text("MFLW v1 bytecode for the Maramat Duino-S (model 0x0407).")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                BuildStatTile(label: "Image", value: "\(result.image.count) B")
+                BuildStatTile(label: "Slots", value: "\(usedSlots)")
+                BuildStatTile(label: "Threads", value: "5")
+                BuildStatTile(label: "Model", value: "0x0407")
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("The image is ready to upload over the selected USB CDC port.")
+                        .font(.callout)
+                    ForEach(Array(result.notes.enumerated()), id: \.offset) { _, note in
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+            }
+            .frame(minHeight: 90, maxHeight: 190)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Divider()
+
+            GlassGroup(spacing: 8) {
+                HStack {
+                    Button("Close", action: onClose)
+                        .keyboardShortcut(.cancelAction)
+                        .glassButtonStyle()
+                    Spacer()
+                    Button("Upload to Duino-S…", action: onUpload)
+                        .keyboardShortcut(.defaultAction)
+                        .glassButtonStyle(prominent: true)
+                }
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 620, minHeight: 320)
+    }
+}

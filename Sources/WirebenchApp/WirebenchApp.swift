@@ -59,6 +59,7 @@ struct WirebenchApp: App {
             viewCommands
             editCommands
             buildCommands
+            hardwareCommands
             exportCommands
             fileCommands
         }
@@ -136,6 +137,22 @@ struct WirebenchApp: App {
 
             Button("Use Program Binary as Build Template\u{2026}") { model.chooseBuildTemplate() }
                 .disabled(model.project == nil)
+        }
+    }
+
+    @CommandsBuilder
+    private var hardwareCommands: some Commands {
+        CommandMenu("PLC") {
+            Button(model.isWatchingDuino ? "Stop Watching Duino-S" : "Watch Duino-S") {
+                if model.isWatchingDuino { model.stopDuinoWatch() } else { model.startDuinoWatch() }
+            }
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+            .disabled(!model.isWatchingDuino
+                      && (model.hardwareFamily != .duinoS || model.project == nil
+                          || model.selectedPortPath.isEmpty || model.isUploading))
+
+            Button("Identify Duino-S") { model.refreshDuinoInfo() }
+                .disabled(model.hardwareFamily != .duinoS || model.selectedPortPath.isEmpty)
         }
     }
 

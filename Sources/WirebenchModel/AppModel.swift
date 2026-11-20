@@ -2652,8 +2652,14 @@ public final class AppModel: @unchecked Sendable {
         // A notice belongs to one showing of the report.
         didSet { buildReportNotice = nil }
     }
+    /// The last Duino-S compile shown by the Build Project report.
+    public var duinoBuildResult: DuinoCompiler.Result?
+    public var duinoBuildError: String?
     /// Whether the report is actually on screen: it is asked for, and there is a build to show.
-    public var isBuildReportVisible: Bool { isShowingBuildReport && buildReport != nil }
+    public var isBuildReportVisible: Bool {
+        guard isShowingBuildReport else { return false }
+        return hardwareFamily == .duinoS ? duinoBuildResult != nil : buildReport != nil
+    }
     /// What the last message said, while the report is up: an alert cannot attach to a window that already
     /// has a sheet, so `presentMessage` hands its message to the report instead.
     public var buildReportNotice: PendingAlert?
@@ -2710,10 +2716,36 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
-    /// Compiles, then shows the report.
+    /// Compiles, then shows the report. In Duino-S mode the report is the MFLW build rather than the
+    /// Dirigo table, so the Build button and Build menu keep one meaning in both modes.
     @MainActor
     public func buildAndShowReport() {
+        if hardwareFamily == .duinoS {
+            if compileDuinoProject() != nil { isShowingBuildReport = true }
+            return
+        }
         if compileProject() != nil { isShowingBuildReport = true }
+    }
+
+    /// Compiles the current project for the Duino-S and stores the image for the Build report.
+    @discardableResult
+    @MainActor
+    public func compileDuinoProject() -> DuinoCompiler.Result? {
+        guard let project else {
+            presentMessage(title: "Nothing to build", message: "Open a project first.")
+            return nil
+        }
+        do {
+            let result = try DuinoCompiler.compile(project: project)
+            duinoBuildResult = result
+            duinoBuildError = nil
+            return result
+        } catch {
+            duinoBuildResult = nil
+            duinoBuildError = error.localizedDescription
+            presentMessage(title: "Duino-S build failed", message: error.localizedDescription, kind: .warning)
+            return nil
+        }
     }
 
     /// Writes the compiled program binary (`.pbd`).

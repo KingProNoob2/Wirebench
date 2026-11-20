@@ -87,9 +87,12 @@ not abort the image.
 Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 
 - **Duino-S** shows the selected USB CDC port, an **Identify** action (ping, GET_INFO, VM_STATUS),
-  **Upload to Duino-S** (compile current FBD project to MFLW, upload, auto-start), and
-  **Watch / Stop Watch**. Watch compiles the same operand→slot table, subscribes up to 512 slots,
-  takes a full snapshot, then polls deltas every 100 ms and shows the decoded values in the card.
+  **Build Project**, and **Watch / Stop Watch**. Build Project now opens a **Duino-S Build** report
+  (image size, slots, notes) whose primary action is **Upload to Duino-S**; the standalone upload
+  button is gone from the Hardware Link card.
+- Watch compiles the same operand→slot table, subscribes up to 512 slots, takes a full snapshot,
+  then polls deltas every 100 ms and shows the decoded values in the card.
+- **PLC ▸ Watch Duino-S** (⌘⇧W) starts/stops the same watch session from the menu bar.
 - Build → Upload Compiled Program routes to the Duino-S when that family is selected.
 - Upload progress, phase and the framed log are reused from the existing Hardware Link.
 
