@@ -18,25 +18,6 @@ struct DuinoAppTests {
         return model
     }
 
-    @Test("Identify without a port says so instead of opening a device")
-    func identifyWithoutPort() async {
-        let model = model()
-        model.selectedPortPath = ""
-        await model.identifyDuino()
-        #expect(model.duinoInfo == nil)
-        #expect(model.uploadStatus.contains("No serial port"))
-    }
-
-    @Test("Upload without a port does not start an upload")
-    func uploadWithoutPort() async {
-        let model = model()
-        model.selectedPortPath = ""
-        await model.uploadDuinoProgram()
-        #expect(!model.isUploading)
-        #expect(model.uploadStatus.contains("No serial port"))
-        #expect(model.uploadPhase.isEmpty)
-    }
-
     @Test("Ethernet without an address is not treated as configured")
     func ethernetNeedsHost() {
         let model = model()

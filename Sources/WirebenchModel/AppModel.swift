@@ -232,7 +232,6 @@ public final class AppModel: @unchecked Sendable {
     /// Duino-S boards found by the last scan.
     public var duinoDiscoveredDevices: [MaraDiscoveredDevice] = []
     public var isDiscoveringDuino: Bool = false
-    public var isIdentifyingDuino: Bool = false
     public var duinoDiscoveryStatus: String = ""
 
     /// What the last Get Info from a Duino-S reported.

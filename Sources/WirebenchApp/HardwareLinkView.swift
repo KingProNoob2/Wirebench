@@ -48,16 +48,9 @@ struct HardwareLinkSection<Report: View>: View {
             if model.hardwareFamily == .duinoS, model.duinoTransport == .ethernet {
                 ethernetFields
             }
-            if model.hardwareFamily == .duinoS, model.isDuinoLinkConfigured {
+            if model.hardwareFamily == .duinoS {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Button("Identify") { Task { await model.identifyDuino() } }
-                            .glassButtonStyle()
-                            .controlSize(.small)
-                            .disabled(model.isDiscoveringDuino || model.isIdentifyingDuino
-                                      || model.isWatchingDuino || model.isUploading)
-                            .help("Connect to the selected endpoint, ping the Duino-S, and read its model and firmware")
-                        if model.isIdentifyingDuino { ProgressView().controlSize(.small) }
                         if model.duinoTransport == .usbCDC {
                             Button("Find") { Task { await model.discoverDuinoDevices() } }
                                 .glassButtonStyle()

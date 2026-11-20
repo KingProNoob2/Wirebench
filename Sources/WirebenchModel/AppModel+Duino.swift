@@ -62,69 +62,6 @@ public extension AppModel {
 
     var isDuinoLinkConfigured: Bool { currentDuinoLink() != nil }
 
-    /// Opens the selected endpoint, identifies the Duino-S and reads its VM status.
-    ///
-    /// This is the "test connection" action. It changes no PLC state: it sends PING, GET_INFO and
-    /// VM_STATUS, then updates the model, firmware and VM labels here. The I/O runs off the main
-    /// thread so a slow or absent network endpoint cannot freeze the editor.
-    func identifyDuino() async {
-        guard let link = currentDuinoLink() else {
-            await MainActor.run {
-                self.uploadStatus = self.duinoTransport == .usbCDC
-                    ? "No serial port. Plug in the Duino-S and rescan."
-                    : "Enter the Duino-S IP address and port."
-            }
-            return
-        }
-        guard !isWatchingDuino, !isUploading else {
-            await MainActor.run {
-                self.uploadStatus = "Stop the watch/upload before identifying the Duino-S."
-            }
-            return
-        }
-        await MainActor.run {
-            self.isIdentifyingDuino = true
-            self.uploadStatus = "Identifying the Duino-S…"
-        }
-        let result: (info: MaraProtClient.Info?, status: MaraProtClient.VMStatus?, error: String?) =
-            await Task.detached {
-                let transport = link.makeTransport()
-                if let tcp = transport as? MaraTCPTransport { tcp.connectTimeout = 1.5 }
-                let client = MaraProtClient(transport: transport,
-                                            stationId: MaraProtClient.pointToPointStation)
-                client.timeout = 1.5
-                do {
-                    try client.connect()
-                    defer { client.close() }
-                    _ = try client.ping()
-                    let info = try client.info()
-                    guard MaraDiscovery.isDuino(info) else {
-                        return (nil, nil, "that endpoint is not a Maramat Duino-S (model 0x\(String(format: "%04X", info.modelId)))")
-                    }
-                    return (info, try? client.vmStatus(), nil)
-                } catch {
-                    return (nil, nil, error.localizedDescription)
-                }
-            }.value
-        await MainActor.run {
-            self.isIdentifyingDuino = false
-            if let info = result.info {
-                self.duinoInfo = info
-                self.duinoVMStatus = result.status
-                self.uploadStatus = "\(info.modelName) · model 0x\(String(format: "%04X", info.modelId)) · "
-                    + "firmware \(info.firmwareVersion >> 16).\(info.firmwareVersion & 0xFFFF)"
-                self.logUpload("Duino-S identified: \(info.modelName), model 0x\(String(format: "%04X", info.modelId)), "
-                               + "firmware 0x\(String(format: "%08X", info.firmwareVersion)), MTU \(info.maxMtuBytes)",
-                               kind: .info)
-            } else {
-                self.duinoInfo = nil
-                self.duinoVMStatus = nil
-                self.uploadStatus = "Duino-S identification failed: \(result.error ?? "unknown error")"
-                self.logUpload("Duino-S identification failed: \(result.error ?? "unknown error")", kind: .error)
-            }
-        }
-    }
-
     /// Compiles the current project to MFLW and uploads it over USB CDC. The VM is started by the
     /// commit command, matching the way the Dirigo uploader starts the PLC after a table write.
     func uploadDuinoProgram(compiled ready: DuinoCompiler.Result? = nil) async {

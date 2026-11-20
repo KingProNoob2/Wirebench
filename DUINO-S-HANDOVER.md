@@ -89,9 +89,7 @@ not abort the image.
 Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 
 - **Duino-S** has liquid-glass **USB / Ethernet** transport picker. USB shows the selected CDC port;
-  Ethernet takes an IP address and TCP port (default 5020). Both offer an **Identify** action
-  (background PING, GET_INFO, VM_STATUS; it changes no program state and does not block the editor),
-  **Build Project**, and **Watch / Stop Watch**. Build Project now opens a **Duino-S Build** report
+  Ethernet takes an IP address and TCP port (default 5020). Both offer **Build Project** and **Watch / Stop Watch**. Build Project now opens a **Duino-S Build** report
   (image size, slots, notes) whose primary action is **Upload to Duino-S**; the standalone upload
   button is gone from the Hardware Link card.
 - Watch compiles the same operand→slot table, subscribes up to 512 slots, takes a full snapshot,

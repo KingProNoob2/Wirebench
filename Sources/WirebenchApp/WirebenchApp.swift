@@ -151,10 +151,6 @@ struct WirebenchApp: App {
                       && (model.hardwareFamily != .duinoS || model.project == nil
                           || !model.isDuinoLinkConfigured || model.isUploading))
 
-            Button("Identify Duino-S") { Task { await model.identifyDuino() } }
-                .disabled(model.hardwareFamily != .duinoS || !model.isDuinoLinkConfigured
-                          || model.isIdentifyingDuino || model.isWatchingDuino || model.isUploading)
-
             Button("Find Duino-S") { Task { await model.discoverDuinoDevices() } }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(model.hardwareFamily != .duinoS || model.isDiscoveringDuino)
