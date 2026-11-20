@@ -9,8 +9,8 @@ public enum HardwareFamily: String, CaseIterable, Identifiable, Sendable {
     case duinoS
 
     public var id: String { rawValue }
-    public var title: String { self == .dirigo ? "Dirigo PLC" : "Maramat Duino-S" }
-    public var shortTitle: String { self == .dirigo ? "Dirigo" : "Duino-S" }
+    public var title: String { self == .dirigo ? "Maramat Duino-P" : "Maramat Duino-S" }
+    public var shortTitle: String { self == .dirigo ? "Duino-P" : "Duino-S" }
 }
 
 /// Where a Duino-S is reached. MaraProt speaks the same frames over both.
