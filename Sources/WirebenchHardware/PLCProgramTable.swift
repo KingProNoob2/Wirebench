@@ -182,6 +182,13 @@ public struct PLCProgramTable: Equatable, Sendable {
     /// The table is split into chunks of `chunkBytes`, each of whole columns of `rows` 16-bit values.
     /// The captures use 128 bytes (eight columns) and send the remainder as its own frame: 640 bytes is
     /// five frames, 192 is two (128 and 64).
+    /// How many frames `matrixWriteFrames` will produce, without building them. The row count does not change the
+    /// number of frames; only the chunk size does.
+    public func matrixFrameCount(chunkBytes: Int = 128) -> Int {
+        guard !uploadedBytes.isEmpty else { return 0 }
+        return (uploadedBytes.count + chunkBytes - 1) / max(1, chunkBytes)
+    }
+
     public func matrixWriteFrames(rows: UInt16 = 8, chunkBytes: Int = 128) -> [[UInt8]] {
         let body = uploadedBytes
         let stride = Int(rows) * 2

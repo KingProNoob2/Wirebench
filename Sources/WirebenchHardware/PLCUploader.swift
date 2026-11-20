@@ -31,30 +31,48 @@ public final class PLCUploader {
     /// Called before each step with a short description, for a log.
     public var onStage: ((String) -> Void)?
 
+    /// Called after each acknowledged step with the fraction of the upload that is done. Retries do not move this
+    /// counter, unlike counting the bytes the transport happens to carry.
+    public var onProgress: ((Double) -> Void)?
+
     public init(session: DbNetSession, destination: UInt8 = 1, source: UInt8 = 31) {
         self.session = session
         self.destination = destination
         self.source = source
     }
 
+    /// How many table frames `table` will take with the current `rows`/`chunkBytes`.
+    public func frameCount(for table: PLCProgramTable) -> Int {
+        table.matrixFrameCount(chunkBytes: chunkBytes)
+    }
+
     /// Stops the PLC, writes the whole table, and starts it again. Returns the number of table frames.
     @discardableResult
     public func upload(table: PLCProgramTable) throws -> Int {
+        let frames = table.matrixWriteFrames(rows: rows, chunkBytes: chunkBytes)
+        // GetStatus, stop, read, every table frame, start: the progress is step count, not wire traffic.
+        let total = 4 + frames.count
+        func step(_ index: Int) { onProgress?(Double(index) / Double(total)) }
+
         onStage?("GetStatus")
         try session.getStatusSerial(destination: destination, source: source)
+        step(1)
         onStage?("Stop the PLC")
         try session.requestStopSerial(destination: destination, source: source)
+        step(2)
         onStage?("Read the run/stop register")
         try session.readRunStopSerial(destination: destination, source: source)
+        step(3)
 
-        let frames = table.matrixWriteFrames(rows: rows, chunkBytes: chunkBytes)
         for (index, payload) in frames.enumerated() {
             onStage?("Table frame \(index + 1) of \(frames.count)")
             try session.writeMatrixSerial(destination: destination, source: source, payload: payload)
+            step(4 + index)
         }
 
         onStage?("Start the PLC")
         try session.requestStartSerial(destination: destination, source: source)
+        step(total)
         return frames.count
     }
 }

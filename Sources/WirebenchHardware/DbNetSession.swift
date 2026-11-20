@@ -415,26 +415,29 @@ extension DbNetSession {
 }
 
 /// A transport that tells a callback about every frame that crosses it, for an upload log.
-///
-/// The callback receives `(direction, bytes)`: `"→"` for a request, `"←"` for the reply, and `"✗"` with the error
-/// text as bytes-less detail when the exchange throws.
 public final class LoggingDbNetTransport: DbNetTransport {
-    private let inner: DbNetTransport
-    private let log: (String, [UInt8]) -> Void
+    public enum Event: Sendable, Equatable {
+        case request
+        case reply
+        case failure(String)
+    }
 
-    public init(wrapping inner: DbNetTransport, log: @escaping (String, [UInt8]) -> Void) {
+    private let inner: DbNetTransport
+    private let log: (Event, [UInt8]) -> Void
+
+    public init(wrapping inner: DbNetTransport, log: @escaping (Event, [UInt8]) -> Void) {
         self.inner = inner
         self.log = log
     }
 
     public func exchange(_ frame: [UInt8], timeout: TimeInterval) throws -> [UInt8] {
-        log("→", frame)
+        log(.request, frame)
         do {
             let reply = try inner.exchange(frame, timeout: timeout)
-            log("←", reply)
+            log(.reply, reply)
             return reply
         } catch {
-            log("✗ \(error)", [])
+            log(.failure("\(error)"), [])
             throw error
         }
     }

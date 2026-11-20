@@ -826,9 +826,9 @@ struct UploadLogTests {
 
     @Test("Stages and frames are reported in order, each request with its reply")
     func logsStagesAndFrames() throws {
-        var frames: [String] = []
+        var frames: [LoggingDbNetTransport.Event] = []
         var stages: [String] = []
-        let logged = LoggingDbNetTransport(wrapping: Echo()) { direction, _ in frames.append(direction) }
+        let logged = LoggingDbNetTransport(wrapping: Echo()) { event, _ in frames.append(event) }
         let uploader = PLCUploader(session: DbNetSession(transport: logged, address: 1), destination: 1, source: 31)
         uploader.onStage = { stages.append($0) }
         let template = try #require(PLCProgramTable.buildTemplate())
@@ -837,6 +837,21 @@ struct UploadLogTests {
         #expect(stages.last == "Start the PLC")
         #expect(stages.filter { $0.hasPrefix("Table frame") }.count == count)
         #expect(frames.count == 2 * (count + 4), "request and reply for GetStatus, stop, read, each frame, start")
-        #expect(frames.enumerated().allSatisfy { $0.element == ($0.offset % 2 == 0 ? "→" : "←") })
+        #expect(frames.enumerated().allSatisfy {
+            $0.element == ($0.offset % 2 == 0 ? .request : .reply)
+        })
+    }
+
+    @Test("Progress counts acknowledged steps, not retries or raw replies")
+    func progressIsStepBased() throws {
+        let table = try #require(PLCProgramTable.buildTemplate())
+        let uploader = PLCUploader(session: DbNetSession(transport: Echo(), address: 1), destination: 1, source: 31)
+        var progress: [Double] = []
+        uploader.onProgress = { progress.append($0) }
+        let frames = try uploader.upload(table: table)
+        #expect(frames == table.matrixFrameCount())
+        #expect(progress.count == 4 + frames)
+        #expect(progress == progress.sorted())
+        #expect(progress.last == 1)
     }
 }
