@@ -123,120 +123,6 @@ public struct PLCProjectCompiler {
         }
     }
 
-    /// The role lists for the classes in `had.pcc`, **verified byte for byte** against `had.dmp`.
-    ///
-    /// These are the mapping the writer's code implies, written out per class: one role per word the
-    /// record carries, in the order `TMP1Module.ExportFile` stage 8 walks (`module+0x7C`, then `+0x84`,
-    /// then the out-pins at `+0x80`). The *values* that fill them come from the project file (constants),
-    /// the symbol table (slots and terminals) and the wiring; the lists only say which value lands where,
-    /// and `Tests/WirebenchTests/ProjectCompilerTests.swift`'s *Record reproduction* suite asserts that
-    /// they rebuild all nine records of `had.dmp` byte for byte.
-    ///
-    /// The flag byte is deliberately absent: it is the module's hidden pins' own values, not a class
-    /// property (the two `TMBoolVar`s carry `0x00` and `0xC0`), so it travels on `Module.flag`.
-    /// The whole library: `classShapesFromP1` (read out of `P1.bpl`) with the nine entries `had.dmp`
-    /// verifies laid over it. The nine win because for three of them the decomp's own counts are known to
-    /// miss (`TMCounter`, `TMComparator`, `TMIntSwitch`), and because their `.terminal` words are pinned
-    /// against the dump.
-    /// Entries read from a class's own `ExportFile`, for the 24 classes that override the base writer.
-    /// `TMDigitalInputs.ExportFile` (P1.bpl 0x41AEEC) is the first: it walks an array of up to sixteen pin
-    /// pointers and gives each one `pin[0x64] = i` and `pin[0x60] = pin[0x68]`, so the class's record is
-    /// one word per out-pin — its own terminal — for however many the project configures.
-    public static let classShapesFromOverrides: [String: ClassShape] = [
-        // The capture shows one word, the slot: `09 80 | 1001`.
-        "TMDigitalInputs": .init(id: 9, roles: [.slot]),
-        // The display classes are modules in the sheet but not part of the program: `had.pcc` holds a
-        // `Segment1` whose module is present, and `had.dmp`'s record walk accounts for the other nine
-        // modules and neither of the two displays. Saying so explicitly is what lets a build report tell
-        // "writes no record" apart from "no shape yet".
-        "TDispSegmentModule": .init(id: nil, roles: [], contributesRecord: false),
-        // The value display is the same kind of module: `TDispValueModule` has its own `Load`, `Save` and
-        // `DrawValues` in `Dirigo.exe` (the editor), and neither display class is in `P1.bpl`, the library the
-        // program is made of. Without this a `Value` that sits on a thread was reported as "no record shape yet".
-        "TDispValueModule": .init(id: nil, roles: [], contributesRecord: false),
-    ]
-
-    public static let classShapes: [String: ClassShape] = {
-        var merged = classShapesFromP1
-        for (cls, shape) in classShapesFromOverrides { merged[cls] = shape }
-        for (cls, shape) in hadProjectShapes { merged[cls] = shape }
-        return merged
-    }()
-
-    public static let hadProjectShapes: [String: ClassShape] = {
-        let wire = ClassShape.Role.wire
-        return [
-            // PulseGen1: its own Cnt terminal as a wire, then its two declared constants, then the slot.
-            // `[IN1][P0][P1][slot][Out]` — IN0 is a word only when wired (see `records`), and the Out terminal
-            // follows the slot: `10 00 | 0600 0401 C001 C001 | 1007 | 0700` in the capture, `10 80 | 0100 C003
-            // C003 | 1002 | 0000` in `had.dmp`, whose trailing `00 00` is that terminal and not a record.
-            "TMPulseGenerator": .init(id: 16, roles: [.inPinOrValue(1), .paramPinOrValue(0), .paramPinOrValue(1),
-                                                      .slot, .ownTerminal(svorka: 1)]),
-            // A boolean variable writes no record: the two 2-byte records `had.dmp` was read as having are
-            // the PulseGen's Out terminal and a constant.
-            "TMBoolVar":        .init(id: nil, roles: [], contributesRecord: false),
-            // Its third input is fed by its own hidden `LastState` out-pin — see `Role.feedback`. With a
-            // plain `wire` there, an unconnected pin wrote constant 0 and the record differed from
-            // `had.dmp` in exactly that word.
-            "TMCounter":        .init(id: 15, roles: [wire, wire, .feedback(svorka: 0), .slot]),
-            // `TMSetPins`: the constructor sets its id to 0x52 (`movl $0x52, 0xa4(%ebx)`, P1.bpl 0x415A47),
-            // and the captured records start `52 04`. The record is `[En][X][P]`: the in-pins in order, then the
-            // parameter. Each is its wire's terminal or, when unwired, its constant. The captured `*kostka`
-            // record is `52 04 | 00 08 | 7F C0 | 03 10` (En from And5, X unwired at 127, P from ISwitch1), and
-            // the `-mod3` save, with ISwitch1 moved to X, is `52 04 | 00 08 | 03 10 | 00 C0`.
-            "TMSetPins":        .init(id: 82, roles: [.inPin(0), .inPinOrConstant(1),
-                                                      .paramPinOrConstant(0), .hidden(0x04)]),
-
-            // Captured in `Serial packet capture/` (2026-10-15). Both instances are 26 bytes, flag `0xA4`:
-            // `*had`  0F A4 | 04 01 | 04 03 | 00 C0 | 00 C0 | 00 C0 | 00 C0 | 08 C0 | 00 C0 | 04 02 | 0A 10 | 04 03 | 04 04
-            // `*kostka` 0F A4 | 00 07 | 08 10 | 00 C0 | 00 C0 | 00 C0 | 00 C0 | 05 C0 | 00 C0 | 00 09 | 08 10 | 00 0A | 00 0B
-            // Inputs Tr, Rst, Pres, EnH, EnL are the five wires (`En` is not in the record); PV is the zero
-            // parameter, Max the project's value (8 or 5), Min the zero parameter. Then the hidden Boolean
-            // that holds the previous Tr (allocated before H and L), the Y word (a slot), H and L.
-            // `St` (1) is not written. The `*kostka` Rst is wired from Y, a word, so it is a slot.
-            "TMAdvCounter":     .init(id: 15, roles: [.inPinOrValue(1), .inPinOrValue(2), .inPinOrValue(3), .inPinOrValue(4),
-                                                      .inPinOrValue(5), .paramPinOrValue(0), .paramPinOrValue(1),
-                                                      .paramPinOrValue(2), .ownTerminal(svorka: 0), .slot,
-                                                      .ownTerminal(svorka: 2), .ownTerminal(svorka: 3),
-                                                      .hidden(0xA4)]),
-            // `[In1][In2][its hidden Boolean][slot]`, as in `kostka-dir.pbd`: `Move` registers a Boolean at pin 0 like `Counter`.
-            "TMMove":           .init(id: 28, roles: [wire, wire, .ownTerminal(svorka: 0), .slot]),
-            "TMDigitalOutputs": .init(id: 10, roles: [.digitalOutputs]),
-            // Eight bit inputs, then its own word (`kostka-dir.pbd`, Dirigo's own export of `kostka 1.pcc`); the library's declaration lists one wire.
-            "TMBits2Int":       .init(id: 52, roles: (1...8).map { .inPinOrValue($0) } + [.slot], inPinFlagUnit: 0x04),
-            // Six source wires, then its six **masks** as declared constants, then the slot. The masks
-            // were `wire`s here because the dump test fed their values in as wires; a real build has no
-            // wire for them at all and takes them from the project's `IN_PIN` values (`1, 2, 4, 8, 16,
-            // 32`), which is what `had.dmp` carries as `C001 C002 C004 C008 C010 C020`. A build that
-            // treated them as wires wrote `C000` six times.
-            "TMIntSwitch":      .init(id: 30, roles: [.restOfInPins, .slot], inPinFlagUnit: 0x04),
-            // Comparator1: a slot from elsewhere, its constant, two terminals, then its own output.
-            // The out-pin writes its *own allocated* terminal. `had.dmp` alone made it look like a fixed
-            // pair — `Comparator1` is module 6 and `Or1` module 7 there — but in `kostička` the same
-            // classes are modules 6 and 2 and their terminals are different, which is what a
-            // cross-project check caught.
-            // One wire (its `<CONNECTION>`), one constant, then its **three** own out-pin terminals —
-            // `AGtB`, `AEqB` and `ALtB`, which `had.dmp` carries as `0400 0500 0600`. They used to be
-            // written as two `wire`s plus one terminal, because the old hand-fed test path had no
-            // allocation to resolve an out-pin's address from; it does now, so the shape says what it means.
-            "TMComparator":     .init(id: 6, roles: [wire, .unassigned, .ownTerminal(svorka: 0),
-                                                     .ownTerminal(svorka: 1), .ownTerminal(svorka: 2)]),
-            "TMOr":             .init(id: 20, roles: [wire, wire, .ownTerminal(svorka: 0)]),
-            // `22 C0 | 100E | C00A | 2000 | 100F`: the dividend's wire, the divisor (a constant 10), the Long
-            // quotient (`0x2000 + index`) and the int remainder.
-            "TMDiv":            .init(id: 34, roles: [wire, .inPinOrValue(2), .ownTerminal(svorka: 0),
-                                                      .ownTerminalIfPin(svorka: 1)]),
-            // `[In1][In2][its Long]`, each input its wire or its constant (`kostka-dir.pbd`).
-            "TMIntMul":         .init(id: 18, roles: [.inPinOrValue(1), .inPinOrValue(2), .ownTerminal(svorka: 0)]),
-            "TMIntAdd":         .init(id: 12, roles: [.inPinOrValue(1), .inPinOrValue(2), .slot]),
-            "TSystemCommand":   .init(id: 81, roles: [.systemCommand]),
-            // Two classes compile to nothing at all: two byte-identical exports prove it.
-            "TMInt2Bits":       .init(id: nil, roles: [], contributesRecord: false),
-            // A variable holds a value for others to read and writes no record (`kostka-dir.pbd` has none for the `IntVar` in `*Demux`).
-            "TMIntVar":         .init(id: nil, roles: [], contributesRecord: false),
-        ]
-    }()
-
     public struct Module: Equatable, Sendable {
         public var name: String
         public var guid: String
@@ -470,6 +356,48 @@ public struct PLCProjectCompiler {
         "TMDigitalOutputs": 0x18,
     ]
 
+    /// A switch with so many inputs that four bits per pin no longer fit in the flag is written in the long form:
+    /// flag bit `0x40` and the count of its `X` inputs as a word before the pins. Seen at 26 pins; where the form
+    /// begins between 12 and 26 is inferred from the linear flag overflowing there.
+    static func isLongSwitch(cls: String, inPinCount: Int) -> Bool {
+        cls == "TMIntSwitch" && inPinCount >= 19
+    }
+
+    /// The record's second byte: the module's own hidden-pin bits, the class bits, and the per-pin bits the
+    /// format derives from the pin count.
+    static func recordFlag(for m: Module, cls: String, shape: ClassShape,
+                           feeds: [Int: UInt16], longSwitch: Bool) -> UInt8 {
+        var flag = m.flag
+        for role in shape.roles {
+            if case .hidden(let bits) = role { flag |= bits }
+        }
+        flag |= classFlagBits[cls] ?? 0
+        // `Div`'s `0x40` is its remainder pin being visible: `kostka-dir.pbd` has `Div1` and `Div3` at flag 0.
+        if cls == "TMDiv", m.outPinCount > 1 { flag |= 0x40 }
+        // A `SystemCmd` hides what its variant hides: `I2` is `0x20` (the captured Tris variant), `I1`
+        // `0x10` (by the same pattern; no capture has a variant that hides it).
+        if shape.roles.contains(.systemCommand) {
+            if m.systemCommand?.input1.isHidden ?? false { flag |= 0x10 }
+            if m.systemCommand?.input2.isHidden ?? true { flag |= 0x20 }
+        }
+        // Bit 0x80 is the first in-pin's constant when nothing is wired to it.
+        if feeds[0] == nil, let first = m.inValues.first, first != 0 { flag |= 0x80 }
+        if longSwitch {
+            flag |= 0x40
+        } else if shape.inPinFlagUnit != 0, m.inPinCount > 3 {
+            flag |= UInt8(truncatingIfNeeded: Int(shape.inPinFlagUnit) * (m.inPinCount - 3))
+        }
+        return flag
+    }
+
+    /// The roles a record writes: a dynamic class has one own-terminal word per sheet out-pin; every other class
+    /// uses its shape's fixed list.
+    static func outputRoles(for m: Module, shape: ClassShape) -> [ClassShape.Role] {
+        shape.dynamicOutPins
+            ? (0..<m.outPinCount).map { ClassShape.Role.ownTerminal(svorka: $0) }
+            : shape.roles
+    }
+
     public static func modules(in xml: String) -> [Module] {
         // Read once, not once per module: which in-pins have a wire, by the module they belong to.
         let connected = connectedPins(in: xml)
@@ -636,279 +564,6 @@ public struct PLCProjectCompiler {
         return (patched, out)
     }
 
-    // MARK: - Compiling
-
-    /// The program records, in compile order: `[id][flag]` then one `u16` per value.
-    ///
-    /// Each value is filled from the wires into that module, in pin order; a pin with no wire carries its
-    /// **constant** — `0xC000 | value` from the module's `constants`, or `0xC000` (constant 0) when the
-    /// adapter supplies none. `0xC000` is *not* an "unassigned" marker: `TMP1Module.InPinBinaryOutput`
-    /// (P1.bpl 0x40D3F4) emits `0xC000 | value` and has no unassigned case.
-    public func records(modules: [Module], wires: [Wire],
-                        slots: [String: UInt16] = [:]) throws -> [UInt8] {
-        // An allocation is built even on this path, which exists for callers that hand in the slot
-        // numbers. Roles that need an *allocated* address — `.ownTerminal`, `.feedback` — would otherwise
-        // fall back to `(umisteni << 8) | svorka`, which is only right when a project's module ids happen
-        // to line up with its pins' `INDEX` column. The handed-in slots stay authoritative for `.slot`, so
-        // the values the caller supplied are still the values written.
-        let allocation = PLCSymbolTable(modules: modules, wires: wires,
-                                        classForGUID: classForGUID, shapes: shapes)
-        return try records(modules: modules, wires: wires, slots: slots, wireValue: { $0.value },
-                           allocation: allocation)
-    }
-
-    /// The same, with the slots **and** the wire values taken from a generated `PLCSymbolTable` rather
-    /// than from a supplied CSV and hand-encoded wires.
-    ///
-    /// This is what makes the compiler need no symbol table of its own: a wire contributes the *source
-    /// pin's* `(INDEX, ROWINDEX)` — `(pin[0x64] << 8) | pin[0x60]` for a Boolean, `0x1000 + pin[0x60]`
-    /// for a word — and those are exactly the two numbers the same generator writes into the CSV.
-    public func records(modules: [Module], wires: [Wire], allocation: PLCSymbolTable) throws -> [UInt8] {
-        // A wire whose source has no allocated address is one the generator cannot place: the source is a
-        // *macro* module (a sheet saved as a block), whose internals are not in this library. Writing the
-        // raw `(module << 8) | pin` there would put a terminal in the table that the symbol table does not
-        // have, so it becomes constant 0 — the encoder's own "no source" value — and the record stays
-        // consistent with the table.
-        try records(modules: modules, wires: wires, slots: allocation.slots,
-                    wireValue: { allocation.value(fromWire: $0) ?? PLCProgramBuilder.Module.constant(0) },
-                    allocation: allocation)
-    }
-
-    private func records(modules: [Module], wires: [Wire], slots: [String: UInt16],
-                         wireValue: (Wire) -> UInt16,
-                         allocation: PLCSymbolTable? = nil) throws -> [UInt8] {
-        var starts: [Int: Int] = [:]
-        return try records(modules: modules, wires: wires, slots: slots, wireValue: wireValue,
-                           allocation: allocation, threadStarts: &starts)
-    }
-
-    /// Records with the offset each thread's first record sits at.
-    private func records(modules: [Module], wires: [Wire], slots: [String: UInt16],
-                         wireValue: (Wire) -> UInt16,
-                         allocation: PLCSymbolTable? = nil,
-                         threadStarts: inout [Int: Int]) throws -> [UInt8] {
-        // A module's word is looked up by its id when the slots are the allocation's own: the modules of a macro's sheet are copied
-        // per call and keep their names, so by name two copies would read one slot. Slots a caller supplied stay by name.
-        let slotsAreAllocated = allocation.map { $0.slots == slots } ?? false
-        func slotWord(_ m: Module) -> UInt16? {
-            if slotsAreAllocated, let index = allocation?.moduleSlot[m.umisteni] { return UInt16(index) }
-            return slots[m.name]
-        }
-        var byInput: [UInt8: [Int: UInt16]] = [:]
-        for w in wires {
-            // A parameter wire is keyed past the in-pins, so the two never share a slot.
-            byInput[w.inModule, default: [:]][w.isParam ? Self.paramKeyBase + w.inPin : w.inPin] = wireValue(w)
-        }
-
-        var out: [UInt8] = []
-        var lastThread: Int?
-        for m in modules {
-            // Brace-insensitive: the project writes `{ABC}`, the id table stores `ABC`.
-            let cls = classForGUID[Self.normaliseGUID(m.guid)] ?? classForGUID[m.guid] ?? "?"
-            guard let shape = shapes[cls] else { continue }
-            guard shape.contributesRecord else { continue }
-            // A thread's records start on a 64-byte boundary of the record region: the capture has thread 2's
-            // twelve bytes, 52 zeros, then thread 4 at 0x80.
-            if let last = lastThread, last != m.threadId, out.count % 64 != 0 {
-                out.append(contentsOf: [UInt8](repeating: 0, count: 64 - out.count % 64))
-            }
-            lastThread = m.threadId
-            if threadStarts[m.threadId] == nil { threadStarts[m.threadId] = out.count }
-            // The record's second byte is not a flag of the program's: it is the OR of the hidden
-            // in-pins' `pin[0x70]` values (`InPinToStream`, P1.bpl 0x40DE0E), so it comes out of the
-            // class's own shape before any word is written.
-            let feeds = byInput[m.umisteni] ?? [:]
-            // Bit 0x80 is the first in-pin's constant when nothing is wired to it; the class adds its own
-            // bits, and a class with an in-pin count in its flag (`TMIntSwitch`) adds those.
-            var flag = m.flag | shape.roles.reduce(UInt8(0)) { acc, role in
-                if case .hidden(let bits) = role { return acc | bits }
-                return acc
-            }
-            flag |= Self.classFlagBits[cls] ?? 0
-            // `Div`'s `0x40` is its remainder pin being visible: `kostka-dir.pbd` has `Div1` and `Div3` (one out-pin) at flag 0.
-            if cls == "TMDiv", m.outPinCount > 1 { flag |= 0x40 }
-            // A `SystemCmd` hides what its variant hides: `I2` is `0x20` (the captured Tris variant), `I1`
-            // `0x10` (by the same pattern; no capture has a variant that hides it).
-            if shape.roles.contains(.systemCommand) {
-                if m.systemCommand?.input1.isHidden ?? false { flag |= 0x10 }
-                if m.systemCommand?.input2.isHidden ?? true { flag |= 0x20 }
-            }
-            if feeds[0] == nil, let first = m.inValues.first, first != 0 { flag |= 0x80 }
-            // A switch with so many inputs that 4 per pin no longer fits the flag (19 or more pins) is written in a long form: flag bit
-            // `0x40` and the count of its `X` inputs as a word before the pins. Seen in `kostka-dir.pbd` for 26 pins (24 inputs, `0x0018`);
-            // where the form begins between 12 and 26 pins is inferred from the linear flag overflowing there.
-            let longSwitch = cls == "TMIntSwitch" && m.inPinCount >= 19
-            if longSwitch {
-                flag |= 0x40
-            } else if shape.inPinFlagUnit != 0, m.inPinCount > 3 {
-                flag |= UInt8(truncatingIfNeeded: Int(shape.inPinFlagUnit) * (m.inPinCount - 3))
-            }
-            out.append(shape.id ?? 0)
-            out.append(flag)
-            func put(_ value: UInt16) {
-                out.append(UInt8(truncatingIfNeeded: value))
-                out.append(UInt8(truncatingIfNeeded: value >> 8))
-            }
-            // The first in-pin is a word only when it is wired; unwired it is the flag bit above.
-            let readsInPinZero = shape.roles.contains { role in
-                switch role {
-                case .inPin(0), .inPinOrConstant(0), .inPinOrValue(0): return true
-                default: return false
-                }
-            }
-            if !readsInPinZero, let wired = feeds[0] { put(wired) }
-            func inValue(_ i: Int) -> UInt16 {
-                feeds[i] ?? PLCProgramBuilder.Module.constant(i < m.inValues.count ? m.inValues[i] : 0)
-            }
-            var pin = 1
-            var next = 0
-            /// The next constant the class would place, or constant 0 when the adapter supplied none.
-            func constant() -> UInt16 {
-                defer { next += 1 }
-                return next < m.constants.count
-                    ? PLCProgramBuilder.Module.constant(m.constants[next])
-                    : PLCProgramBuilder.Module.constant(0)
-            }
-            // A `dynamicOutPins` class writes one word per **sheet** out-pin (`TMDigitalInputs` walks the
-            // module's own pin array). An ordinary class's count is *not* the sheet's: `8xDO1` shows seven
-            // `<IN_PIN>` elements and its record has eight words, because `TMDigitalOutputs` registers
-            // eight channels and the class's count is what the writer walks.
-            let roles = shape.dynamicOutPins
-                ? (0..<m.outPinCount).map { ClassShape.Role.ownTerminal(svorka: $0) }
-                : shape.roles
-            for role in roles {
-                if case .hidden = role { continue }   // a hidden pin sets the flag and writes nothing
-                if case .restOfInPins = role {
-                    if longSwitch { put(UInt16(m.inPinCount - 2)) }
-                    for i in 1..<max(1, m.inPinCount) { put(inValue(i)) }
-                    continue
-                }
-                if case .systemCommand = role {
-                    let variant = m.systemCommand
-                    put(feeds[1] ?? variant.map { PLCProgramBuilder.Module.constant(Int($0.command)) } ?? inValue(1))
-                    for (index, hidden) in [variant?.input1.isHidden ?? false, variant?.input2.isHidden ?? true].enumerated()
-                    where !hidden {
-                        put(feeds[Self.paramKeyBase + index]
-                            ?? PLCProgramBuilder.Module.constant(index < m.paramValues.count ? m.paramValues[index] : 0))
-                    }
-                    put(slotWord(m).map { 0x1000 + $0 } ?? PLCProgramBuilder.Module.constant(0))
-                    continue
-                }
-                if case .digitalOutputs = role {
-                    // One word per registered channel; the channels the sheet hides are constant 0 and
-                    // the visible ones take in-pins 1, 2, … in order (`rulkoshaddirigo`: 14 channels, mask
-                    // `$0473` → channels 2, 3, 7, 8, 9, 11, 12, 13 are in-pins 1…8).
-                    let channels = m.pinCount ?? max(0, m.inPinCount - 1)
-                    let hidden = m.hiddenPinMask ?? 0
-                    var pin = 1
-                    for channel in 0..<channels {
-                        if channel < Int.bitWidth, hidden & (1 << channel) != 0 {
-                            put(PLCProgramBuilder.Module.constant(0))
-                        } else {
-                            put(inValue(pin))
-                            pin += 1
-                        }
-                    }
-                    continue
-                }
-                let value: UInt16
-                switch role {
-                case .slot:
-                    // `0x1000 + ROWINDEX` of the module's own symbol row, from Dirigo's symbol table.
-                    value = slotWord(m).map { 0x1000 + $0 } ?? PLCProgramBuilder.Module.constant(0)
-                case .terminal(let umisteni, let svorka):
-                    value = PLCProgramBuilder.Module.terminal(umisteni: umisteni, svorka: svorka)
-                case .feedback(let svorka):
-                    // The module's own out-pin `svorka`, through the same allocation the symbol table is
-                    // generated from. Unlike `ownTerminal` this is deliberately *not* a sheet pin: it is
-                    // the class closing a loop on itself, so it neither advances the wire index nor is
-                    // supplied by the adapter.
-                    value = allocation?.addresses[UInt16(m.umisteni) << 8 | UInt16(svorka)]?.word
-                        ?? PLCProgramBuilder.Module.terminal(umisteni: m.umisteni, svorka: UInt8(svorka))
-                case .ownTerminalIfPin(let svorka):
-                    guard m.outPinCount > svorka else { continue }
-                    value = allocation?.addresses[UInt16(m.umisteni) << 8 | UInt16(svorka)]?.word
-                        ?? PLCProgramBuilder.Module.terminal(umisteni: m.umisteni, svorka: UInt8(svorka))
-                case .ownTerminal(let svorka):
-                    // The pin's own address, from the same allocation the symbol table is generated from.
-                    // Without one — the hand-fed-wire path older tests use — fall back to `(umisteni << 8)
-                    // | svorka`, which is what that path assumed; it coincides with the allocated value
-                    // only when a project's module ids happen to line up with the pins' `INDEX` column,
-                    // as `had.pcc`'s do.
-                    value = allocation?.addresses[UInt16(m.umisteni) << 8 | UInt16(svorka)]?.word
-                        ?? PLCProgramBuilder.Module.terminal(umisteni: m.umisteni, svorka: UInt8(svorka))
-                case .inPin(let index):
-                    value = feeds[index] ?? PLCProgramBuilder.Module.constant(0)
-                case .inPinOrConstant(let index):
-                    value = feeds[index] ?? constant()
-                case .paramPinOrConstant(let index):
-                    value = feeds[Self.paramKeyBase + index] ?? constant()
-                case .inPinOrValue(let index):
-                    value = inValue(index)
-                case .paramPinOrValue(let index):
-                    value = feeds[Self.paramKeyBase + index]
-                        ?? PLCProgramBuilder.Module.constant(index < m.paramValues.count ? m.paramValues[index] : 0)
-                case .restOfInPins, .digitalOutputs, .systemCommand:
-                    continue
-                case .wire:
-                    // A wire, or — when nothing feeds the pin — the pin's constant, which the encoder
-                    // gives as 0 for an unset value. Only `.unassigned` positions consume `constants`,
-                    // because those are the class's declared constant pins; a `.wire` position that the
-                    // sheet leaves open is a pin the class still treats as a wire.
-                    value = feeds[pin] ?? PLCProgramBuilder.Module.constant(0)
-                    pin += 1
-                case .zero:
-                    value = PLCProgramBuilder.Module.constant(0)
-                case .unassigned:
-                    // A class-declared constant pin is not one of the sheet's pins, so it does not
-                    // advance the wire index — the same rule `.hidden` follows.
-                    value = constant()
-                case .hidden:
-                    continue
-                }
-                out.append(UInt8(truncatingIfNeeded: value))
-                out.append(UInt8(truncatingIfNeeded: value >> 8))
-            }
-        }
-        return out
-    }
-
-    /// A whole table: the records placed into a template, padded, with the checksum recomputed.
-    public func table(fromTemplate template: PLCProgramTable,
-                      modules: [Module], wires: [Wire],
-                      slots: [String: UInt16] = [:]) throws -> [UInt8] {
-        var starts: [Int: Int] = [:]
-        let region = try records(modules: modules, wires: wires, slots: slots, wireValue: { $0.value },
-                                 allocation: PLCSymbolTable(modules: modules, wires: wires,
-                                                            classForGUID: classForGUID, shapes: shapes),
-                                 threadStarts: &starts)
-        return try table(fromTemplate: template, modules: modules, wires: wires, region: region,
-                         threadStarts: starts)
-    }
-
-    /// The same, with the slots and the wire values taken from a generated `PLCSymbolTable`.
-    public func table(fromTemplate template: PLCProgramTable, modules: [Module], wires: [Wire],
-                      allocation: PLCSymbolTable) throws -> [UInt8] {
-        var starts: [Int: Int] = [:]
-        let region = try records(modules: modules, wires: wires, slots: allocation.slots,
-                                 wireValue: { allocation.value(fromWire: $0) ?? PLCProgramBuilder.Module.constant(0) },
-                                 allocation: allocation, threadStarts: &starts)
-        return try table(fromTemplate: template, modules: modules, wires: wires, region: region,
-                         threadStarts: starts)
-    }
-
-    /// Header from the template, then the records, the gap, and the trailer from the template. The
-    /// table's length follows the records; nothing is padded to a fixed size.
-    private func table(fromTemplate template: PLCProgramTable, modules: [Module], wires: [Wire],
-                       region: [UInt8], threadStarts: [Int: Int] = [:]) throws -> [UInt8] {
-        PLCProgramTable.assemble(template: template, records: region, threadStarts: threadStarts)
-    }
-
-    /// `{ABC}` and `ABC` are the same GUID; the project file and the id table differ in brace style.
-    public static func normaliseGUID(_ guid: String) -> String {
-        guid.uppercased().trimmingCharacters(in: CharacterSet(charactersIn: "{}"))
-    }
-
     // MARK: - The value families, from the encoders
 
     /// One `u16` of the record region, classified by the family `TMP1Module`'s pin encoders emit.
@@ -957,167 +612,6 @@ public struct PLCProjectCompiler {
         }
     }
 
-    /// One row of Dirigo's symbol table, with the fields the record's words are built from.
-    public struct Symbol: Equatable, Sendable {
-        public var id: Int
-        public var owner: Int
-        public var driver: Int
-        public var type: Int              // 4 = a module's own variable row, 6 = a pin row
-        public var index: Int
-        public var rowIndex: Int
-        public var colIndex: Int
-        public var name: String
-        public var umisteni: Int
-        public var svorka: Int
-        /// The columns the compiler does not read but the file carries. All five real symbol tables hold
-        /// them constant or empty (`POPIS`/`DATA` empty, `K` 1, `Q` 0, `RIGHTS` 2, `INFO1-3`, `K_ADR`,
-        /// `Q_ADR` empty), so they are defaults rather than parsed state. `data`/`k`/`q` are text because
-        /// that is what the file has: the DBF behind it types them as *doubles* and prints them as such.
-        public var popis: String = ""
-        public var data: String = ""
-        public var k: String = "1"
-        public var q: String = "0"
-        public var rights: Int = 2
-        public var info1: String = ""
-        public var info2: String = ""
-        public var info3: String = ""
-        public var kAdr: String = ""
-        public var qAdr: String = ""
-
-        public init(id: Int, owner: Int, driver: Int = 20, type: Int, index: Int, rowIndex: Int,
-                    colIndex: Int, name: String, umisteni: Int, svorka: Int, popis: String = "",
-                    data: String = "", k: String = "1", q: String = "0", rights: Int = 2,
-                    info1: String = "", info2: String = "", info3: String = "",
-                    kAdr: String = "", qAdr: String = "") {
-            self.id = id; self.owner = owner; self.driver = driver; self.type = type
-            self.index = index; self.rowIndex = rowIndex; self.colIndex = colIndex; self.name = name
-            self.umisteni = umisteni; self.svorka = svorka
-            self.popis = popis; self.data = data; self.k = k; self.q = q; self.rights = rights
-            self.info1 = info1; self.info2 = info2; self.info3 = info3
-            self.kAdr = kAdr; self.qAdr = qAdr
-        }
-    }
-
-    /// The column order of the file, exactly as Dirigo's own header has it. The reader and the writer
-    /// both take their order from here, so they cannot drift apart.
-    public static let symbolColumns = ["ID", "OWNER", "DRIVER", "TYP", "INDEX", "ROWINDEX", "COLINDEX",
-                                       "NAME", "POPIS", "DATA", "K", "Q", "RIGHTS", "UMISTENI", "SVORKA",
-                                       "INFO1", "INFO2", "INFO3", "K_ADR", "Q_ADR"]
-
-    /// The symbol table as Dirigo writes it.
-    ///
-    /// CRLF lines, a fully quoted header, and the quoting of each row following the **DBF field type**
-    /// behind it — character columns quoted, integer and double columns bare. That is why `UMISTENI` and
-    /// `SVORKA` are `"1"`/`"0"` while `INDEX`/`ROWINDEX` are bare, and why an empty `DATA` is nothing at
-    /// all where an empty `POPIS` is `""`. `TDBFTable` (Dbftable) types the columns as
-    /// `I I I I I I I C C O O O I C C C C C I I`, which is where the pattern comes from.
-    ///
-    /// Verified by round trip against all five real symbol tables (`SymbolTableTests.roundTrip`).
-    public static func csv(fromSymbols rows: [Symbol]) -> String {
-        var out = symbolColumns.map { "\"\($0)\"" }.joined(separator: ",") + "\r\n"
-        for r in rows {
-            let fields: [String] = [
-                "\(r.id)", "\(r.owner)", "\(r.driver)", "\(r.type)", "\(r.index)", "\(r.rowIndex)",
-                "\(r.colIndex)",
-                "\"\(r.name)\"",
-                "\"\(r.popis)\"",
-                r.data,                                   // DBF double: bare, empty when unset
-                r.k, r.q,
-                "\(r.rights)",
-                "\"\(r.umisteni)\"", "\"\(r.svorka)\"",   // DBF character columns
-                "\"\(r.info1)\"", "\"\(r.info2)\"", "\"\(r.info3)\"",
-                r.kAdr, r.qAdr,
-            ]
-            out += fields.joined(separator: ",") + "\r\n"
-        }
-        return out
-    }
-
-    /// The whole symbol table, not just the slots. Columns are positional, from `symbolColumns`.
-    public static func symbols(fromSymbolCSV csv: String) -> [Symbol] {
-        // Split on characters, not on "\n": a CRLF is one `Character`, and the file is CRLF.
-        csv.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r\n" }.dropFirst().compactMap { rawLine in
-            let line = String(rawLine)
-            let f = line.components(separatedBy: ",")
-            guard f.count >= 20 else { return nil }
-            guard let id = Int(clean(f[0])), let owner = Int(clean(f[1])),
-                  let driver = Int(clean(f[2])), let type = Int(clean(f[3])),
-                  let index = Int(clean(f[4])), let row = Int(clean(f[5])),
-                  let col = Int(clean(f[6])), let rights = Int(clean(f[12])),
-                  let umisteni = Int(clean(f[13])), let svorka = Int(clean(f[14])) else { return nil }
-            return Symbol(id: id, owner: owner, driver: driver, type: type, index: index,
-                          rowIndex: row, colIndex: col, name: clean(f[7]),
-                          umisteni: umisteni, svorka: svorka,
-                          popis: clean(f[8]), data: clean(f[9]), k: clean(f[10]).isEmpty ? "0" : clean(f[10]),
-                          q: clean(f[11]).isEmpty ? "0" : clean(f[11]), rights: rights,
-                          info1: clean(f[15]), info2: clean(f[16]), info3: clean(f[17]),
-                          kAdr: clean(f[18]), qAdr: clean(f[19]))
-        }
-    }
-
-    // MARK: - The symbol table
-
-    /// Data-slot indices, from the symbol table Dirigo writes beside a project (`had.csv`).
-    ///
-    /// A module's slot is `0x1000 + ROWINDEX` of its own output symbol: a `TYP=4` row whose `NAME`
-    /// contains a dot — `Counter1.Y`, `PulseGen1.Cnt`, `ISwitch1.Y`, `SystemCmd1.Out`. Verified against
-    /// `had+1block.csv` on all four modules in `had.pcc` that have such a row. `Comparator1` has none and
-    /// `ISwitch1` carries two slots against its one row, so this is a lower bound, not the whole rule.
-    ///
-    /// The file is CRLF, comma-separated, with every field quoted. Columns are positional:
-    /// `ID, OWNER, DRIVER, TYP, INDEX, ROWINDEX, COLINDEX, NAME, …`.
-    public static func slots(fromSymbolCSV csv: String) -> [String: UInt16] {
-        var out: [String: UInt16] = [:]
-        for s in symbols(fromSymbolCSV: csv) where s.type == 4 {
-            guard let dot = s.name.firstIndex(of: ".") else { continue }
-            out[String(s.name[..<dot])] = UInt16(s.rowIndex)
-        }
-        return out
-    }
-
-    /// Strips the quotes Dirigo wraps every field in, and any CR left by the file's CRLF endings.
-    private static func clean(_ field: String) -> String {
-        field.replacingOccurrences(of: "\"", with: "")
-             .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    // MARK: - Small XML helpers
-
-    /// Compiled patterns, by pattern text. Compiling is the expensive part of a match, and a build asks for the same
-    /// few dozen patterns thousands of times — once per attribute of every module.
-    private final class PatternCache: @unchecked Sendable {
-        private var compiled: [String: NSRegularExpression] = [:]
-        private let lock = NSLock()
-
-        func regex(_ pattern: String) -> NSRegularExpression? {
-            lock.lock()
-            defer { lock.unlock() }
-            if let known = compiled[pattern] { return known }
-            guard let made = try? NSRegularExpression(pattern: pattern) else { return nil }
-            compiled[pattern] = made
-            return made
-        }
-    }
-    private static let patterns = PatternCache()
-
-    private static func matches(_ pattern: String, in text: String) -> [String] {
-        guard let re = patterns.regex(pattern) else { return [] }
-        let range = NSRange(text.startIndex..., in: text)
-        return re.matches(in: text, range: range).compactMap {
-            Range($0.range, in: text).map { String(text[$0]) }
-        }
-    }
-
-    private static func attribute(_ name: String, _ tag: String) -> String? {
-        guard let re = patterns.regex("\\b\(name)=\"([^\"]*)\""),
-              let found = re.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
-              let value = Range(found.range(at: 1), in: tag) else { return nil }
-        return String(tag[value])
-    }
-
-    /// Each `<MODULE …>` start tag with the text after it, up to the next `</MODULE>` (or to the end of the file
-    /// when there is none) — good enough for this file. One pass: a module's body is found from where its tag
-    /// matched, not by searching the file for the tag again.
     /// The names of modules the compiler cannot place in the program's one-byte module position.
     ///
     /// `ID` is a byte in the format — a symbol row's terminal is `(umisteni << 8) | svorka` — so a project with more
@@ -1130,13 +624,4 @@ public struct PLCProjectCompiler {
         }
     }
 
-    private static func moduleElements(in xml: String) -> [(tag: String, body: String)] {
-        guard let re = patterns.regex(#"<MODULE\b[^>]*>"#) else { return [] }
-        return re.matches(in: xml, range: NSRange(xml.startIndex..., in: xml)).compactMap { found in
-            guard let tagRange = Range(found.range, in: xml) else { return nil }
-            let rest = xml[tagRange.upperBound...]
-            let body = rest.range(of: "</MODULE>").map { String(rest[..<$0.lowerBound]) } ?? String(rest)
-            return (String(xml[tagRange]), body)
-        }
-    }
 }
