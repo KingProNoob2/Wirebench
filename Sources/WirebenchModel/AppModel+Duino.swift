@@ -13,17 +13,67 @@ public enum HardwareFamily: String, CaseIterable, Identifiable, Sendable {
     public var shortTitle: String { self == .dirigo ? "Dirigo" : "Duino-S" }
 }
 
+/// Where a Duino-S is reached. MaraProt speaks the same frames over both.
+public enum DuinoTransport: String, CaseIterable, Identifiable, Sendable {
+    case usbCDC
+    case ethernet
+
+    public var id: String { rawValue }
+    public var title: String { self == .usbCDC ? "USB" : "Ethernet" }
+}
+
+/// A resolved Duino-S endpoint, Sendable so the watch task can carry it off the main actor.
+public struct DuinoLink: Sendable, Equatable {
+    public var transport: DuinoTransport
+    public var serialPath: String
+    public var host: String
+    public var port: UInt16
+
+    public func makeTransport() -> MaraProtTransport {
+        switch transport {
+        case .usbCDC:
+            return MaraSerialTransport(path: serialPath)
+        case .ethernet:
+            return MaraTCPTransport(host: host, port: port)
+        }
+    }
+
+    public var description: String {
+        switch transport {
+        case .usbCDC: return serialPath
+        case .ethernet: return "\(host):\(port)"
+        }
+    }
+}
+
 public extension AppModel {
-    /// Opens the selected USB CDC port, identifies the Duino-S and reads its VM status.
+    /// The endpoint the next identify/upload/watch action should use, or nil when the fields are incomplete.
+    func currentDuinoLink() -> DuinoLink? {
+        switch duinoTransport {
+        case .usbCDC:
+            guard !selectedPortPath.isEmpty else { return nil }
+            return DuinoLink(transport: .usbCDC, serialPath: selectedPortPath, host: "", port: 0)
+        case .ethernet:
+            let host = duinoHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty, (1...65_535).contains(duinoTCPPort) else { return nil }
+            return DuinoLink(transport: .ethernet, serialPath: "", host: host, port: UInt16(duinoTCPPort))
+        }
+    }
+
+    var isDuinoLinkConfigured: Bool { currentDuinoLink() != nil }
+
+    /// Opens the selected endpoint, identifies the Duino-S and reads its VM status.
+    /// This is also the "test connection" action the communication window needs.
     /// This is also the "test connection" action the communication window needs.
     @discardableResult
     func refreshDuinoInfo() -> MaraProtClient.Info? {
-        guard !selectedPortPath.isEmpty else {
-            uploadStatus = "No serial port. Plug in the Duino-S and rescan."
+        guard let link = currentDuinoLink() else {
+            uploadStatus = duinoTransport == .usbCDC
+                ? "No serial port. Plug in the Duino-S and rescan."
+                : "Enter the Duino-S IP address and port."
             return nil
         }
-        let transport = MaraSerialTransport(path: selectedPortPath)
-        let client = MaraProtClient(transport: transport, stationId: MaraProtClient.pointToPointStation)
+        let client = MaraProtClient(transport: link.makeTransport(), stationId: MaraProtClient.pointToPointStation)
         do {
             try client.connect()
             defer { client.close() }
@@ -55,8 +105,10 @@ public extension AppModel {
             uploadProgress = nil
             return
         }
-        guard !selectedPortPath.isEmpty else {
-            uploadStatus = "No serial port. Plug in the Duino-S and rescan."
+        guard let link = currentDuinoLink() else {
+            uploadStatus = duinoTransport == .usbCDC
+                ? "No serial port. Plug in the Duino-S and rescan."
+                : "Enter the Duino-S IP address and port."
             uploadPhase = ""
             uploadProgress = nil
             return
@@ -92,11 +144,10 @@ public extension AppModel {
             self.uploadStatus = "Connecting to the Duino-S…"
         }
         logUpload("Duino-S image built: \(compiled.image.count) bytes, \(compiled.slots.count) slots, "
-                  + "\(compiled.notes.count) note(s).", kind: .info)
+                  + "\(compiled.notes.count) note(s); link \(link.description).", kind: .info)
         for note in compiled.notes { logUpload(note, kind: .info) }
 
-        let transport = MaraSerialTransport(path: selectedPortPath)
-        let client = MaraProtClient(transport: transport, stationId: MaraProtClient.pointToPointStation)
+        let client = MaraProtClient(transport: link.makeTransport(), stationId: MaraProtClient.pointToPointStation)
         do {
             try client.connect()
             defer { client.close() }
@@ -151,16 +202,17 @@ public extension AppModel {
             duinoWatchStatus = "There is no project to watch."
             return
         }
-        guard !selectedPortPath.isEmpty else {
-            duinoWatchStatus = "No serial port. Plug in the Duino-S and rescan."
+        guard let link = currentDuinoLink() else {
+            duinoWatchStatus = duinoTransport == .usbCDC
+                ? "No serial port. Plug in the Duino-S and rescan."
+                : "Enter the Duino-S IP address and port."
             return
         }
         duinoWatchStatus = "Starting watch…"
         isWatchingDuino = true
-        let port = selectedPortPath
         duinoWatchTask?.cancel()
         duinoWatchTask = Task.detached { [weak self] in
-            await self?.runDuinoWatch(project: project, port: port)
+            await self?.runDuinoWatch(project: project, link: link)
         }
     }
 
@@ -174,7 +226,7 @@ public extension AppModel {
         duinoWatchSlotTypes.removeAll()
     }
 
-    private func runDuinoWatch(project: PCCProject, port: String) async {
+    private func runDuinoWatch(project: PCCProject, link: DuinoLink) async {
         let compiled: DuinoCompiler.Result
         do {
             compiled = try DuinoCompiler.compile(project: project)
@@ -200,7 +252,7 @@ public extension AppModel {
             return
         }
         let slotIDs = selected.map(\.0)
-        let client = MaraProtClient(transport: MaraSerialTransport(path: port),
+        let client = MaraProtClient(transport: link.makeTransport(),
                                     stationId: MaraProtClient.pointToPointStation)
         do {
             try client.connect()

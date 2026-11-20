@@ -98,43 +98,51 @@ struct WirebenchCLI {
 
         case "duino-upload":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli duino-upload <project> --port <device> [--address <0..255>]")
+                print("Error: Missing file path. Usage: wirebench-cli duino-upload <project> (--port <device> | --host <ip> [--tcp-port 5020]) [--address <0..255>]")
                 return
             }
             var port: String?
+            var host: String?
+            var tcpPort = 5020
             var address: UInt8 = 0
             var index = 3
             while index < args.count {
                 if args[index] == "--port", index + 1 < args.count { port = args[index + 1]; index += 2; continue }
+                if args[index] == "--host", index + 1 < args.count { host = args[index + 1]; index += 2; continue }
+                if args[index] == "--tcp-port", index + 1 < args.count { tcpPort = Int(args[index + 1]) ?? 5020; index += 2; continue }
                 if args[index] == "--address", index + 1 < args.count {
                     address = UInt8(args[index + 1]) ?? 0; index += 2; continue
                 }
                 index += 1
             }
-            guard let port else {
-                print("Error: --port is required for duino-upload.")
+            guard port != nil || host != nil else {
+                print("Error: give --port for USB CDC or --host for Ethernet.")
                 return
             }
-            await duinoUpload(path: args[2], port: port, station: address)
+            await duinoUpload(path: args[2], serialPort: port, host: host, tcpPort: tcpPort, station: address)
 
         case "duino-watch":
             guard args.count >= 3 else {
-                print("Error: Missing file path. Usage: wirebench-cli duino-watch <project> --port <device> [--seconds <n>]")
+                print("Error: Missing file path. Usage: wirebench-cli duino-watch <project> (--port <device> | --host <ip> [--tcp-port 5020]) [--seconds <n>]")
                 return
             }
             var watchPort: String?
+            var watchHost: String?
+            var watchTCPPort = 5020
             var seconds = 0
             var wi = 3
             while wi < args.count {
                 if args[wi] == "--port", wi + 1 < args.count { watchPort = args[wi + 1]; wi += 2; continue }
+                if args[wi] == "--host", wi + 1 < args.count { watchHost = args[wi + 1]; wi += 2; continue }
+                if args[wi] == "--tcp-port", wi + 1 < args.count { watchTCPPort = Int(args[wi + 1]) ?? 5020; wi += 2; continue }
                 if args[wi] == "--seconds", wi + 1 < args.count { seconds = Int(args[wi + 1]) ?? 0; wi += 2; continue }
                 wi += 1
             }
-            guard let watchPort else {
-                print("Error: --port is required for duino-watch.")
+            guard watchPort != nil || watchHost != nil else {
+                print("Error: give --port for USB CDC or --host for Ethernet.")
                 return
             }
-            await duinoWatch(path: args[2], port: watchPort, seconds: seconds)
+            await duinoWatch(path: args[2], serialPort: watchPort, host: watchHost, tcpPort: watchTCPPort, seconds: seconds)
 
         case "st":
             guard args.count >= 3 else {
@@ -170,9 +178,9 @@ struct WirebenchCLI {
                                                 Show the hardware profile and SystemCmd catalogue
           wirebench-cli export-mfl <project> [--out <file>]  Write a Maraflow .mfl project
           wirebench-cli duino-build <project> [--out <file>] Compile FBD to an MFLW image for the Duino-S
-          wirebench-cli duino-upload <project> --port <device> [--address <n>]
-                                                Compile to MFLW and upload over MaraProt USB CDC
-          wirebench-cli duino-watch <project> --port <device> [--seconds <n>]
+          wirebench-cli duino-upload <project> (--port <device> | --host <ip> [--tcp-port 5020]) [--address <n>]
+                                                Compile to MFLW and upload over MaraProt USB CDC or TCP
+          wirebench-cli duino-watch <project> (--port <device> | --host <ip> [--tcp-port 5020]) [--seconds <n>]
                                                 Poll and print live Duino-S slots (0 seconds = until Ctrl-C)
           wirebench-cli st <program.st> [--out <dir>] [--name <name>]
                                                 Compile IEC 61131-3 Structured Text to <name>.wbp.
@@ -746,12 +754,19 @@ struct WirebenchCLI {
         }
     }
 
-    static func duinoUpload(path: String, port: String, station: UInt8) async {
+    static func duinoUpload(path: String, serialPort: String?, host: String?, tcpPort: Int, station: UInt8) async {
         do {
             let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
             let result = try DuinoCompiler.compile(project: loaded.project)
-            print("MFLW image: \(result.image.count) bytes; connecting to \(port)…")
-            let client = MaraProtClient(transport: MaraSerialTransport(path: port), stationId: station)
+            let endpoint = serialPort.map { "USB \($0)" } ?? "TCP \(host ?? ""):\(tcpPort)"
+            print("MFLW image: \(result.image.count) bytes; connecting to \(endpoint)…")
+            let transport: MaraProtTransport
+            if let serialPort {
+                transport = MaraSerialTransport(path: serialPort)
+            } else {
+                transport = MaraTCPTransport(host: host ?? "", port: UInt16(clamping: tcpPort))
+            }
+            let client = MaraProtClient(transport: transport, stationId: station)
             try client.connect()
             defer { client.close() }
             _ = try client.ping()
@@ -772,13 +787,19 @@ struct WirebenchCLI {
         }
     }
 
-    static func duinoWatch(path: String, port: String, seconds: Int) async {
+    static func duinoWatch(path: String, serialPort: String?, host: String?, tcpPort: Int, seconds: Int) async {
         do {
             let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
             let result = try DuinoCompiler.compile(project: loaded.project)
             let names = result.slots
             let ids = Array(Set(names.values)).sorted()
-            let client = MaraProtClient(transport: MaraSerialTransport(path: port),
+            let transport: MaraProtTransport
+            if let serialPort {
+                transport = MaraSerialTransport(path: serialPort)
+            } else {
+                transport = MaraTCPTransport(host: host ?? "", port: UInt16(clamping: tcpPort))
+            }
+            let client = MaraProtClient(transport: transport,
                                         stationId: MaraProtClient.pointToPointStation)
             try client.connect()
             defer { client.close() }

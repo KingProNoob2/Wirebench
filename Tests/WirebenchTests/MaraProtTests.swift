@@ -50,6 +50,19 @@ struct MaraProtTests {
         }
     }
 
+    @Test("The Ethernet transport carries a frame over TCP and back")
+    func ethernetTransport() throws {
+        let server = try FakeTCPServer()
+        defer { server.stop() }
+        let transport = MaraTCPTransport(host: "127.0.0.1", port: server.port)
+        let client = MaraProtClient(transport: transport)
+        try client.connect()
+        defer { client.close() }
+        let ping = try client.ping(echo: 0xA1B2C3D4)
+        #expect(ping.echo == 0xA1B2C3D4)
+        #expect(ping.uptimeMilliseconds == 77)
+    }
+
     @Test("The USB CDC transport carries a frame over a serial port and back")
     func serialTransport() throws {
         let device = try FakeSerialDuino()
@@ -100,6 +113,64 @@ struct MaraProtTests {
         let read = try client.readSlots([0, 0x4001])
         #expect(read[0] == [1])
         #expect(read[0x4001] == [42, 0, 0, 0])
+    }
+}
+
+/// A one-connection TCP server for the Ethernet transport test.
+private final class FakeTCPServer: @unchecked Sendable {
+    let port: UInt16
+    private let listener: Int32
+    private var running = true
+
+    init() throws {
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { throw POSIXError(.EIO) }
+        listener = socketFD
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(0).bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0, listen(socketFD, 1) == 0 else { throw POSIXError(.EIO) }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        var actual = sockaddr_in()
+        let named = withUnsafeMutablePointer(to: &actual) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(socketFD, $0, &length)
+            }
+        }
+        guard named == 0 else { throw POSIXError(.EIO) }
+        port = UInt16(bigEndian: actual.sin_port)
+        Thread.detachNewThread { [self] in serve() }
+    }
+
+    func stop() { running = false; _ = close(listener) }
+
+    private func serve() {
+        let connection = accept(listener, nil, nil)
+        guard connection >= 0 else { return }
+        defer { _ = close(connection) }
+        var pending: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while running {
+            let count = read(connection, &buffer, buffer.count)
+            if count <= 0 { return }
+            pending += buffer.prefix(count)
+            while let total = MaraProtFrame.frameLength(from: pending), pending.count >= total {
+                guard let request = try? MaraProtFrame.decode(Array(pending.prefix(total))) else { return }
+                pending.removeFirst(total)
+                let reply = MaraProtFrame(sequence: request.sequence, stationId: request.stationId,
+                                          opcode: request.opcode,
+                                          payload: request.payload + [77, 0, 0, 0],
+                                          isResponse: true)
+                guard let bytes = try? reply.encoded() else { return }
+                _ = bytes.withUnsafeBytes { write(connection, $0.baseAddress, bytes.count) }
+            }
+        }
     }
 }
 

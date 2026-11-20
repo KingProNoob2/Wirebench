@@ -149,10 +149,10 @@ struct WirebenchApp: App {
             .keyboardShortcut("w", modifiers: [.command, .shift])
             .disabled(!model.isWatchingDuino
                       && (model.hardwareFamily != .duinoS || model.project == nil
-                          || model.selectedPortPath.isEmpty || model.isUploading))
+                          || !model.isDuinoLinkConfigured || model.isUploading))
 
             Button("Identify Duino-S") { model.refreshDuinoInfo() }
-                .disabled(model.hardwareFamily != .duinoS || model.selectedPortPath.isEmpty)
+                .disabled(model.hardwareFamily != .duinoS || !model.isDuinoLinkConfigured)
         }
     }
 

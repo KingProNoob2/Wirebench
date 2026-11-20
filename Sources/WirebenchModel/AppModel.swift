@@ -224,6 +224,11 @@ public final class AppModel: @unchecked Sendable {
     /// Which PLC family the upload and build actions target.
     public var hardwareFamily: HardwareFamily = .dirigo
 
+    /// How a Duino-S is reached: USB CDC or its Ethernet TCP server (port 5020).
+    public var duinoTransport: DuinoTransport = .usbCDC
+    public var duinoHost: String = "192.168.1.50"
+    public var duinoTCPPort: Int = 5020
+
     /// What the last Get Info from a Duino-S reported.
     public var duinoInfo: MaraProtClient.Info?
     public var duinoVMStatus: MaraProtClient.VMStatus?

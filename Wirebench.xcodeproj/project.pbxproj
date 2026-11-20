@@ -27,6 +27,7 @@
 		126EBE24A519EB2BC2201DDF /* PLCConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A7CDA0E13463081B3E60B4 /* PLCConfigurationTests.swift */; };
 		12FF0E41B23596B583422D37 /* BridgeCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD6BED43B959E3AFB1409329 /* BridgeCommands.swift */; };
 		1398D1BBD281462BD9EAA64B /* AgentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041B14FEB87342AB021FC91C /* AgentPanelView.swift */; };
+		142A01C33B35924CB5E1A400 /* MaraTCPTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8F05359224D250FC042C2D /* MaraTCPTransport.swift */; };
 		14E9B4067FEF730A77A12FFE /* MaraflowSTEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C4BAFB3A7A559A6EDD25FE /* MaraflowSTEditorTests.swift */; };
 		165B2A6342301EAEEED28478 /* libWirebenchSource.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 77AD64915A1C2E53357992FD /* libWirebenchSource.a */; };
 		1854C66ED7ACF7BC45773CCE /* PLCClassShapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA6EC807772ACBB08AF7148D /* PLCClassShapes.swift */; };
@@ -633,6 +634,7 @@
 		49BDBFA29CD7EE9AAB113E91 /* PinDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinDisplay.swift; sourceTree = "<group>"; };
 		4AA8CC39941AC87246E1205F /* PLCProjectShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCProjectShapes.swift; sourceTree = "<group>"; };
 		4B6EA21BCC3BF8E8E88EA5C7 /* CxxSimulationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CxxSimulationTests.swift; sourceTree = "<group>"; };
+		4B8F05359224D250FC042C2D /* MaraTCPTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraTCPTransport.swift; sourceTree = "<group>"; };
 		4C82F8D344878BFCD054DB22 /* MaraflowFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowFormat.swift; sourceTree = "<group>"; };
 		4C9AE92ACD62BFD2E2ACF702 /* ProjectFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFile.swift; sourceTree = "<group>"; };
 		4CB5133ABA7613474CC5FFC7 /* DataAndArrayBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataAndArrayBlocks.swift; sourceTree = "<group>"; };
@@ -803,7 +805,7 @@
 		F9A42D656A9C7A4D8C4BCD9B /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		FAFAA9C136EA927854F270D1 /* AppModel+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Clipboard.swift"; sourceTree = "<group>"; };
 		FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraProtFrame.swift; sourceTree = "<group>"; };
-		"TEMP_8938EEC4-DF30-479A-A20C-3EE3F623AEDC" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		"TEMP_6E4D0BB8-5E29-44AA-8ABD-C54D3F75B2C2" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -967,6 +969,7 @@
 				D5D3CFE585EF3BDF0442C0B6 /* DbNetSession.swift */,
 				BB552BAD99E895F922648697 /* MaraProtClient.swift */,
 				FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */,
+				4B8F05359224D250FC042C2D /* MaraTCPTransport.swift */,
 				CA6EC807772ACBB08AF7148D /* PLCClassShapes.swift */,
 				814D3432475BE22756223E7A /* PLCDataType.swift */,
 				323ACD8F6286FEC1DDB46816 /* PLCProgramBuilder.swift */,
@@ -1258,10 +1261,10 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_AAFFF004-BCE4-4508-8684-049F5C7E2D2A" /* Wirebench */ = {
+		"TEMP_8B64A893-AD9C-4DC1-8CA4-B2931993DF71" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_8938EEC4-DF30-479A-A20C-3EE3F623AEDC" /* Release.xcconfig */,
+				"TEMP_6E4D0BB8-5E29-44AA-8ABD-C54D3F75B2C2" /* Release.xcconfig */,
 			);
 			path = Wirebench;
 			sourceTree = "<group>";
@@ -1739,6 +1742,7 @@
 				28C92805438C3A46CAE2CFF9 /* DbNetSession.swift in Sources */,
 				8199DA4644F8C18D02922BFA /* MaraProtClient.swift in Sources */,
 				331E79D09B9EEAB686D91451 /* MaraProtFrame.swift in Sources */,
+				142A01C33B35924CB5E1A400 /* MaraTCPTransport.swift in Sources */,
 				1854C66ED7ACF7BC45773CCE /* PLCClassShapes.swift in Sources */,
 				27B41CA8478FC9AA21A29ADB /* PLCDataType.swift in Sources */,
 				74BAF49C53DF23E0E25C5457 /* PLCProgramBuilder.swift in Sources */,
@@ -2309,7 +2313,7 @@
 		};
 		425F11E043331A2F28A2B6AF /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_8938EEC4-DF30-479A-A20C-3EE3F623AEDC" /* Release.xcconfig */;
+			baseConfigurationReference = "TEMP_6E4D0BB8-5E29-44AA-8ABD-C54D3F75B2C2" /* Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

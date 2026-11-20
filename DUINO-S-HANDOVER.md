@@ -1,8 +1,8 @@
 # Maramat Duino-S support — handover
 
-Status: **working slice with live watch**. FBD compile to MFLW, MaraProt v1 over USB CDC,
-device identification/status, full image upload, and live slot watching are implemented.
-TCP 5020, RS-485 and DFU are not.
+Status: **working slice with live watch**. FBD compile to MFLW, MaraProt v1 over USB CDC **and
+Ethernet TCP 5020**, device identification/status, full image upload, and live slot watching are
+implemented. RS-485 and DFU are not.
 
 ## What the Duino-S is
 
@@ -22,7 +22,8 @@ Sources used:
 | File | Purpose |
 | --- | --- |
 | `Sources/WirebenchHardware/MaraProtFrame.swift` | MaraProt v1 frame codec, CRC-16-CCITT and CRC-32 |
-| `Sources/WirebenchHardware/MaraProtClient.swift` | USB CDC serial transport and the client: ping, GET_INFO, VM_STATUS, VM control, chunked upload, watch subscribe/poll, slot read/write |
+| `Sources/WirebenchHardware/MaraProtClient.swift` | MaraProt client: ping, GET_INFO, VM_STATUS, VM control, chunked upload, watch subscribe/poll, slot read/write |
+| `Sources/WirebenchHardware/MaraTCPTransport.swift` | Ethernet TCP transport (POSIX sockets, port 5020) |
 | `Sources/WirebenchModel/DuinoCompiler.swift` | FBD project → MFLW image, slot allocation and opcode emission |
 | `Sources/WirebenchModel/DuinoMacroExpansion.swift` | Inlines FBD macro sheets before emission |
 | `Sources/WirebenchModel/AppModel+Duino.swift` | `HardwareFamily`, identify, compile+upload, live watch session, UI state |
@@ -86,7 +87,8 @@ not abort the image.
 
 Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 
-- **Duino-S** shows the selected USB CDC port, an **Identify** action (ping, GET_INFO, VM_STATUS),
+- **Duino-S** has a **USB / Ethernet** transport picker. USB shows the selected CDC port; Ethernet
+  takes an IP address and TCP port (default 5020). Both offer an **Identify** action (ping, GET_INFO, VM_STATUS),
   **Build Project**, and **Watch / Stop Watch**. Build Project now opens a **Duino-S Build** report
   (image size, slots, notes) whose primary action is **Upload to Duino-S**; the standalone upload
   button is gone from the Hardware Link card.
@@ -101,18 +103,22 @@ Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 ```
 wirebench-cli duino-build <project> [--out <image.mflw>]
 wirebench-cli duino-upload <project> --port /dev/cu.usbmodem... [--address 0]
+wirebench-cli duino-upload <project> --host 192.168.1.50 [--tcp-port 5020]
 wirebench-cli duino-watch <project> --port /dev/cu.usbmodem... [--seconds 10]
+wirebench-cli duino-watch <project> --host 192.168.1.50 [--seconds 10]
 ```
 
 `duino-build` writes the image and prints slot/notes. `duino-upload` identifies the device, refuses
 a model other than 0x0407, uploads with auto-start and prints progress.
 
-## USB CDC details
+## USB CDC and Ethernet TCP details
 
-- Use the USB virtual COM port (`cu.usbmodem*` on macOS, `ttyACM*` on Linux).
+- USB: use the USB virtual COM port (`cu.usbmodem*` on macOS, `ttyACM*` on Linux).
 - Open at 115200 8N1 with **no parity** (the CDC line rate is ignored by the device, but the port
   still needs a setting).
-- Station ID `0` (P2P) is the default; RS-485 needs `1..247` and a real transport.
+- USB station ID `0` (P2P) is the default; RS-485 needs `1..247` and a real transport.
+- Ethernet: connect to the device's IP at TCP port 5020. The firmware is point-to-point on TCP, so
+  station `0` is used there too.
 - Frame: `4D 50 10 ST SEQlo SEQhi OP STATUS LENlo LENhi payload CRC16lo CRC16hi`; CRC-16-CCITT
   poly `0x1021`, init `0xFFFF`, over header+payload.
 - Upload: `VM_UPLOAD_BEGIN` (total size + full-image CRC32) → repeated `VM_UPLOAD_CHUNK`
@@ -136,7 +142,8 @@ and does not yet validate them against the board map.
   - nested FBD macro project
   - image header/model/CRC checks
 - `MaraProtTests` cover CRC vectors, frame round-trip/corruption, client ping/info/status, chunked
-  upload, watch subscribe/poll, slot read/write, and a real pseudo-terminal serial exchange.
+  upload, watch subscribe/poll, slot read/write, a real pseudo-terminal serial exchange, and a real
+  loopback TCP exchange.
 
 Run:
 
@@ -147,7 +154,7 @@ swift test --disable-sandbox --filter 'DuinoCompilerTests|MaraProtTests'
 ## Known gaps / next steps
 
 1. The Watch UI displays values but does not offer forcing (SLOT_WRITE_BATCH) yet; the client method exists.
-2. Ethernet TCP 5020 and RS-485 transports; only USB CDC is implemented.
+2. RS-485 transport; USB CDC and Ethernet TCP 5020 are implemented.
 3. ST/LD pages (Maraflow's `StBytecodeCompiler`/ladder) are not ported.
 4. Broad native Dirigo block coverage; many `TM*` blocks still have no Duino-S mapping.
 5. `IO.8xDI`/`IO.8xDO` and PulseGen: importer/bridge exists, emitter case/VM support still missing.

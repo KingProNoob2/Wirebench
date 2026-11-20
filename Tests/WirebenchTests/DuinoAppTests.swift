@@ -36,6 +36,17 @@ struct DuinoAppTests {
         #expect(model.uploadPhase.isEmpty)
     }
 
+    @Test("Ethernet without an address is not treated as configured")
+    func ethernetNeedsHost() {
+        let model = model()
+        model.duinoTransport = .ethernet
+        model.duinoHost = ""
+        #expect(!model.isDuinoLinkConfigured)
+        model.startDuinoWatch()
+        #expect(!model.isWatchingDuino)
+        #expect(model.duinoWatchStatus.contains("IP address"))
+    }
+
     @Test("Build Project produces the Duino-S report when that family is selected")
     func buildShowsDuinoReport() throws {
         let model = model()

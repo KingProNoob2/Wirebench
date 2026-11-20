@@ -36,14 +36,30 @@ struct HardwareLinkSection<Report: View>: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .help("The PLC family the build and upload actions target")
+            if model.hardwareFamily == .duinoS {
+                Picker("Transport", selection: $model.duinoTransport) {
+                    ForEach(DuinoTransport.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("USB CDC virtual COM port, or the Duino-S Ethernet TCP server on port 5020")
+            }
             statusRow
-            if !model.availablePorts.isEmpty { portPicker }
-            if model.hardwareFamily == .duinoS, !model.selectedPortPath.isEmpty {
+            if (model.hardwareFamily != .duinoS || model.duinoTransport == .usbCDC),
+               !model.availablePorts.isEmpty {
+                portPicker
+            }
+            if model.hardwareFamily == .duinoS, model.duinoTransport == .ethernet {
+                ethernetFields
+            }
+            if model.hardwareFamily == .duinoS, model.isDuinoLinkConfigured {
                 HStack(spacing: 6) {
                     Button("Identify") { model.refreshDuinoInfo() }
                         .buttonStyle(.borderless)
                         .font(.caption)
-                        .help("Open the selected port, ping the Duino-S, and read its model and firmware")
+                        .help("Connect to the selected endpoint, ping the Duino-S, and read its model and firmware")
                     Spacer(minLength: 4)
                     if let info = model.duinoInfo {
                         Text("\(info.modelName) · 0x\(String(format: "%04X", info.modelId))")
@@ -74,6 +90,10 @@ struct HardwareLinkSection<Report: View>: View {
         // The link is opened by an upload and closed after it, so "connected" is only what an upload in progress looks like.
         if model.isHardwareConnected { return "Connected" }
         if model.hardwareFamily == .duinoS {
+            if model.duinoTransport == .ethernet {
+                let host = model.duinoHost.trimmingCharacters(in: .whitespaces)
+                return host.isEmpty ? "No Ethernet host" : "TCP \(host):\(model.duinoTCPPort)"
+            }
             if let info = model.duinoInfo { return "Ready · \(info.modelName)" }
             return model.availablePorts.isEmpty ? "No serial port" : "Duino-S ready"
         }
@@ -92,17 +112,38 @@ struct HardwareLinkSection<Report: View>: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 4)
-            Button {
-                model.refreshPorts()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .foregroundStyle(.secondary)
+            if model.hardwareFamily != .duinoS || model.duinoTransport == .usbCDC {
+                Button {
+                    model.refreshPorts()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(model.hardwareFamily == .duinoS
+                      ? "Rescan for the Duino-S USB CDC port"
+                      : "Rescan for serial adapters")
+                .accessibilityLabel("Rescan serial ports")
             }
-            .buttonStyle(.borderless)
-            .help(model.hardwareFamily == .duinoS
-                  ? "Rescan for the Duino-S USB CDC port"
-                  : "Rescan for serial adapters")
-            .accessibilityLabel("Rescan serial ports")
+        }
+    }
+
+    private var ethernetFields: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text("IP").foregroundStyle(.secondary)
+                TextField("192.168.1.50", text: $model.duinoHost)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .disabled(model.isWatchingDuino || model.isUploading)
+                Text("Port").foregroundStyle(.secondary)
+                TextField("5020", value: $model.duinoTCPPort, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(width: 62)
+                    .disabled(model.isWatchingDuino || model.isUploading)
+            }
+            .font(.caption)
         }
     }
 
@@ -152,7 +193,7 @@ struct HardwareLinkSection<Report: View>: View {
                         .glassButtonStyle()
                         .controlSize(.regular)
                         .frame(maxWidth: .infinity)
-                        .disabled(model.project == nil || model.selectedPortPath.isEmpty || model.isUploading)
+                        .disabled(model.project == nil || !model.isDuinoLinkConfigured || model.isUploading)
                         .help("Poll the Duino-S VM and show the selected slots live")
                 }
             }
