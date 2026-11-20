@@ -60,5 +60,6 @@ struct DuinoAppTests {
         #expect(model.hardwareFamily == .duinoS)
         model.hardwareFamily = .dirigo
         #expect(model.hardwareFamily.shortTitle == "Duino-P")
+        #expect(model.hardwareFamily.title == "Sybas Duino-P")
     }
 }

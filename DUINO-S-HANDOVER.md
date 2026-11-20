@@ -86,7 +86,8 @@ not abort the image.
 
 ## UI
 
-Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
+Hardware Link now has a **Duino-P** / **Duino-S** segmented picker: Duino-P is the Sybas
+D3Net/525-table family, Duino-S is the Maramat MaraProt/MFLW family.
 
 - **Duino-S** has liquid-glass **USB / Ethernet** transport picker. USB shows the selected CDC port;
   Ethernet takes an IP address and TCP port (default 5020). Both offer **Build Project** and **Watch / Stop Watch**. Build Project now opens a **Duino-S Build** report
