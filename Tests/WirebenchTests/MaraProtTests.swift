@@ -89,6 +89,17 @@ struct MaraProtTests {
         #expect(device.receivedChunks == 200)
         #expect(progress.last == 1)
         #expect(device.started)
+
+        let epoch = try client.watchSubscribe([0, 0x4001])
+        let snapshot = try client.watchPoll(ackEpoch: 0)
+        #expect(snapshot.changedSlots.count == 2)
+        _ = try client.writeSlots([0: [1], 0x4001: [42, 0, 0, 0]])
+        let update = try client.watchPoll(ackEpoch: epoch)
+        #expect(update.changedSlots[0] == [1])
+        #expect(update.changedSlots[0x4001]?.count == 4)
+        let read = try client.readSlots([0, 0x4001])
+        #expect(read[0] == [1])
+        #expect(read[0x4001] == [42, 0, 0, 0])
     }
 }
 
@@ -135,6 +146,10 @@ private final class FakeSerialDuino: @unchecked Sendable {
 private final class FakeDuino: MaraProtTransport {
     var receivedChunks = 0
     var started = false
+    private var watchSlots: [UInt16] = []
+    private var watchEpoch: UInt16 = 0
+    private var changed: Set<UInt16> = []
+    private var slotValues: [UInt16: [UInt8]] = [:]
     private var beginCRC: UInt32 = 0
     private var expectedLength = 0
     private var bytes: [UInt8] = []
@@ -191,6 +206,56 @@ private final class FakeDuino: MaraProtTransport {
             payload = [UInt8(truncatingIfNeeded: crc), UInt8(truncatingIfNeeded: crc >> 8),
                        UInt8(truncatingIfNeeded: crc >> 16), UInt8(truncatingIfNeeded: crc >> 24),
                        started ? MaraProt.VMRunState.running.rawValue : MaraProt.VMRunState.stopped.rawValue]
+        case .watchSubscribe:
+            let append = request.payload.first == 1
+            if !append { watchSlots.removeAll() }
+            let count = Int(request.payload[1]) | (Int(request.payload[2]) << 8)
+            var position = 3
+            for _ in 0..<count {
+                let slot = UInt16(request.payload[position]) | (UInt16(request.payload[position + 1]) << 8)
+                watchSlots.append(slot)
+                position += 2
+            }
+            watchEpoch &+= 1
+            changed = Set(watchSlots)
+            payload = [UInt8(truncatingIfNeeded: watchSlots.count), UInt8(truncatingIfNeeded: watchSlots.count >> 8),
+                       UInt8(truncatingIfNeeded: watchEpoch), UInt8(truncatingIfNeeded: watchEpoch >> 8)]
+        case .watchPoll:
+            let acknowledged = UInt16(request.payload[0]) | (UInt16(request.payload[1]) << 8)
+            let emit = acknowledged == 0 || acknowledged != watchEpoch ? Set(watchSlots) : changed
+            changed.removeAll()
+            var body: [UInt8] = []
+            for slot in emit.sorted() {
+                let value = slotValues[slot] ?? [UInt8](repeating: 0, count: MaraProtClient.slotSize(slot))
+                body += [UInt8(truncatingIfNeeded: slot), UInt8(truncatingIfNeeded: slot >> 8)]
+                body += value
+            }
+            payload = [UInt8(truncatingIfNeeded: watchEpoch), UInt8(truncatingIfNeeded: watchEpoch >> 8),
+                       MaraProt.VMRunState.running.rawValue, 0,
+                       UInt8(truncatingIfNeeded: emit.count), UInt8(truncatingIfNeeded: emit.count >> 8)] + body
+        case .slotReadBatch:
+            let count = Int(request.payload[0]) | (Int(request.payload[1]) << 8)
+            var body: [UInt8] = []
+            var position = 2
+            for _ in 0..<count {
+                let slot = UInt16(request.payload[position]) | (UInt16(request.payload[position + 1]) << 8)
+                position += 2
+                body += [UInt8(truncatingIfNeeded: slot), UInt8(truncatingIfNeeded: slot >> 8)]
+                body += slotValues[slot] ?? [UInt8](repeating: 0, count: MaraProtClient.slotSize(slot))
+            }
+            payload = [UInt8(truncatingIfNeeded: count), UInt8(truncatingIfNeeded: count >> 8)] + body
+        case .slotWriteBatch:
+            let count = Int(request.payload[0]) | (Int(request.payload[1]) << 8)
+            var position = 2
+            for _ in 0..<count {
+                let slot = UInt16(request.payload[position]) | (UInt16(request.payload[position + 1]) << 8)
+                position += 2
+                let size = MaraProtClient.slotSize(slot)
+                slotValues[slot] = Array(request.payload[position..<(position + size)])
+                changed.insert(slot)
+                position += size
+            }
+            payload = [UInt8(truncatingIfNeeded: count), UInt8(truncatingIfNeeded: count >> 8)]
         default:
             status = MaraProt.Status.opcode.rawValue
             payload = []

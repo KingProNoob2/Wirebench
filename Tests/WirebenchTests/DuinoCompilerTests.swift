@@ -95,6 +95,8 @@ struct DuinoCompilerTests {
         try vm.setRunning()
         let q = try #require(result.slots["Timer1.Q"])
         let et = try #require(result.slots["Timer1.ET"])
+        #expect(result.slotTypes[q] == .bool)
+        #expect(result.slotTypes[et] == .int)
         for _ in 0..<4 { try vm.step(thread: 1, dtMicroseconds: 5_000) }
         #expect(vm.readInt(et) == 20)
         #expect(vm.readBool(q))

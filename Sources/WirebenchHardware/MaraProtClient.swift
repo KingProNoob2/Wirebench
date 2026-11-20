@@ -8,7 +8,7 @@ public protocol MaraProtTransport: AnyObject {
 }
 
 /// USB CDC and RS-485 both arrive as a byte stream; only the way the port is opened differs.
-public final class MaraSerialTransport: MaraProtTransport {
+public final class MaraSerialTransport: MaraProtTransport, @unchecked Sendable {
     private let port: SerialPort
     private let path: String
     private let baudRate: Int
@@ -50,7 +50,7 @@ public final class MaraSerialTransport: MaraProtTransport {
 }
 
 /// A thin timeout wrapper for an already-open serial port, used when the caller owns the port.
-public final class MaraStreamTransport: MaraProtTransport {
+public final class MaraStreamTransport: MaraProtTransport, @unchecked Sendable {
     private let read: (Int, TimeInterval) throws -> [UInt8]
     private let write: ([UInt8]) throws -> Void
     private let closeHandler: () -> Void
@@ -83,7 +83,7 @@ public final class MaraStreamTransport: MaraProtTransport {
     }
 }
 
-public final class MaraProtClient {
+public final class MaraProtClient: @unchecked Sendable {
     public enum ClientError: Error, LocalizedError, Equatable {
         case timeout
         case malformedResponse(String)
@@ -134,6 +134,15 @@ public final class MaraProtClient {
         public var payloadCrc32: UInt32
         public var runState: MaraProt.VMRunState
         public var chunks: Int
+    }
+
+    public struct WatchUpdate: Equatable, Sendable {
+        public var epoch: UInt16
+        public var runState: MaraProt.VMRunState
+        public var eStopActive: Bool
+        /// Only the slots whose value changed since the acknowledged epoch. A poll with a stale epoch
+        /// returns the whole subscribed list.
+        public var changedSlots: [UInt16: [UInt8]]
     }
 
     public let transport: MaraProtTransport
@@ -193,6 +202,123 @@ public final class MaraProtClient {
             throw ClientError.malformedResponse("VM_CONTROL returned \(payload.count) bytes")
         }
         return state
+    }
+
+    /// Replaces the device's watch list with `slotIds`, chunked to the frame limit. Returns the epoch
+    /// the next poll must acknowledge.
+    @discardableResult
+    public func watchSubscribe(_ slotIds: [UInt16]) throws -> UInt16 {
+        var epoch: UInt16 = 1
+        var offset = 0
+        repeat {
+            let count = min(250, slotIds.count - offset)
+            var request: [UInt8] = [offset == 0 ? 0 : 1]
+            request += le16(UInt16(count))
+            for index in 0..<count { request += le16(slotIds[offset + index]) }
+            let reply = try transceive(.watchSubscribe, request, timeout: timeout)
+            guard reply.count >= 4 else {
+                throw ClientError.malformedResponse("WATCH_SUBSCRIBE returned \(reply.count) bytes")
+            }
+            epoch = readLE16(reply, 2)
+            offset += count
+        } while offset < slotIds.count
+        return epoch
+    }
+
+    /// Polls the subscribed slots. Pass the epoch returned by the previous call (or 0 for a full snapshot).
+    public func watchPoll(ackEpoch: UInt16) throws -> WatchUpdate {
+        let reply = try transceive(.watchPoll, le16(ackEpoch), timeout: timeout)
+        guard reply.count >= 6 else {
+            throw ClientError.malformedResponse("WATCH_POLL returned \(reply.count) bytes")
+        }
+        let epoch = readLE16(reply, 0)
+        let state = MaraProt.VMRunState(rawValue: reply[2]) ?? .stopped
+        let count = Int(readLE16(reply, 4))
+        var changed: [UInt16: [UInt8]] = [:]
+        var position = 6
+        for _ in 0..<count {
+            guard position + 2 <= reply.count else { break }
+            let slot = readLE16(reply, position)
+            position += 2
+            let size = Self.slotSize(slot)
+            guard size > 0, position + size <= reply.count else { break }
+            changed[slot] = Array(reply[position..<(position + size)])
+            position += size
+        }
+        return WatchUpdate(epoch: epoch, runState: state, eStopActive: reply[3] != 0, changedSlots: changed)
+    }
+
+    /// Reads a set of slots in one or more batches, for a one-shot watch snapshot.
+    public func readSlots(_ slotIds: [UInt16]) throws -> [UInt16: [UInt8]] {
+        var result: [UInt16: [UInt8]] = [:]
+        var offset = 0
+        while offset < slotIds.count {
+            var count = 0
+            var bytes = 2
+            while offset + count < slotIds.count {
+                let next = Self.slotSize(slotIds[offset + count])
+                if count > 0 && bytes + 2 + next > 500 { break }
+                bytes += 2 + next
+                count += 1
+            }
+            if count == 0 { break }
+            var request = le16(UInt16(count))
+            for index in 0..<count { request += le16(slotIds[offset + index]) }
+            let reply = try transceive(.slotReadBatch, request, timeout: timeout)
+            guard reply.count >= 2 else { throw ClientError.malformedResponse("SLOT_READ_BATCH returned \(reply.count) bytes") }
+            let emitted = Int(readLE16(reply, 0))
+            var position = 2
+            for _ in 0..<emitted {
+                guard position + 2 <= reply.count else { break }
+                let slot = readLE16(reply, position)
+                position += 2
+                let size = Self.slotSize(slot)
+                guard size > 0, position + size <= reply.count else { break }
+                result[slot] = Array(reply[position..<(position + size)])
+                position += size
+            }
+            offset += count
+        }
+        return result
+    }
+
+    /// Writes a set of slots, for a Watch/Force control.
+    @discardableResult
+    public func writeSlots(_ values: [UInt16: [UInt8]]) throws -> Int {
+        let entries = values.sorted { $0.key < $1.key }
+        var offset = 0
+        var applied = 0
+        while offset < entries.count {
+            var count = 0
+            var bytes = 2
+            while offset + count < entries.count {
+                let (slot, raw) = entries[offset + count]
+                if count > 0 && bytes + 2 + raw.count > 500 { break }
+                bytes += 2 + raw.count
+                count += 1
+            }
+            if count == 0 { break }
+            var request = le16(UInt16(count))
+            for index in 0..<count {
+                request += le16(entries[offset + index].key)
+                request += entries[offset + index].value
+            }
+            let reply = try transceive(.slotWriteBatch, request, timeout: timeout)
+            guard reply.count >= 2 else { throw ClientError.malformedResponse("SLOT_WRITE_BATCH returned \(reply.count) bytes") }
+            applied += Int(readLE16(reply, 0))
+            offset += count
+        }
+        return applied
+    }
+
+    /// The byte width of a type-tagged slot.
+    public static func slotSize(_ slot: UInt16) -> Int {
+        switch (slot >> 14) & 0x3 {
+        case 0: return 1
+        case 1: return 4
+        case 2: return 8
+        default: return 4
+        }
     }
 
     /// Uploads a complete MFLW image. The image itself carries its payload CRC in its header; the
@@ -264,6 +390,10 @@ public final class MaraProtClient {
             throw ClientError.deviceError(MaraProt.Status(rawValue: reply.status) ?? .parameter)
         }
         return reply.payload
+    }
+
+    private func le16(_ value: UInt16) -> [UInt8] {
+        [UInt8(truncatingIfNeeded: value), UInt8(truncatingIfNeeded: value >> 8)]
     }
 
     private func le32(_ value: UInt32) -> [UInt8] {

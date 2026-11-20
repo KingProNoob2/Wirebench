@@ -35,6 +35,15 @@ struct DuinoAppTests {
         #expect(model.uploadPhase.isEmpty)
     }
 
+    @Test("Watch without a port does not open a session")
+    func watchWithoutPort() {
+        let model = model()
+        model.selectedPortPath = ""
+        model.startDuinoWatch()
+        #expect(!model.isWatchingDuino)
+        #expect(model.duinoWatchStatus.contains("No serial port"))
+    }
+
     @Test("The Hardware Link family picker routes the upload action to the Duino-S")
     func familyRoutes() {
         let model = model()

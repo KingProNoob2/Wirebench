@@ -117,6 +117,25 @@ struct WirebenchCLI {
             }
             await duinoUpload(path: args[2], port: port, station: address)
 
+        case "duino-watch":
+            guard args.count >= 3 else {
+                print("Error: Missing file path. Usage: wirebench-cli duino-watch <project> --port <device> [--seconds <n>]")
+                return
+            }
+            var watchPort: String?
+            var seconds = 0
+            var wi = 3
+            while wi < args.count {
+                if args[wi] == "--port", wi + 1 < args.count { watchPort = args[wi + 1]; wi += 2; continue }
+                if args[wi] == "--seconds", wi + 1 < args.count { seconds = Int(args[wi + 1]) ?? 0; wi += 2; continue }
+                wi += 1
+            }
+            guard let watchPort else {
+                print("Error: --port is required for duino-watch.")
+                return
+            }
+            await duinoWatch(path: args[2], port: watchPort, seconds: seconds)
+
         case "st":
             guard args.count >= 3 else {
                 print("Error: Missing file path. Usage: wirebench-cli st <program.st> [--out <dir>] [--name <name>]")
@@ -153,6 +172,8 @@ struct WirebenchCLI {
           wirebench-cli duino-build <project> [--out <file>] Compile FBD to an MFLW image for the Duino-S
           wirebench-cli duino-upload <project> --port <device> [--address <n>]
                                                 Compile to MFLW and upload over MaraProt USB CDC
+          wirebench-cli duino-watch <project> --port <device> [--seconds <n>]
+                                                Poll and print live Duino-S slots (0 seconds = until Ctrl-C)
           wirebench-cli st <program.st> [--out <dir>] [--name <name>]
                                                 Compile IEC 61131-3 Structured Text to <name>.wbp.
           wirebench-cli build <project.wbp> [--out <dir>] [--template <program.pbd>] [--quiet]
@@ -747,6 +768,46 @@ struct WirebenchCLI {
             print("\nUploaded \(upload.chunks) chunk(s), VM state \(upload.runState).")
         } catch {
             FileHandle.standardError.write(Data("duino-upload failed: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+
+    static func duinoWatch(path: String, port: String, seconds: Int) async {
+        do {
+            let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
+            let result = try DuinoCompiler.compile(project: loaded.project)
+            let names = result.slots
+            let ids = Array(Set(names.values)).sorted()
+            let client = MaraProtClient(transport: MaraSerialTransport(path: port),
+                                        stationId: MaraProtClient.pointToPointStation)
+            try client.connect()
+            defer { client.close() }
+            _ = try client.ping()
+            let info = try client.info()
+            var epoch = try client.watchSubscribe(ids)
+            let initial = try client.readSlots(ids)
+            var update = try client.watchPoll(ackEpoch: epoch)
+            for (slot, raw) in initial.sorted(by: { $0.key < $1.key }) {
+                let type = result.slotTypes[slot] ?? .bool
+                let label = names.first(where: { $0.value == slot })?.key ?? "slot \(slot)"
+                print(label.padding(toLength: 36, withPad: " ", startingAt: 0), type.value(from: raw))
+            }
+            epoch = update.epoch
+            print("Watching \(info.modelName), \(ids.count) slot(s). Ctrl-C to stop.")
+            let deadline = seconds > 0 ? Date().addingTimeInterval(Double(seconds)) : .distantFuture
+            while Date() < deadline {
+                for (slot, raw) in update.changedSlots.sorted(by: { $0.key < $1.key }) {
+                    let type = result.slotTypes[slot] ?? .bool
+                    let label = names.first(where: { $0.value == slot })?.key ?? "slot \(slot)"
+                    print(label.padding(toLength: 36, withPad: " ", startingAt: 0), type.value(from: raw))
+                }
+                fflush(stdout)
+                try await Task.sleep(nanoseconds: 100_000_000)
+                update = try client.watchPoll(ackEpoch: epoch)
+                epoch = update.epoch
+            }
+        } catch {
+            FileHandle.standardError.write(Data("duino-watch failed: \(error.localizedDescription)\n".utf8))
             exit(1)
         }
     }

@@ -132,3 +132,121 @@ public extension AppModel {
         }
     }
 }
+
+public extension AppModel {
+    /// Starts a live watch session: compile the current FBD project for its operand→slot table, open the
+    /// selected USB CDC port, subscribe to the slots and poll the device. The port stays open only while
+    /// watching, like an upload.
+    func startDuinoWatch() {
+        guard !isWatchingDuino else { return }
+        guard !isUploading else {
+            duinoWatchStatus = "Wait for the upload to finish before watching."
+            return
+        }
+        guard let project, !project.modules.isEmpty else {
+            duinoWatchStatus = "There is no project to watch."
+            return
+        }
+        guard !selectedPortPath.isEmpty else {
+            duinoWatchStatus = "No serial port. Plug in the Duino-S and rescan."
+            return
+        }
+        duinoWatchStatus = "Starting watch…"
+        isWatchingDuino = true
+        let port = selectedPortPath
+        duinoWatchTask?.cancel()
+        duinoWatchTask = Task.detached { [weak self] in
+            await self?.runDuinoWatch(project: project, port: port)
+        }
+    }
+
+    func stopDuinoWatch() {
+        duinoWatchTask?.cancel()
+        duinoWatchTask = nil
+        isWatchingDuino = false
+        duinoWatchStatus = "Watch stopped."
+        duinoWatchValues.removeAll()
+    }
+
+    private func runDuinoWatch(project: PCCProject, port: String) async {
+        let compiled: DuinoCompiler.Result
+        do {
+            compiled = try DuinoCompiler.compile(project: project)
+        } catch {
+            await MainActor.run {
+                self.isWatchingDuino = false
+                self.duinoWatchStatus = "Watch compile failed: \(error.localizedDescription)"
+            }
+            return
+        }
+
+        let allSlots = compiled.slots.keys.sorted().compactMap { name -> (UInt16, String)? in
+            guard let slot = compiled.slots[name] else { return nil }
+            return (slot, name)
+        }
+        // The device subscribes at most 512 slots; keep the first 512 in stable name order.
+        let selected = Array(allSlots.prefix(512))
+        guard !selected.isEmpty else {
+            await MainActor.run {
+                self.isWatchingDuino = false
+                self.duinoWatchStatus = "The compiled image has no watchable slots."
+            }
+            return
+        }
+        let slotIDs = selected.map(\.0)
+        let client = MaraProtClient(transport: MaraSerialTransport(path: port),
+                                    stationId: MaraProtClient.pointToPointStation)
+        do {
+            try client.connect()
+            defer { client.close() }
+            _ = try client.ping()
+            let info = try client.info()
+            guard info.modelId == 0x0407 else {
+                throw MaraProtClient.ClientError.uploadRejected("not a Duino-S")
+            }
+            let epoch = try client.watchSubscribe(slotIDs)
+            // Read every selected slot once so the table starts complete; the watch poll then carries deltas.
+            let initial = try client.readSlots(slotIDs)
+            var update = try client.watchPoll(ackEpoch: epoch)
+            let names = Dictionary(uniqueKeysWithValues: selected.map { ($0.0, $0.1) })
+            let types = Dictionary(uniqueKeysWithValues: selected.map { ($0.0, compiled.slotTypes[$0.0] ?? .bool) })
+            var values: [UInt16: Double] = [:]
+            for (slot, raw) in initial {
+                values[slot] = (types[slot] ?? .bool).value(from: raw)
+            }
+            await MainActor.run {
+                self.duinoInfo = info
+                self.duinoWatchSlotNames = names
+                self.duinoWatchSlotTypes = types
+                self.duinoWatchValues = values
+                self.duinoWatchStatus = "Watching \(selected.count) slot(s) on \(info.modelName)."
+            }
+            var ackEpoch = update.epoch == 0 ? epoch : update.epoch
+            while !Task.isCancelled {
+                try await Task.sleep(nanoseconds: 100_000_000)
+                if Task.isCancelled { break }
+                update = try client.watchPoll(ackEpoch: ackEpoch)
+                ackEpoch = update.epoch
+                var changes: [UInt16: Double] = [:]
+                for (slot, raw) in update.changedSlots where types[slot] != nil {
+                    changes[slot] = types[slot]!.value(from: raw)
+                }
+                if !changes.isEmpty {
+                    await MainActor.run {
+                        for (slot, value) in changes { self.duinoWatchValues[slot] = value }
+                    }
+                }
+            }
+            await MainActor.run { self.duinoWatchStatus = "Watch stopped." }
+        } catch {
+            if !Task.isCancelled {
+                await MainActor.run {
+                    self.duinoWatchStatus = "Watch failed: \(error.localizedDescription)"
+                }
+            }
+        }
+        await MainActor.run {
+            self.isWatchingDuino = false
+        }
+    }
+}

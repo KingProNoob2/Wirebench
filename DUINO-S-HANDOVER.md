@@ -1,7 +1,8 @@
 # Maramat Duino-S support — handover
 
-Status: **first working slice**. FBD compile to MFLW, MaraProt v1 over USB CDC, device
-identification/status, and full image upload are implemented. Watch, TCP 5020, RS-485 and DFU are not.
+Status: **working slice with live watch**. FBD compile to MFLW, MaraProt v1 over USB CDC,
+device identification/status, full image upload, and live slot watching are implemented.
+TCP 5020, RS-485 and DFU are not.
 
 ## What the Duino-S is
 
@@ -21,10 +22,10 @@ Sources used:
 | File | Purpose |
 | --- | --- |
 | `Sources/WirebenchHardware/MaraProtFrame.swift` | MaraProt v1 frame codec, CRC-16-CCITT and CRC-32 |
-| `Sources/WirebenchHardware/MaraProtClient.swift` | USB CDC serial transport and the client: ping, GET_INFO, VM_STATUS, VM control, chunked upload |
+| `Sources/WirebenchHardware/MaraProtClient.swift` | USB CDC serial transport and the client: ping, GET_INFO, VM_STATUS, VM control, chunked upload, watch subscribe/poll, slot read/write |
 | `Sources/WirebenchModel/DuinoCompiler.swift` | FBD project → MFLW image, slot allocation and opcode emission |
 | `Sources/WirebenchModel/DuinoMacroExpansion.swift` | Inlines FBD macro sheets before emission |
-| `Sources/WirebenchModel/AppModel+Duino.swift` | `HardwareFamily`, identify, compile+upload, UI state |
+| `Sources/WirebenchModel/AppModel+Duino.swift` | `HardwareFamily`, identify, compile+upload, live watch session, UI state |
 | `Sources/WirebenchMaraVM/` | Swift owner for the portable `mara_vm.c` used by tests |
 | `Sources/WirebenchMaraVMC/` | Vendored portable MaraVM C engine (`mara_vm.c`, `mara_vm.h`) |
 | `Sources/WirebenchApp/HardwareLinkView.swift` | PLC family picker, Duino-S identify/upload actions |
@@ -86,7 +87,9 @@ not abort the image.
 Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 
 - **Duino-S** shows the selected USB CDC port, an **Identify** action (ping, GET_INFO, VM_STATUS),
-  and **Upload to Duino-S** (compile current FBD project to MFLW, upload, auto-start).
+  **Upload to Duino-S** (compile current FBD project to MFLW, upload, auto-start), and
+  **Watch / Stop Watch**. Watch compiles the same operand→slot table, subscribes up to 512 slots,
+  takes a full snapshot, then polls deltas every 100 ms and shows the decoded values in the card.
 - Build → Upload Compiled Program routes to the Duino-S when that family is selected.
 - Upload progress, phase and the framed log are reused from the existing Hardware Link.
 
@@ -95,6 +98,7 @@ Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 ```
 wirebench-cli duino-build <project> [--out <image.mflw>]
 wirebench-cli duino-upload <project> --port /dev/cu.usbmodem... [--address 0]
+wirebench-cli duino-watch <project> --port /dev/cu.usbmodem... [--seconds 10]
 ```
 
 `duino-build` writes the image and prints slot/notes. `duino-upload` identifies the device, refuses
@@ -128,8 +132,8 @@ and does not yet validate them against the board map.
   - Timer/TON elapsed time
   - nested FBD macro project
   - image header/model/CRC checks
-- `MaraProtTests` cover CRC vectors, frame round-trip/corruption, and client ping/info/status plus
-  chunked upload against a frame-level fake device.
+- `MaraProtTests` cover CRC vectors, frame round-trip/corruption, client ping/info/status, chunked
+  upload, watch subscribe/poll, slot read/write, and a real pseudo-terminal serial exchange.
 
 Run:
 
@@ -139,7 +143,7 @@ swift test --disable-sandbox --filter 'DuinoCompilerTests|MaraProtTests'
 
 ## Known gaps / next steps
 
-1. Watch/subscription and slot read/write (MaraProt 0x30–0x33); watch “comes later” per the request.
+1. The Watch UI displays values but does not offer forcing (SLOT_WRITE_BATCH) yet; the client method exists.
 2. Ethernet TCP 5020 and RS-485 transports; only USB CDC is implemented.
 3. ST/LD pages (Maraflow's `StBytecodeCompiler`/ladder) are not ported.
 4. Broad native Dirigo block coverage; many `TM*` blocks still have no Duino-S mapping.

@@ -228,6 +228,14 @@ public final class AppModel: @unchecked Sendable {
     public var duinoInfo: MaraProtClient.Info?
     public var duinoVMStatus: MaraProtClient.VMStatus?
 
+    /// Live watch state for the Duino-S. Slot names come from the MFLW compiler's operand table.
+    public var isWatchingDuino: Bool = false
+    public var duinoWatchStatus: String = ""
+    public var duinoWatchSlotNames: [UInt16: String] = [:]
+    public var duinoWatchSlotTypes: [UInt16: DuinoSlotType] = [:]
+    public var duinoWatchValues: [UInt16: Double] = [:]
+    var duinoWatchTask: Task<Void, Never>?
+
     /// Whether the serial link to the PLC is open: only while an upload is running, which opens the port itself and closes it again.
     public private(set) var isHardwareConnected: Bool = false
 

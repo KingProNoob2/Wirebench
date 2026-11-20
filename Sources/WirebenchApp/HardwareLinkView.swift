@@ -54,6 +54,7 @@ struct HardwareLinkSection<Report: View>: View {
                 }
             }
             actions
+            watchPanel
             if outcome != .idle { uploadStatus }
             if !model.uploadLog.isEmpty { log }
         }
@@ -114,7 +115,7 @@ struct HardwareLinkSection<Report: View>: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .fixedSize()
-        .disabled(model.isHardwareConnected)
+        .disabled(model.isHardwareConnected || model.isWatchingDuino)
     }
 
     /// The section's main action, full width. The frame is on the label, not the button: a frame around
@@ -147,9 +148,68 @@ struct HardwareLinkSection<Report: View>: View {
                 }
                 .glassButtonStyle()
                 .controlSize(.regular)
-                .disabled(model.project == nil || model.isUploading)
+                .disabled(model.project == nil || model.isUploading || model.isWatchingDuino)
                 .help("Compile this FBD project to MFLW and upload it over the selected USB CDC port")
+
+                if model.isWatchingDuino {
+                    Button("Stop Watch") { model.stopDuinoWatch() }
+                        .glassButtonStyle()
+                        .controlSize(.regular)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Button("Watch") { model.startDuinoWatch() }
+                        .glassButtonStyle()
+                        .controlSize(.regular)
+                        .frame(maxWidth: .infinity)
+                        .disabled(model.project == nil || model.selectedPortPath.isEmpty || model.isUploading)
+                        .help("Poll the Duino-S VM and show the selected slots live")
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var watchPanel: some View {
+        if model.isWatchingDuino || !model.duinoWatchStatus.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: model.isWatchingDuino ? "eye.fill" : "eye")
+                    Text(model.duinoWatchStatus)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .foregroundStyle(model.isWatchingDuino ? Color.secondary : Color.secondary)
+                if !model.duinoWatchSlotNames.isEmpty {
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(model.duinoWatchSlotNames.keys.sorted(), id: \.self) { slot in
+                                HStack(spacing: 6) {
+                                    Text(model.duinoWatchSlotNames[slot] ?? "slot \(slot)")
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer(minLength: 2)
+                                    Text(watchValue(slot))
+                                        .monospacedDigit()
+                                        .foregroundStyle(.primary)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 170)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func watchValue(_ slot: UInt16) -> String {
+        guard let value = model.duinoWatchValues[slot] else { return "—" }
+        switch model.duinoWatchSlotTypes[slot] ?? .bool {
+        case .bool: return value == 0 ? "0" : "1"
+        case .int, .long: return String(Int64(value))
+        case .float: return String(format: "%.3f", value)
         }
     }
 

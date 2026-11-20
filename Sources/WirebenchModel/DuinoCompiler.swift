@@ -20,6 +20,7 @@ public enum DuinoCompiler {
         /// Operand name (`Block.Output`, `Page.Variable`) to the slot the VM watches.
         public var slots: [String: UInt16]
         public var slotNames: [UInt16: String]
+        public var slotTypes: [UInt16: DuinoSlotType]
         public var notes: [String]
     }
 
@@ -64,6 +65,65 @@ public enum DuinoCompiler {
     }
 }
 
+/// The four VM slot families. The top two bits of a slot ID select one.
+public enum DuinoSlotType: Int, Sendable, CaseIterable {
+    case bool = 0
+    case int = 1
+    case long = 2
+    case float = 3
+
+    public var slotBytes: Int {
+        switch self {
+        case .bool: return 1
+        case .int, .float: return 4
+        case .long: return 8
+        }
+    }
+
+    /// A slot ID as the VM tags it: `(type << 14) | index`.
+    public init?(slot: UInt16) {
+        self.init(rawValue: Int(slot >> 14))
+    }
+
+
+    /// Decode a little-endian slot value for display/watch.
+    public func value(from bytes: [UInt8]) -> Double {
+        switch self {
+        case .bool: return bytes.first == 1 ? 1 : 0
+        case .int:
+            guard bytes.count >= 4 else { return 0 }
+            let bits = UInt32(bytes[0]) | (UInt32(bytes[1]) << 8) | (UInt32(bytes[2]) << 16) | (UInt32(bytes[3]) << 24)
+            return Double(Int32(bitPattern: bits))
+        case .long:
+            guard bytes.count >= 8 else { return 0 }
+            var bits: UInt64 = 0
+            for index in 0..<8 { bits |= UInt64(bytes[index]) << (index * 8) }
+            return Double(Int64(bitPattern: bits))
+        case .float:
+            guard bytes.count >= 4 else { return 0 }
+            let bits = UInt32(bytes[0]) | (UInt32(bytes[1]) << 8) | (UInt32(bytes[2]) << 16) | (UInt32(bytes[3]) << 24)
+            return Double(Float(bitPattern: bits))
+        }
+    }
+
+    public func bytes(from value: Double) -> [UInt8] {
+        switch self {
+        case .bool: return [value != 0 ? 1 : 0]
+        case .int:
+            let raw = UInt32(bitPattern: Int32(clamping: Int(value)))
+            return [UInt8(truncatingIfNeeded: raw), UInt8(truncatingIfNeeded: raw >> 8),
+                    UInt8(truncatingIfNeeded: raw >> 16), UInt8(truncatingIfNeeded: raw >> 24)]
+        case .long:
+            let raw = UInt64(bitPattern: Int64(value))
+            return (0..<8).map { UInt8(truncatingIfNeeded: raw >> ($0 * 8)) }
+        case .float:
+            let raw = Float(value).bitPattern
+            return [UInt8(truncatingIfNeeded: raw), UInt8(truncatingIfNeeded: raw >> 8),
+                    UInt8(truncatingIfNeeded: raw >> 16), UInt8(truncatingIfNeeded: raw >> 24)]
+        }
+    }
+}
+
 // MARK: - The emitter state
 
 private struct Compiler {
@@ -73,6 +133,7 @@ private struct Compiler {
     private var initEntries: [(slot: UInt16, bits: UInt64)] = []
     private var slots: [String: UInt16] = [:]
     private var slotNames: [UInt16: String] = [:]
+    private var slotTypes: [UInt16: DuinoSlotType] = [:]
     private var notes: [String] = []
     private var blocksByID: [Int: CompileBlock] = [:]
     private var wiresByInput: [WireKey: WireSource] = [:]
@@ -89,7 +150,7 @@ private struct Compiler {
         collectWires()
         try emitProgram()
         let image = try assemble()
-        return DuinoCompiler.Result(image: image, slots: slots, slotNames: slotNames, notes: notes)
+        return DuinoCompiler.Result(image: image, slots: slots, slotNames: slotNames, slotTypes: slotTypes, notes: notes)
     }
 
     // MARK: - Model
@@ -110,7 +171,7 @@ private struct Compiler {
 
     private struct PinSpec {
         var short: String
-        var type: SlotType
+        var type: DuinoSlotType
     }
 
     private struct MacroInfo {
@@ -126,25 +187,6 @@ private struct Compiler {
     private struct WireSource {
         var module: Int
         var pin: Int
-    }
-
-    private enum SlotType: Int, CaseIterable {
-        case bool = 0
-        case int = 1
-        case long = 2
-        case float = 3
-
-        var slotBytes: Int {
-            switch self {
-            case .bool: return 1
-            case .int, .float: return 4
-            case .long: return 8
-            }
-        }
-
-        var initialBits: UInt64 {
-            0
-        }
     }
 
     // MARK: - Collection
@@ -244,7 +286,7 @@ private struct Compiler {
         throw DuinoCompiler.CompileError.unsupportedBlock(module.name, page: module.page)
     }
 
-    private func slotType(_ text: String) -> SlotType {
+    private func slotType(_ text: String) -> DuinoSlotType {
         switch text.uppercased() {
         case "BOOL", "BOOLEAN", "BIT": return .bool
         case "LONG", "INT64": return .long
@@ -279,21 +321,22 @@ private struct Compiler {
 
     // MARK: - Slot allocation
 
-    private mutating func alloc(_ type: SlotType) -> UInt16 {
+    private mutating func alloc(_ type: DuinoSlotType) -> UInt16 {
         let index = nextSlot[type.rawValue]
         nextSlot[type.rawValue] += 1
         return UInt16(type.rawValue << 14) | UInt16(truncatingIfNeeded: index)
     }
 
-    private mutating func allocInit(_ type: SlotType, value: PinValue, name: String) -> UInt16 {
+    private mutating func allocInit(_ type: DuinoSlotType, value: PinValue, name: String) -> UInt16 {
         let slot = alloc(type)
         initEntries.append((slot, bits(for: value, type: type)))
         slots[name] = slot
         slotNames[slot] = name
+        slotTypes[slot] = type
         return slot
     }
 
-    private func bits(for value: PinValue, type: SlotType) -> UInt64 {
+    private func bits(for value: PinValue, type: DuinoSlotType) -> UInt64 {
         switch type {
         case .bool:
             return value.asBool ? 1 : 0
@@ -313,7 +356,7 @@ private struct Compiler {
         }
     }
 
-    private mutating func constant(_ value: PinValue, type: SlotType, name: String) -> UInt16 {
+    private mutating func constant(_ value: PinValue, type: DuinoSlotType, name: String) -> UInt16 {
         allocInit(type, value: value, name: name)
     }
 
