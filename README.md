@@ -23,6 +23,8 @@ There are two front ends on one Swift model: a macOS SwiftUI app and a Qt Quick 
 - **Compiling.** Produces the PLC program (`.pbd`) and the symbol table (`.csv`). For the projects whose Dirigo
   output is in `Tests/Fixtures`, both match byte for byte.
 - **Uploading.** Sends a compiled program over a serial link, following the DbNet frames Dirigo uses.
+  A second target, the Maramat Duino-S, compiles FBD to MFLW bytecode and uploads it over MaraProt v1 USB CDC;
+  see [`DUINO-S-HANDOVER.md`](DUINO-S-HANDOVER.md).
 - **Export Legacy .PCC.** Writes a copy in Dirigo's own sheet layout for a project edited here, without changing
   the open document.
 - **Reference and agent.** A searchable block reference in English and Czech, and an optional chat panel that

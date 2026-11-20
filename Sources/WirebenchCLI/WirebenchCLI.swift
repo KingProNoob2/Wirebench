@@ -88,6 +88,35 @@ struct WirebenchCLI {
             let output = args.count >= 5 && args[3] == "--out" ? args[4] : nil
             exportMaraflow(path: args[2], output: output)
 
+        case "duino-build":
+            guard args.count >= 3 else {
+                print("Error: Missing file path. Usage: wirebench-cli duino-build <project> [--out <image.mflw>]")
+                return
+            }
+            let out = args.count >= 5 && args[3] == "--out" ? args[4] : nil
+            duinoBuild(path: args[2], output: out)
+
+        case "duino-upload":
+            guard args.count >= 3 else {
+                print("Error: Missing file path. Usage: wirebench-cli duino-upload <project> --port <device> [--address <0..255>]")
+                return
+            }
+            var port: String?
+            var address: UInt8 = 0
+            var index = 3
+            while index < args.count {
+                if args[index] == "--port", index + 1 < args.count { port = args[index + 1]; index += 2; continue }
+                if args[index] == "--address", index + 1 < args.count {
+                    address = UInt8(args[index + 1]) ?? 0; index += 2; continue
+                }
+                index += 1
+            }
+            guard let port else {
+                print("Error: --port is required for duino-upload.")
+                return
+            }
+            await duinoUpload(path: args[2], port: port, station: address)
+
         case "st":
             guard args.count >= 3 else {
                 print("Error: Missing file path. Usage: wirebench-cli st <program.st> [--out <dir>] [--name <name>]")
@@ -121,6 +150,9 @@ struct WirebenchCLI {
           wirebench-cli profile <project.wbp>
                                                 Show the hardware profile and SystemCmd catalogue
           wirebench-cli export-mfl <project> [--out <file>]  Write a Maraflow .mfl project
+          wirebench-cli duino-build <project> [--out <file>] Compile FBD to an MFLW image for the Duino-S
+          wirebench-cli duino-upload <project> --port <device> [--address <n>]
+                                                Compile to MFLW and upload over MaraProt USB CDC
           wirebench-cli st <program.st> [--out <dir>] [--name <name>]
                                                 Compile IEC 61131-3 Structured Text to <name>.wbp.
           wirebench-cli build <project.wbp> [--out <dir>] [--template <program.pbd>] [--quiet]
@@ -673,6 +705,48 @@ struct WirebenchCLI {
             FileHandle.standardOutput.write(Data(build.symbolCSV.utf8))
         } catch {
             print("Failed to compile: \(error)")
+            exit(1)
+        }
+    }
+
+    static func duinoBuild(path: String, output: String?) {
+        do {
+            let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
+            let result = try DuinoCompiler.compile(project: loaded.project)
+            let outURL = output.map { URL(fileURLWithPath: $0) }
+                ?? URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("mflw")
+            try Data(result.image).write(to: outURL)
+            print("MFLW image: \(result.image.count) bytes, \(result.slots.count) slots")
+            for note in result.notes { print("  Note: \(note)") }
+            print("Wrote \(outURL.path)")
+        } catch {
+            FileHandle.standardError.write(Data("duino-build failed: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+
+    static func duinoUpload(path: String, port: String, station: UInt8) async {
+        do {
+            let loaded = try ProjectFile.read(at: URL(fileURLWithPath: path))
+            let result = try DuinoCompiler.compile(project: loaded.project)
+            print("MFLW image: \(result.image.count) bytes; connecting to \(port)…")
+            let client = MaraProtClient(transport: MaraSerialTransport(path: port), stationId: station)
+            try client.connect()
+            defer { client.close() }
+            _ = try client.ping()
+            let info = try client.info()
+            print("Device: \(info.modelName), model 0x\(String(format: "%04X", info.modelId)), firmware 0x\(String(format: "%08X", info.firmwareVersion))")
+            guard info.modelId == 0x0407 else {
+                FileHandle.standardError.write(Data("not a Duino-S (model 0x\(String(format: "%04X", info.modelId)))\n".utf8))
+                exit(1)
+            }
+            let upload = try client.uploadImage(result.image, autoStart: true) { fraction in
+                print(String(format: "\rUploading: %3.0f%%", fraction * 100), terminator: "")
+                fflush(stdout)
+            }
+            print("\nUploaded \(upload.chunks) chunk(s), VM state \(upload.runState).")
+        } catch {
+            FileHandle.standardError.write(Data("duino-upload failed: \(error.localizedDescription)\n".utf8))
             exit(1)
         }
     }

@@ -221,6 +221,13 @@ public final class AppModel: @unchecked Sendable {
     /// mirrored into `isHardwareConnected` for the UI.
     private let serialPort = SerialPort()
 
+    /// Which PLC family the upload and build actions target.
+    public var hardwareFamily: HardwareFamily = .dirigo
+
+    /// What the last Get Info from a Duino-S reported.
+    public var duinoInfo: MaraProtClient.Info?
+    public var duinoVMStatus: MaraProtClient.VMStatus?
+
     /// Whether the serial link to the PLC is open: only while an upload is running, which opens the port itself and closes it again.
     public private(set) var isHardwareConnected: Bool = false
 
@@ -758,6 +765,8 @@ public final class AppModel: @unchecked Sendable {
                                kind: loaded.format == .wirebench && notes.count == 1 ? .warning : .info)
             }
             isLegacyDocument = loaded.format != .wirebench
+            // `.mfl` projects are authored for the Maraflow Duino-S family; Dirigo projects keep the D3Net path.
+            if loaded.format == .maraflow { hardwareFamily = .duinoS }
             isRestoringUndo = true
             self.project = proj
             // A new document means new meanings for the same module ids, and `ModulePinCatalog`
@@ -2726,6 +2735,10 @@ public final class AppModel: @unchecked Sendable {
     /// Uploads what the compiler just produced, rather than a file.
     @MainActor
     public func uploadCompiledProgram() {
+        if hardwareFamily == .duinoS {
+            Task { await uploadDuinoProgram() }
+            return
+        }
         guard let report = compileProject() else { return }
         guard let table = try? PLCProgramTable(bytes: report.table) else { return }
         Task { await upload(table: table) }

@@ -28,8 +28,31 @@ struct HardwareLinkSection<Report: View>: View {
                 .padding(.leading, 3)
                 .padding(.bottom, 2)
                 .accessibilityAddTraits(.isHeader)
+            Picker("PLC", selection: $model.hardwareFamily) {
+                ForEach(HardwareFamily.allCases) { family in
+                    Text(family.shortTitle).tag(family)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .help("The PLC family the build and upload actions target")
             statusRow
             if !model.availablePorts.isEmpty { portPicker }
+            if model.hardwareFamily == .duinoS, !model.selectedPortPath.isEmpty {
+                HStack(spacing: 6) {
+                    Button("Identify") { model.refreshDuinoInfo() }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        .help("Open the selected port, ping the Duino-S, and read its model and firmware")
+                    Spacer(minLength: 4)
+                    if let info = model.duinoInfo {
+                        Text("\(info.modelName) · 0x\(String(format: "%04X", info.modelId))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
             actions
             if outcome != .idle { uploadStatus }
             if !model.uploadLog.isEmpty { log }
@@ -49,6 +72,10 @@ struct HardwareLinkSection<Report: View>: View {
     private var statusText: String {
         // The link is opened by an upload and closed after it, so "connected" is only what an upload in progress looks like.
         if model.isHardwareConnected { return "Connected" }
+        if model.hardwareFamily == .duinoS {
+            if let info = model.duinoInfo { return "Ready · \(info.modelName)" }
+            return model.availablePorts.isEmpty ? "No serial port" : "Duino-S ready"
+        }
         return model.availablePorts.isEmpty ? "No serial port" : "Ready to upload"
     }
 
@@ -71,7 +98,9 @@ struct HardwareLinkSection<Report: View>: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Rescan for serial adapters")
+            .help(model.hardwareFamily == .duinoS
+                  ? "Rescan for the Duino-S USB CDC port"
+                  : "Rescan for serial adapters")
             .accessibilityLabel("Rescan serial ports")
         }
     }
@@ -91,22 +120,37 @@ struct HardwareLinkSection<Report: View>: View {
     /// The section's main action, full width. The frame is on the label, not the button: a frame around
     /// a macOS button only pads it, while a wide label stretches the bezel itself.
     private var actions: some View {
-        Button {
-            model.buildAndShowReport()
-        } label: {
-            // Named as in the Build menu, so the same action reads the same everywhere.
-            Text("Build Project")
-                .frame(maxWidth: .infinity)
+        VStack(spacing: 6) {
+            Button {
+                model.buildAndShowReport()
+            } label: {
+                // Named as in the Build menu, so the same action reads the same everywhere.
+                Text("Build Project")
+                    .frame(maxWidth: .infinity)
+            }
+            .glassButtonStyle(prominent: true)
+            // The system popover, like the block picker's, with its arrow on the button it belongs to.
+            .popover(isPresented: Binding(get: { model.isBuildReportVisible },
+                                          set: { model.isShowingBuildReport = $0 }),
+                     arrowEdge: .trailing) { report() }
+            .controlSize(.regular)
+            .disabled(model.project == nil)
+            .padding(.top, 6)
+            .help("Build the project and show the report, with Upload to PLC (⌘B)")
+
+            if model.hardwareFamily == .duinoS {
+                Button {
+                    model.uploadCompiledProgram()
+                } label: {
+                    Text(model.isUploading ? "Uploading…" : "Upload to Duino-S")
+                        .frame(maxWidth: .infinity)
+                }
+                .glassButtonStyle()
+                .controlSize(.regular)
+                .disabled(model.project == nil || model.isUploading)
+                .help("Compile this FBD project to MFLW and upload it over the selected USB CDC port")
+            }
         }
-        .glassButtonStyle(prominent: true)
-        // The system popover, like the block picker's, with its arrow on the button it belongs to.
-        .popover(isPresented: Binding(get: { model.isBuildReportVisible }, set: { model.isShowingBuildReport = $0 }),
-                 arrowEdge: .trailing) { report() }
-        .controlSize(.regular)
-        .disabled(model.project == nil)
-        .padding(.top, 6)
-        // The report it opens has Upload to PLC and the exports.
-        .help("Build the project and show the report, with Upload to PLC (⌘B)")
     }
 
     // MARK: - The upload

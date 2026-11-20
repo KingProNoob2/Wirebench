@@ -47,6 +47,15 @@ let coreTargets: [Target] = [
         name: "WirebenchEngine",
         dependencies: ["WirebenchCore", "WirebenchLibrary", "WirebenchSimCxx"]
     ),
+    .target(
+        name: "WirebenchMaraVMC",
+        path: "Sources/WirebenchMaraVMC",
+        publicHeadersPath: "include"
+    ),
+    .target(
+        name: "WirebenchMaraVM",
+        dependencies: ["WirebenchMaraVMC"]
+    ),
     // zlib, for the one place Apple's Compression framework is used; only linked where that framework is absent.
     .systemLibrary(
         name: "CZlib",
@@ -90,7 +99,7 @@ let featureTargets: [Target] = [
         // They were previously reachable only through the GUI, which is how a coordinate-space
         // mistake in `PinHitTest` survived a green test suite and a successful build.
         dependencies: ["WirebenchCore", "WirebenchLibrary", "WirebenchEngine", "WirebenchHardware", "WirebenchModel",
-                       "WirebenchSource"] + appTestDependencies,
+                       "WirebenchSource", "WirebenchMaraVM"] + appTestDependencies,
         swiftSettings: aiSettings
     ),
 ]
