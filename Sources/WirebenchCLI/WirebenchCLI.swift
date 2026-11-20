@@ -88,6 +88,15 @@ struct WirebenchCLI {
             let output = args.count >= 5 && args[3] == "--out" ? args[4] : nil
             exportMaraflow(path: args[2], output: output)
 
+        case "duino-discover":
+            var discoverPort = 5020
+            var di = 2
+            while di + 1 < args.count {
+                if args[di] == "--tcp-port" { discoverPort = Int(args[di + 1]) ?? 5020; di += 2; continue }
+                di += 1
+            }
+            await duinoDiscover(tcpPort: discoverPort)
+
         case "duino-build":
             guard args.count >= 3 else {
                 print("Error: Missing file path. Usage: wirebench-cli duino-build <project> [--out <image.mflw>]")
@@ -177,6 +186,8 @@ struct WirebenchCLI {
           wirebench-cli profile <project.wbp>
                                                 Show the hardware profile and SystemCmd catalogue
           wirebench-cli export-mfl <project> [--out <file>]  Write a Maraflow .mfl project
+          wirebench-cli duino-discover [--tcp-port 5020]
+                                                Scan local IPv4 subnets for a Duino-S on port 5020
           wirebench-cli duino-build <project> [--out <file>] Compile FBD to an MFLW image for the Duino-S
           wirebench-cli duino-upload <project> (--port <device> | --host <ip> [--tcp-port 5020]) [--address <n>]
                                                 Compile to MFLW and upload over MaraProt USB CDC or TCP
@@ -830,6 +841,26 @@ struct WirebenchCLI {
         } catch {
             FileHandle.standardError.write(Data("duino-watch failed: \(error.localizedDescription)\n".utf8))
             exit(1)
+        }
+    }
+
+    static func duinoDiscover(tcpPort: Int) async {
+        let networks = MaraDiscovery.localIPv4Networks()
+        if networks.isEmpty {
+            print("No local IPv4 network to scan.")
+            return
+        }
+        print("Scanning \(networks.map { "\($0.interfaceName) \($0.address)/\($0.prefixLength)" }.joined(separator: ", "))…")
+        let devices = await Task.detached {
+            MaraDiscovery.scanLocalNetwork(port: UInt16(clamping: tcpPort), timeout: 0.15)
+        }.value
+        if devices.isEmpty {
+            print("No Duino-S found.")
+            return
+        }
+        for device in devices {
+            print("\(device.info.modelName) at \(device.endpoint):\(device.port) "
+                  + "(model 0x\(String(format: "%04X", device.info.modelId)), \(device.latencyMilliseconds) ms)")
         }
     }
 }

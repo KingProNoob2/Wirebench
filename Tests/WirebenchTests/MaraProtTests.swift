@@ -76,6 +76,26 @@ struct MaraProtTests {
         #expect(ping.uptimeMilliseconds == 99)
     }
 
+    @Test("A loopback scan finds a Duino-S by its GET_INFO identity")
+    func discoveryProbe() throws {
+        let server = try FakeTCPServer()
+        defer { server.stop() }
+        let network = MaraDiscovery.IPv4Network(interfaceName: "loopback", address: "127.0.0.1",
+                                                netmask: "255.255.255.255", prefixLength: 32,
+                                                hosts: ["127.0.0.1"])
+        let found = MaraDiscovery.scanLocalNetwork(port: server.port, timeout: 0.5, networks: [network])
+        #expect(found.count == 1)
+        #expect(found.first?.info.modelId == 0x0407)
+        #expect(found.first?.endpoint == "127.0.0.1")
+    }
+
+    @Test("Discovery does not claim a different TCP service as a Duino-S")
+    func discoveryRejectsOtherDevice() throws {
+        let server = try FakeTCPServer(modelID: 0x1234, modelName: "Other")
+        defer { server.stop() }
+        #expect(MaraDiscovery.probe(host: "127.0.0.1", port: server.port) == nil)
+    }
+
     @Test("The client performs PING, GET_INFO and a chunked image upload")
     func clientOperations() throws {
         let device = FakeDuino()
@@ -121,8 +141,12 @@ private final class FakeTCPServer: @unchecked Sendable {
     let port: UInt16
     private let listener: Int32
     private var running = true
+    private let modelID: UInt16
+    private let modelName: String
 
-    init() throws {
+    init(modelID: UInt16 = 0x0407, modelName: String = "Duino - S") throws {
+        self.modelID = modelID
+        self.modelName = modelName
         let socketFD = socket(AF_INET, SOCK_STREAM, 0)
         guard socketFD >= 0 else { throw POSIXError(.EIO) }
         listener = socketFD
@@ -163,10 +187,25 @@ private final class FakeTCPServer: @unchecked Sendable {
             while let total = MaraProtFrame.frameLength(from: pending), pending.count >= total {
                 guard let request = try? MaraProtFrame.decode(Array(pending.prefix(total))) else { return }
                 pending.removeFirst(total)
+                let payload: [UInt8]
+                switch MaraProt.Opcode(rawValue: request.opcode) {
+                case .ping:
+                    payload = request.payload + [77, 0, 0, 0]
+                case .getInfo:
+                    var info = [UInt8](repeating: 0, count: 44)
+                    info[0] = 1
+                    info[2] = UInt8(truncatingIfNeeded: modelID)
+                    info[3] = UInt8(truncatingIfNeeded: modelID >> 8)
+                    info[8] = MaraProt.TransportKind.tcpIP.rawValue
+                    info[9] = 0x08; info[10] = 0x02
+                    let name = Array(modelName.utf8)
+                    info.replaceSubrange(20..<(20 + min(24, name.count)), with: name.prefix(24))
+                    payload = info
+                default:
+                    payload = []
+                }
                 let reply = MaraProtFrame(sequence: request.sequence, stationId: request.stationId,
-                                          opcode: request.opcode,
-                                          payload: request.payload + [77, 0, 0, 0],
-                                          isResponse: true)
+                                          opcode: request.opcode, payload: payload, isResponse: true)
                 guard let bytes = try? reply.encoded() else { return }
                 _ = bytes.withUnsafeBytes { write(connection, $0.baseAddress, bytes.count) }
             }

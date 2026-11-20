@@ -1,8 +1,8 @@
 # Maramat Duino-S support — handover
 
 Status: **working slice with live watch**. FBD compile to MFLW, MaraProt v1 over USB CDC **and
-Ethernet TCP 5020**, device identification/status, full image upload, and live slot watching are
-implemented. RS-485 and DFU are not.
+Ethernet TCP 5020**, automatic local-network/USB discovery, device identification/status, full image
+upload, and live slot watching are implemented. RS-485 and DFU are not.
 
 ## What the Duino-S is
 
@@ -24,6 +24,7 @@ Sources used:
 | `Sources/WirebenchHardware/MaraProtFrame.swift` | MaraProt v1 frame codec, CRC-16-CCITT and CRC-32 |
 | `Sources/WirebenchHardware/MaraProtClient.swift` | MaraProt client: ping, GET_INFO, VM_STATUS, VM control, chunked upload, watch subscribe/poll, slot read/write |
 | `Sources/WirebenchHardware/MaraTCPTransport.swift` | Ethernet TCP transport (POSIX sockets, port 5020) |
+| `Sources/WirebenchHardware/MaraDiscovery.swift` | Local subnet scan and USB-port probing, accepted only through GET_INFO's model identity |
 | `Sources/WirebenchModel/DuinoCompiler.swift` | FBD project → MFLW image, slot allocation and opcode emission |
 | `Sources/WirebenchModel/DuinoMacroExpansion.swift` | Inlines FBD macro sheets before emission |
 | `Sources/WirebenchModel/AppModel+Duino.swift` | `HardwareFamily`, identify, compile+upload, live watch session, UI state |
@@ -87,20 +88,26 @@ not abort the image.
 
 Hardware Link now has a `Dirigo` / `Duino-S` segmented picker.
 
-- **Duino-S** has a **USB / Ethernet** transport picker. USB shows the selected CDC port; Ethernet
-  takes an IP address and TCP port (default 5020). Both offer an **Identify** action (ping, GET_INFO, VM_STATUS),
+- **Duino-S** has liquid-glass **USB / Ethernet** transport picker. USB shows the selected CDC port;
+  Ethernet takes an IP address and TCP port (default 5020). Both offer an **Identify** action (ping, GET_INFO, VM_STATUS),
   **Build Project**, and **Watch / Stop Watch**. Build Project now opens a **Duino-S Build** report
   (image size, slots, notes) whose primary action is **Upload to Duino-S**; the standalone upload
   button is gone from the Hardware Link card.
 - Watch compiles the same operand→slot table, subscribes up to 512 slots, takes a full snapshot,
   then polls deltas every 100 ms and shows the decoded values in the card.
+- Selecting Duino-S / Ethernet starts discovery automatically. **Find** (USB) and **Find Duino-S**
+  (Ethernet) rescan; the Ethernet scan probes local IPv4 /24 subnets on TCP 5020 and accepts a
+  device only when GET_INFO reports model `0x0407` or a name containing `Duino`. A single result is
+  selected automatically; multiple results appear in a device menu.
 - **PLC ▸ Watch Duino-S** (⌘⇧W) starts/stops the same watch session from the menu bar.
+  **PLC ▸ Find Duino-S** (⌘⇧D) rescans.
 - Build → Upload Compiled Program routes to the Duino-S when that family is selected.
 - Upload progress, phase and the framed log are reused from the existing Hardware Link.
 
 ## CLI
 
 ```
+wirebench-cli duino-discover [--tcp-port 5020]
 wirebench-cli duino-build <project> [--out <image.mflw>]
 wirebench-cli duino-upload <project> --port /dev/cu.usbmodem... [--address 0]
 wirebench-cli duino-upload <project> --host 192.168.1.50 [--tcp-port 5020]
@@ -108,7 +115,8 @@ wirebench-cli duino-watch <project> --port /dev/cu.usbmodem... [--seconds 10]
 wirebench-cli duino-watch <project> --host 192.168.1.50 [--seconds 10]
 ```
 
-`duino-build` writes the image and prints slot/notes. `duino-upload` identifies the device, refuses
+`duino-discover` scans local IPv4 subnets and prints the Duino-S boards it finds. `duino-build`
+writes the image and prints slot/notes. `duino-upload` identifies the device, refuses
 a model other than 0x0407, uploads with auto-start and prints progress.
 
 ## USB CDC and Ethernet TCP details
@@ -119,6 +127,10 @@ a model other than 0x0407, uploads with auto-start and prints progress.
 - USB station ID `0` (P2P) is the default; RS-485 needs `1..247` and a real transport.
 - Ethernet: connect to the device's IP at TCP port 5020. The firmware is point-to-point on TCP, so
   station `0` is used there too.
+- Discovery: the firmware starts lwIP with DHCP, but `lwipopts.h` leaves `LWIP_MDNS_RESPONDER` and
+  `LWIP_NETBIOS_RESPONDER` at their default 0, and `LWIP_NETIF_HOSTNAME` is 0, so there is no mDNS,
+  NetBIOS or hostname to query. Discovery scans the local IPv4 subnets on TCP 5020 and validates
+  GET_INFO (`modelId 0x0407`, name `Duino - S`). USB discovery probes each CDC port the same way.
 - Frame: `4D 50 10 ST SEQlo SEQhi OP STATUS LENlo LENhi payload CRC16lo CRC16hi`; CRC-16-CCITT
   poly `0x1021`, init `0xFFFF`, over header+payload.
 - Upload: `VM_UPLOAD_BEGIN` (total size + full-image CRC32) → repeated `VM_UPLOAD_CHUNK`

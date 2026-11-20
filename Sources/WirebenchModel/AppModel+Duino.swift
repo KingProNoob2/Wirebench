@@ -308,3 +308,67 @@ public extension AppModel {
         }
     }
 }
+
+public extension AppModel {
+    /// Finds a Duino-S without the user typing an address.
+    ///
+    /// The Duino-S firmware has no mDNS/NetBIOS responder enabled, so Ethernet is discovered by
+    /// probing the local IPv4 subnet's TCP 5020 port and checking GET_INFO's model identity. USB is
+    /// discovered by probing the CDC ports and doing the same identity check.
+    func discoverDuinoDevices() async {
+        guard hardwareFamily == .duinoS else { return }
+        guard !isDiscoveringDuino else { return }
+        await MainActor.run {
+            self.isDiscoveringDuino = true
+            self.duinoDiscoveryStatus = duinoTransport == .usbCDC
+                ? "Looking for a Duino-S on USB…" : "Scanning the local network for port 5020…"
+        }
+        let devices: [MaraDiscoveredDevice]
+        if duinoTransport == .usbCDC {
+            let paths = SerialPort.availablePorts().map(\.path)
+            devices = await Task.detached {
+                MaraDiscovery.probeSerialPorts(paths)
+            }.value
+        } else {
+            let tcpPort = UInt16(clamping: max(1, min(65_535, duinoTCPPort)))
+            devices = await Task.detached {
+                MaraDiscovery.scanLocalNetwork(port: tcpPort, timeout: 0.15)
+            }.value
+        }
+        await MainActor.run {
+            self.isDiscoveringDuino = false
+            self.duinoDiscoveredDevices = devices
+            if devices.isEmpty {
+                self.duinoDiscoveryStatus = duinoTransport == .usbCDC
+                    ? "No Duino-S answered on the serial ports."
+                    : "No Duino-S answered on the local network."
+                return
+            }
+            if duinoTransport == .usbCDC {
+                if self.selectedPortPath.isEmpty || !devices.contains(where: { $0.endpoint == self.selectedPortPath }) {
+                    self.selectedPortPath = devices[0].endpoint
+                }
+            } else {
+                if !devices.contains(where: { $0.endpoint == self.duinoHost }) {
+                    self.duinoHost = devices[0].endpoint
+                }
+            }
+            self.duinoInfo = devices[0].info
+            self.duinoDiscoveryStatus = devices.count == 1
+                ? "Found \(devices[0].displayName)."
+                : "Found \(devices.count) Duino-S boards; pick one."
+        }
+    }
+
+    /// Selects one of the devices returned by discovery.
+    func selectDuinoDevice(_ device: MaraDiscoveredDevice) {
+        if duinoTransport == .usbCDC {
+            selectedPortPath = device.endpoint
+        } else {
+            duinoHost = device.endpoint
+            if device.port != 0 { duinoTCPPort = Int(device.port) }
+        }
+        duinoInfo = device.info
+        duinoDiscoveryStatus = "Using \(device.displayName)."
+    }
+}

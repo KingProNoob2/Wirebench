@@ -100,6 +100,7 @@
 		5802CCEEF19FFC2254271652 /* SelfWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905B369E5C9D1EC191B2D52A /* SelfWiringTests.swift */; };
 		58ABC81641071EA4B96541C1 /* CanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D454E2B899E7A7139D23B88B /* CanvasView.swift */; };
 		597DEF74F46BF4B151D7FBFA /* D3NetBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49B56CB5D6ED2D0A9ED16C35 /* D3NetBlocks.swift */; };
+		5A0E94F0AD3F9043F8980E35 /* GlassSegmentedPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3749C8BFB8305FC76DBE482 /* GlassSegmentedPicker.swift */; };
 		5A5B9E7C32E12E80ED91787F /* WireLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F7391015D9EA235EEC30650 /* WireLayout.swift */; };
 		5C75345AD39E0384DEAB65CB /* PLCProjectXML.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F729FFEAF5611E17F9837E5 /* PLCProjectXML.swift */; };
 		5C7639B24E0EA55D0DB4C3A6 /* GraphicBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D651568562E28CFCBDD1075 /* GraphicBuilderTests.swift */; };
@@ -146,6 +147,7 @@
 		81052D8AFB7E81BEC6677208 /* WireSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B189D4E97A42CDF6624C42E8 /* WireSelectionTests.swift */; };
 		810A2712A6A8E0685735C88C /* BuildReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F3F6D5EFC02316420ED21D /* BuildReportView.swift */; };
 		8199DA4644F8C18D02922BFA /* MaraProtClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB552BAD99E895F922648697 /* MaraProtClient.swift */; };
+		82E8A88C8E0F6947A514894E /* MaraDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06E4A561F3D27B32C99984E /* MaraDiscovery.swift */; };
 		8380E1F5A78506C88DF4E7F2 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A42D656A9C7A4D8C4BCD9B /* AppModel.swift */; };
 		83E787D39756D89318BBFB50 /* SwiftIDEView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EE0047361C84F4BB3114E2 /* SwiftIDEView.swift */; };
 		8424E461476569B95D5B1D1D /* ModuleCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06822B22CFDB66E4BF7727D /* ModuleCardView.swift */; };
@@ -732,6 +734,7 @@
 		B0F4A3536C23C27EBE9363C6 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		B189D4E97A42CDF6624C42E8 /* WireSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireSelectionTests.swift; sourceTree = "<group>"; };
 		B202F5BBB30BB4AD0B885300 /* RobustnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobustnessTests.swift; sourceTree = "<group>"; };
+		B3749C8BFB8305FC76DBE482 /* GlassSegmentedPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassSegmentedPicker.swift; sourceTree = "<group>"; };
 		B39B1FA3612194261E655448 /* ProgramBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramBuilderTests.swift; sourceTree = "<group>"; };
 		B46E38B10AD9202AC7D370E4 /* Highlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlighter.swift; sourceTree = "<group>"; };
 		B4A7CDA0E13463081B3E60B4 /* PLCConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCConfigurationTests.swift; sourceTree = "<group>"; };
@@ -753,6 +756,7 @@
 		BF06BD119253BE7BAD17BB63 /* MaraflowPageRuntimeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowPageRuntimeCard.swift; sourceTree = "<group>"; };
 		BF36C83AEB1002D48BBBF8C9 /* MaraflowVariants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MaraflowVariants.h; sourceTree = "<group>"; };
 		BFA311406500190793496159 /* BlockPaletteSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockPaletteSearch.swift; sourceTree = "<group>"; };
+		C06E4A561F3D27B32C99984E /* MaraDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraDiscovery.swift; sourceTree = "<group>"; };
 		C095252F97C7BDA83DC9D5AD /* PinZeroGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinZeroGateTests.swift; sourceTree = "<group>"; };
 		C14CC87FBF096F88C3CF8B1D /* LogicBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogicBlocks.swift; sourceTree = "<group>"; };
 		C5FBA15CB21201C5C3CF4D68 /* PLCProgramImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCProgramImage.swift; sourceTree = "<group>"; };
@@ -805,7 +809,7 @@
 		F9A42D656A9C7A4D8C4BCD9B /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		FAFAA9C136EA927854F270D1 /* AppModel+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Clipboard.swift"; sourceTree = "<group>"; };
 		FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraProtFrame.swift; sourceTree = "<group>"; };
-		"TEMP_6E4D0BB8-5E29-44AA-8ABD-C54D3F75B2C2" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		"TEMP_7F1BF4A5-339B-4424-B39D-0331C3B1D29D" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -967,6 +971,7 @@
 			children = (
 				6A40EE6050622064D29F578F /* DbNetFrame.swift */,
 				D5D3CFE585EF3BDF0442C0B6 /* DbNetSession.swift */,
+				C06E4A561F3D27B32C99984E /* MaraDiscovery.swift */,
 				BB552BAD99E895F922648697 /* MaraProtClient.swift */,
 				FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */,
 				4B8F05359224D250FC042C2D /* MaraTCPTransport.swift */,
@@ -999,6 +1004,7 @@
 				75F3F6D5EFC02316420ED21D /* BuildReportView.swift */,
 				D454E2B899E7A7139D23B88B /* CanvasView.swift */,
 				D033803C6CC77DAA300B0921 /* FilePanels.swift */,
+				B3749C8BFB8305FC76DBE482 /* GlassSegmentedPicker.swift */,
 				38F7D9364C1ED5F6A7E6ACFE /* GraphicColor.swift */,
 				210A65183DA78C896A156FAB /* GraphicShapeView.swift */,
 				2D70E169075ACB139A57154E /* HardwareLinkView.swift */,
@@ -1261,10 +1267,10 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_8B64A893-AD9C-4DC1-8CA4-B2931993DF71" /* Wirebench */ = {
+		"TEMP_9E7D409D-6707-4C62-AC5C-A81D95D0C095" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_6E4D0BB8-5E29-44AA-8ABD-C54D3F75B2C2" /* Release.xcconfig */,
+				"TEMP_7F1BF4A5-339B-4424-B39D-0331C3B1D29D" /* Release.xcconfig */,
 			);
 			path = Wirebench;
 			sourceTree = "<group>";
@@ -1740,6 +1746,7 @@
 			files = (
 				27901125BB5633013E5C5996 /* DbNetFrame.swift in Sources */,
 				28C92805438C3A46CAE2CFF9 /* DbNetSession.swift in Sources */,
+				82E8A88C8E0F6947A514894E /* MaraDiscovery.swift in Sources */,
 				8199DA4644F8C18D02922BFA /* MaraProtClient.swift in Sources */,
 				331E79D09B9EEAB686D91451 /* MaraProtFrame.swift in Sources */,
 				142A01C33B35924CB5E1A400 /* MaraTCPTransport.swift in Sources */,
@@ -1780,6 +1787,7 @@
 				810A2712A6A8E0685735C88C /* BuildReportView.swift in Sources */,
 				58ABC81641071EA4B96541C1 /* CanvasView.swift in Sources */,
 				23466B7B7F8C0349BA8CC25D /* FilePanels.swift in Sources */,
+				5A0E94F0AD3F9043F8980E35 /* GlassSegmentedPicker.swift in Sources */,
 				E2CB9D45DB878B668E5586F4 /* GraphicColor.swift in Sources */,
 				7B6C22B52E85A3D3A93617FF /* GraphicShapeView.swift in Sources */,
 				B0C856907BA34CE316C38224 /* HardwareLinkView.swift in Sources */,
@@ -2313,7 +2321,7 @@
 		};
 		425F11E043331A2F28A2B6AF /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E4D0BB8-5E29-44AA-8ABD-C54D3F75B2C2" /* Release.xcconfig */;
+			baseConfigurationReference = "TEMP_7F1BF4A5-339B-4424-B39D-0331C3B1D29D" /* Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

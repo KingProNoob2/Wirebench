@@ -229,6 +229,11 @@ public final class AppModel: @unchecked Sendable {
     public var duinoHost: String = "192.168.1.50"
     public var duinoTCPPort: Int = 5020
 
+    /// Duino-S boards found by the last scan.
+    public var duinoDiscoveredDevices: [MaraDiscoveredDevice] = []
+    public var isDiscoveringDuino: Bool = false
+    public var duinoDiscoveryStatus: String = ""
+
     /// What the last Get Info from a Duino-S reported.
     public var duinoInfo: MaraProtClient.Info?
     public var duinoVMStatus: MaraProtClient.VMStatus?

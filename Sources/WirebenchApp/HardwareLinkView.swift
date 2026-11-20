@@ -28,23 +28,17 @@ struct HardwareLinkSection<Report: View>: View {
                 .padding(.leading, 3)
                 .padding(.bottom, 2)
                 .accessibilityAddTraits(.isHeader)
-            Picker("PLC", selection: $model.hardwareFamily) {
-                ForEach(HardwareFamily.allCases) { family in
-                    Text(family.shortTitle).tag(family)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .help("The PLC family the build and upload actions target")
+            GlassSegmentedPicker(selection: $model.hardwareFamily,
+                                 options: HardwareFamily.allCases,
+                                 title: { $0.shortTitle },
+                                 accessibilityLabel: "PLC family")
+                .help("The PLC family the build and upload actions target")
             if model.hardwareFamily == .duinoS {
-                Picker("Transport", selection: $model.duinoTransport) {
-                    ForEach(DuinoTransport.allCases) { choice in
-                        Text(choice.title).tag(choice)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("USB CDC virtual COM port, or the Duino-S Ethernet TCP server on port 5020")
+                GlassSegmentedPicker(selection: $model.duinoTransport,
+                                     options: DuinoTransport.allCases,
+                                     title: { $0.title },
+                                     accessibilityLabel: "Duino-S transport")
+                    .help("USB CDC virtual COM port, or the Duino-S Ethernet TCP server on port 5020")
             }
             statusRow
             if (model.hardwareFamily != .duinoS || model.duinoTransport == .usbCDC),
@@ -55,17 +49,42 @@ struct HardwareLinkSection<Report: View>: View {
                 ethernetFields
             }
             if model.hardwareFamily == .duinoS, model.isDuinoLinkConfigured {
-                HStack(spacing: 6) {
-                    Button("Identify") { model.refreshDuinoInfo() }
-                        .buttonStyle(.borderless)
-                        .font(.caption)
-                        .help("Connect to the selected endpoint, ping the Duino-S, and read its model and firmware")
-                    Spacer(minLength: 4)
-                    if let info = model.duinoInfo {
-                        Text("\(info.modelName) · 0x\(String(format: "%04X", info.modelId))")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Button("Identify") { model.refreshDuinoInfo() }
+                            .glassButtonStyle()
+                            .controlSize(.small)
+                            .disabled(model.isDiscoveringDuino || model.isWatchingDuino)
+                            .help("Connect to the selected endpoint, ping the Duino-S, and read its model and firmware")
+                        if model.duinoTransport == .usbCDC {
+                            Button("Find") { Task { await model.discoverDuinoDevices() } }
+                                .glassButtonStyle()
+                                .controlSize(.small)
+                                .disabled(model.isDiscoveringDuino || model.isWatchingDuino)
+                                .help("Probe the serial ports and use the one that identifies as a Duino-S")
+                        }
+                        Spacer(minLength: 4)
+                        if let info = model.duinoInfo {
+                            Text("\(info.modelName) · 0x\(String(format: "%04X", info.modelId))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    if !model.duinoDiscoveryStatus.isEmpty {
+                        Text(model.duinoDiscoveryStatus)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if model.duinoDiscoveredDevices.count > 1 {
+                        Menu("Found \(model.duinoDiscoveredDevices.count) devices") {
+                            ForEach(model.duinoDiscoveredDevices) { device in
+                                Button(device.displayName) { model.selectDuinoDevice(device) }
+                            }
+                        }
+                        .menuStyle(.borderlessButton)
+                        .controlSize(.small)
                     }
                 }
             }
@@ -81,7 +100,22 @@ struct HardwareLinkSection<Report: View>: View {
         .glassPanel(cornerRadius: 18)
         // `refreshPorts` is the only thing that fills `availablePorts`; re-reading on appear also picks up
         // an adapter plugged in after launch.
-        .onAppear { model.refreshPorts() }
+        .onAppear {
+            model.refreshPorts()
+            if model.hardwareFamily == .duinoS, model.duinoDiscoveredDevices.isEmpty {
+                Task { await model.discoverDuinoDevices() }
+            }
+        }
+        .onChange(of: model.hardwareFamily) { _, family in
+            if family == .duinoS, model.duinoDiscoveredDevices.isEmpty {
+                Task { await model.discoverDuinoDevices() }
+            }
+        }
+        .onChange(of: model.duinoTransport) { _, _ in
+            if model.hardwareFamily == .duinoS {
+                Task { await model.discoverDuinoDevices() }
+            }
+        }
     }
 
     // MARK: - The link
@@ -144,6 +178,18 @@ struct HardwareLinkSection<Report: View>: View {
                     .disabled(model.isWatchingDuino || model.isUploading)
             }
             .font(.caption)
+            HStack(spacing: 6) {
+                Button {
+                    Task { await model.discoverDuinoDevices() }
+                } label: {
+                    Label(model.isDiscoveringDuino ? "Scanning…" : "Find Duino-S",
+                          systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .glassButtonStyle()
+                .controlSize(.small)
+                .disabled(model.isDiscoveringDuino || model.isWatchingDuino || model.isUploading)
+                if model.isDiscoveringDuino { ProgressView().controlSize(.small) }
+            }
         }
     }
 
