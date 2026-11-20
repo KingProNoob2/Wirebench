@@ -19,10 +19,11 @@ struct DuinoAppTests {
     }
 
     @Test("Identify without a port says so instead of opening a device")
-    func identifyWithoutPort() {
+    func identifyWithoutPort() async {
         let model = model()
         model.selectedPortPath = ""
-        #expect(model.refreshDuinoInfo() == nil)
+        await model.identifyDuino()
+        #expect(model.duinoInfo == nil)
         #expect(model.uploadStatus.contains("No serial port"))
     }
 
