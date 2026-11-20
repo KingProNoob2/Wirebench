@@ -43,7 +43,7 @@ public final class PLCUploader {
 
     /// How many table frames `table` will take with the current `rows`/`chunkBytes`.
     public func frameCount(for table: PLCProgramTable) -> Int {
-        table.matrixFrameCount(chunkBytes: chunkBytes)
+        table.matrixFrameCount(chunkBytes: max(1, chunkBytes))
     }
 
     /// Stops the PLC, writes the whole table, and starts it again. Returns the number of table frames.

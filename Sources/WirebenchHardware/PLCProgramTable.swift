@@ -165,6 +165,7 @@ public struct PLCProgramTable: Equatable, Sendable {
     /// `Col = 8` is byte 128. `NCols` is how many columns this frame carries.
     public func matrixWritePayload(byteOffset: Int, columns: UInt16, rows: UInt16 = 8,
                                    data: [UInt8]) -> [UInt8] {
+        let rows = max(1, rows)
         let stride = Int(rows) * 2
         let col = stride > 0 ? byteOffset / stride : 0
         var out: [UInt8] = [0x02, 0x20]
@@ -186,11 +187,13 @@ public struct PLCProgramTable: Equatable, Sendable {
     /// number of frames; only the chunk size does.
     public func matrixFrameCount(chunkBytes: Int = 128) -> Int {
         guard !uploadedBytes.isEmpty else { return 0 }
-        return (uploadedBytes.count + chunkBytes - 1) / max(1, chunkBytes)
+        return (uploadedBytes.count + max(1, chunkBytes) - 1) / max(1, chunkBytes)
     }
 
     public func matrixWriteFrames(rows: UInt16 = 8, chunkBytes: Int = 128) -> [[UInt8]] {
         let body = uploadedBytes
+        let rows = max(1, rows)
+        let chunkBytes = max(1, chunkBytes)
         let stride = Int(rows) * 2
         var frames: [[UInt8]] = []
         var offset = 0

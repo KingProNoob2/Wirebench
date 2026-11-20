@@ -530,9 +530,13 @@ public struct PLCProjectCompiler {
         var out: [Wire] = []
         for w in wires {
             var wire = w
-            var hops = 0
+            // Follow the interface chain until it reaches a real block. A visited set rather than a hop
+            // limit: a legitimate nested macro can be deeper than any fixed count, while a self-loop must
+            // stop instead of following forever.
+            var visited: Set<UInt8> = []
             var dropped = false
-            while hops < 8, let source = byID[wire.outModule], isInterface(source), let next = outside(of: source, pin: wire.outPin) {
+            while let source = byID[wire.outModule], isInterface(source), visited.insert(source.umisteni).inserted,
+                  let next = outside(of: source, pin: wire.outPin) {
                 switch next {
                 case .wire(let module, let pin):
                     wire.outModule = module
@@ -542,7 +546,6 @@ public struct PLCProjectCompiler {
                     dropped = true
                 }
                 if dropped { break }
-                hops += 1
             }
             if !dropped { out.append(wire) }
         }

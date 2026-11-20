@@ -157,4 +157,12 @@ struct ProgramTableTests {
         let modified = try PLCProgramTable(bytes: damaged)
         #expect(!modified.checksumIsValid, "the field must depend on the whole table")
     }
+
+    @Test("Matrix splitting clamps invalid row and chunk sizes")
+    func clampsInvalidSplitting() throws {
+        let table = try #require(PLCProgramTable.buildTemplate())
+        #expect(table.matrixFrameCount(chunkBytes: 0) == table.matrixFrameCount(chunkBytes: 1))
+        #expect(table.matrixWriteFrames(rows: 0, chunkBytes: 0).count == table.matrixFrameCount(chunkBytes: 1))
+        #expect(!table.matrixWriteFrames(rows: 0, chunkBytes: 0).isEmpty)
+    }
 }

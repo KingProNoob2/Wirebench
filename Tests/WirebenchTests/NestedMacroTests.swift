@@ -270,4 +270,23 @@ struct NestedMacroTests {
         #expect(bytes.count == 42)
         #expect(bytes[40] == 0x00 && bytes[41] == 0xC0)
     }
+
+    @Test("Macro interface cycles terminate instead of following a fixed hop limit")
+    func interfaceCycleTerminates() {
+        let interfaceGUID = "3FFBEEC3-FD74-4C54-96F7-864A9D7F5DFC"
+        func interface(_ id: UInt8, _ page: String) -> PLCProjectCompiler.Module {
+            PLCProjectCompiler.Module(name: "In\(id)", guid: interfaceGUID, umisteni: id, order: 10,
+                                      inPinCount: 0, outPinCount: 1, page: page, macroName: "Inputs")
+        }
+        func call(_ id: UInt8, _ target: String) -> PLCProjectCompiler.Module {
+            PLCProjectCompiler.Module(name: "Call\(id)", guid: PLCProjectCompiler.macroCallGUID,
+                                      umisteni: id, order: 20, inPinCount: 1, outPinCount: 1,
+                                      page: "Main", macroName: target)
+        }
+        let modules = [interface(10, "*A"), interface(20, "*B"), call(1, "A"), call(2, "B")]
+        let wires = [PLCProjectCompiler.Wire(inModule: 2, inPin: 0, outModule: 10, outPin: 0),
+                     PLCProjectCompiler.Wire(inModule: 1, inPin: 0, outModule: 20, outPin: 0)]
+        let (_, resolved) = PLCProjectCompiler.expandingMacroInterfaces(modules: modules, wires: wires)
+        #expect(resolved.count == 2, "the cycle is left as it is instead of dropping or looping")
+    }
 }
