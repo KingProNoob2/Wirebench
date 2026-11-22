@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import Foundation
 import PackageDescription
 
@@ -15,6 +15,7 @@ let appTargets: [Target] = [
         name: "WirebenchApp",
         dependencies: ["WirebenchModel", "WirebenchCore", "WirebenchLibrary", "WirebenchEngine", "WirebenchHardware",
                        "WirebenchSource"],
+        resources: [.process("SimulatorAssets")],
         swiftSettings: aiSettings
     ),
 ]
@@ -56,6 +57,14 @@ let coreTargets: [Target] = [
         name: "WirebenchMaraVM",
         dependencies: ["WirebenchMaraVMC"]
     ),
+    .target(
+        name: "WirebenchDuinoSim",
+        dependencies: ["WirebenchMaraVMC"],
+        path: "Sources/WirebenchDuinoSim",
+        publicHeadersPath: "include",
+        cxxSettings: [.unsafeFlags(["-std=c++17", "-O2", "-pipe"]),
+                      .headerSearchPath("../WirebenchMaraVMC/include")]
+    ),
     // zlib, for the one place Apple's Compression framework is used; only linked where that framework is absent.
     .systemLibrary(
         name: "CZlib",
@@ -64,7 +73,7 @@ let coreTargets: [Target] = [
     ),
     .target(
         name: "WirebenchHardware",
-        dependencies: ["WirebenchCore", "WirebenchLibrary", .target(name: "CZlib", condition: .when(platforms: [.linux]))]
+        dependencies: ["WirebenchCore", "WirebenchLibrary", "WirebenchDuinoSim", .target(name: "CZlib", condition: .when(platforms: [.linux]))]
     ),
 ]
 
@@ -107,7 +116,7 @@ let featureTargets: [Target] = [
 let package = Package(
     name: "Wirebench",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v26)
     ],
     products: [
         .library(name: "WirebenchCore", targets: ["WirebenchCore"]),

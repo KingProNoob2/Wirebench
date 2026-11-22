@@ -17,6 +17,8 @@
 		04DB5A4EB2EA255852EB2E8D /* ClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C9B99E7B25B343F04EE743 /* ClipboardTests.swift */; };
 		05A473AAC6857868AC0E8B2D /* InspectorSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0702BB07F82795FDEF10F70B /* InspectorSnapshotTests.swift */; };
 		060979F59A10EE24C389B7DE /* PLCUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01C85640D716ACA029392E58 /* PLCUploader.swift */; };
+		065070E1BA9FDD3E31B3D40E /* shield.usdz in Resources */ = {isa = PBXBuildFile; fileRef = E268894246356F22AD3F224E /* shield.usdz */; };
+		07270CD9DC73550BF924C4FE /* libWirebenchDuinoSim.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 172C37B365793EB60700661F /* libWirebenchDuinoSim.a */; };
 		0933AD4DC64165740D93EB25 /* wirebench_bridge.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 128BDC19F30B9CB6A321CC01 /* wirebench_bridge.h */; };
 		0AB0602DDBE122247C6785F6 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B53735B1631268DA0160A5FE /* MainView.swift */; };
 		0C0378BBD175B55F571AD730 /* PaperSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8213CE996731A223997D01 /* PaperSize.swift */; };
@@ -29,9 +31,12 @@
 		1398D1BBD281462BD9EAA64B /* AgentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041B14FEB87342AB021FC91C /* AgentPanelView.swift */; };
 		142A01C33B35924CB5E1A400 /* MaraTCPTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8F05359224D250FC042C2D /* MaraTCPTransport.swift */; };
 		14E9B4067FEF730A77A12FFE /* MaraflowSTEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C4BAFB3A7A559A6EDD25FE /* MaraflowSTEditorTests.swift */; };
+		1565E94FE17FA93F8F9EABEC /* module.modulemap in CopyFiles */ = {isa = PBXBuildFile; fileRef = 1D87A744369C57E5FA70005A /* module.modulemap */; };
 		165B2A6342301EAEEED28478 /* libWirebenchSource.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 77AD64915A1C2E53357992FD /* libWirebenchSource.a */; };
+		180A71F339452F03C52E9471 /* libWirebenchMaraVMC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 48BDF1FF3514552BBA88D909 /* libWirebenchMaraVMC.a */; };
 		1854C66ED7ACF7BC45773CCE /* PLCClassShapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA6EC807772ACBB08AF7148D /* PLCClassShapes.swift */; };
 		191116F1327F748B7680A65A /* SchedulingEditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F705F9F4955CC97F72D8878E /* SchedulingEditTests.swift */; };
+		1A90ADA0986F0D68455BAAAA /* libWirebenchMaraVMC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 48BDF1FF3514552BBA88D909 /* libWirebenchMaraVMC.a */; };
 		1AD8425705C34A4BA0BF146B /* ProgramTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 033177646C9EE6A072CE589F /* ProgramTableTests.swift */; };
 		1CCB9272F490AE355D8DD951 /* AgentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBF13A5B1BAF34BDC1A66B4F /* AgentClient.swift */; };
 		1F17FB7971E757331E51CC20 /* CxxBlockFuzzTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C5CC1D17D71545FB2DEAE2 /* CxxBlockFuzzTests.swift */; };
@@ -53,6 +58,7 @@
 		2D0A670B5FA550BE69CEF091 /* libWirebenchCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 52EE8F91AB776FE144249CEF /* libWirebenchCore.a */; };
 		2DECDD1018F93667BA22249C /* DuinoCompilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2281243B554DF6448C2AF785 /* DuinoCompilerTests.swift */; };
 		2E9E36851742E8AE7301519F /* AdvancedMathBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A109573CFED3D768E77D5C10 /* AdvancedMathBlocks.swift */; };
+		2F41172ACC4D42C8E7EAA43B /* board-manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 69CDDFEE93578B9F74FCBED2 /* board-manifest.json */; };
 		300DBC4DE79A8A5D31D67485 /* MaraflowVariants.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = BF36C83AEB1002D48BBBF8C9 /* MaraflowVariants.h */; };
 		304BC514F0C7E589A3342B10 /* libWirebenchLibrary.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 198627A3D8D9CF17A6BBEE51 /* libWirebenchLibrary.a */; };
 		311FCE3547DBCCD25FF95D7B /* SecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4CE7E9DC87C7B360E4C94A /* SecretStore.swift */; };
@@ -77,12 +83,14 @@
 		40B81ABF323C4FF665C2798F /* MaraflowQtSceneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97047895F9CEA0C60CD90FD7 /* MaraflowQtSceneTests.swift */; };
 		40BC1186139B108C47D841FF /* DbNetProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C36044891EEA01123E4BFF1 /* DbNetProtocolTests.swift */; };
 		426FE0BE74986E1E5353FE08 /* NestedMacroTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E0E9322B4BF9060EC069E8 /* NestedMacroTests.swift */; };
+		452A2A50F61A67EE7003F20E /* DuinoSimView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9E021415876D2D756CA4A9 /* DuinoSimView.swift */; };
 		498CCCF3F26EAE56757313A1 /* ConstructContainers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D5C5DD0CBD52F0110E8C418 /* ConstructContainers.swift */; };
 		49C74A1E29A4FCA5FCAF8768 /* LiveValuesLayerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D29E700BBE08ED12CA364E6 /* LiveValuesLayerTests.swift */; };
 		4AC3B7187DE5D7532148A36A /* DataAndArrayBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB5133ABA7613474CC5FFC7 /* DataAndArrayBlocks.swift */; };
 		4B3EEBDB852CFCE3A5D158E2 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F526AD594FE3751C0713D52 /* HelpView.swift */; };
 		4D722BC69380E1914ACBC465 /* ParameterPinTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD2A56724BE89B00C9DE779B /* ParameterPinTests.swift */; };
 		4DA53C67484057E4D4170F48 /* MaraflowExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26730718C8D9F0F4D6293628 /* MaraflowExtras.swift */; };
+		4DA825F7593FF5E009E7C859 /* DuinoSimSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDF631E7FF965A7B9F0FDA5 /* DuinoSimSession.swift */; };
 		4E020688AA363C753D5E3E87 /* SystemCmdEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FFCAA2574CFC015E8CE0AA /* SystemCmdEditingTests.swift */; };
 		4E28EC67FD21F88929AE7556 /* Completion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E14AFEDA07B6C7A06F2E77 /* Completion.swift */; };
 		4E33093F8B4850527CEEDB9F /* BlockInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 601B98187AE5D94E7119B240 /* BlockInteraction.swift */; };
@@ -126,9 +134,11 @@
 		6FC405800C247CB83B2539FA /* PCCParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFB576BA7CDBE02E464B5B9 /* PCCParser.swift */; };
 		7021B5EE6FFB7925F8970DE3 /* libWirebenchHardware.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 35A11E59FF889FB765013CF1 /* libWirebenchHardware.a */; };
 		704B8561FED9C3FB3ADC7B90 /* StructuredTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD5DEE94DEFF5CA0AB0F63E /* StructuredTextTests.swift */; };
+		708B24678F82148968DC8EFB /* libWirebenchDuinoSim.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 172C37B365793EB60700661F /* libWirebenchDuinoSim.a */; };
 		71081E3BAED8B276DA039B4D /* DirigoGraphicBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F974746B5B6C0CFFCDEDADB /* DirigoGraphicBindingTests.swift */; };
 		72C3D368F623AA573B3CD1D5 /* PlayLoopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A824BCC5A9588423C46774 /* PlayLoopTests.swift */; };
 		7308C0E2A431CAC514FD1016 /* module.modulemap in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0E028A3FBE8984268BE73BD8 /* module.modulemap */; };
+		7316E69B7DB1ACFC60B98679 /* libWirebenchDuinoSim.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 172C37B365793EB60700661F /* libWirebenchDuinoSim.a */; };
 		738DC241DF725FBAEE28B382 /* DevicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D012FE232405E25D474730A3 /* DevicesTests.swift */; };
 		7467EDA345BB86F41B7007F7 /* BlockFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681156E596E36D4F100CCF5B /* BlockFactory.swift */; };
 		74BAF49C53DF23E0E25C5457 /* PLCProgramBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 323ACD8F6286FEC1DDB46816 /* PLCProgramBuilder.swift */; };
@@ -140,6 +150,7 @@
 		77B7006E39267CDAF895EC04 /* LegacyExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DA55DA3DC80022D4590C16E /* LegacyExportTests.swift */; };
 		78F7D5E7EE157D52F73786A2 /* RawDeflate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCC1D1C0283DC0FA777338A /* RawDeflate.swift */; };
 		790DD833CCFC2AAF55D16D61 /* AppModel+SystemCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F35E83E8FC17B66D17E4244 /* AppModel+SystemCmd.swift */; };
+		7B50A3F93129105AD0EB87AC /* board-frame.json in Resources */ = {isa = PBXBuildFile; fileRef = 688EE9CA566B9CF5E557AB4A /* board-frame.json */; };
 		7B6C22B52E85A3D3A93617FF /* GraphicShapeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210A65183DA78C896A156FAB /* GraphicShapeView.swift */; };
 		7DAE96BD19D221196735F20F /* TortureCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E086C34530C239419D064071 /* TortureCorpusTests.swift */; };
 		7FD076B18EC28C0EAFAD40B4 /* AppearanceMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = E513A6D4D5D2EDA5CCE74DB7 /* AppearanceMode.swift */; };
@@ -158,9 +169,11 @@
 		866F819F9F90E1E11AFB1801 /* MathBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27146F39436C6210A99D6E3B /* MathBlocks.swift */; };
 		879E8FFB6E4EF40C0B9A14F5 /* StructuredTextRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2819FD5BD9198F1A8770AEDB /* StructuredTextRegressionTests.swift */; };
 		89CE4A7BB8679DDBEC7DFCD3 /* BoolVarBlockTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD0D991A05E275C44A68FBD0 /* BoolVarBlockTests.swift */; };
+		8B3EB21DB5A374BCCE1BA614 /* libWirebenchMaraVMC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 48BDF1FF3514552BBA88D909 /* libWirebenchMaraVMC.a */; };
 		8DB0EAA310583D7F16BC8A25 /* libWirebenchEngine.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0DE89F76DAE17E00752B8088 /* libWirebenchEngine.a */; };
 		900321F676554D93F2D32F9F /* ProjectRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10719576A6E98A21273E8287 /* ProjectRoundTripTests.swift */; };
 		90810377641C30D6DC55FED7 /* MaraflowImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAD39DA59DDD5AEF69C60F70 /* MaraflowImportTests.swift */; };
+		9132605AACC01BDFDDD3A89C /* mara_vm.c in Sources */ = {isa = PBXBuildFile; fileRef = E1D59AFEB07A9BC95769F8E2 /* mara_vm.c */; };
 		91B6019E963C6AC4AB2F03BC /* PinTemplateCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50E2CD5521E3058D764863B0 /* PinTemplateCatalog.swift */; };
 		9244DFAE9C872B7F1587EA8B /* libWirebenchSimCxx.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2168034C145775113407163A /* libWirebenchSimCxx.a */; };
 		927D4F100B29D546501A49D4 /* AttributeBag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 300DED04CF2EBA83FD86E7C1 /* AttributeBag.swift */; };
@@ -180,9 +193,12 @@
 		9D5CCB561AF0F6C07D99EB16 /* libWirebenchHardware.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 35A11E59FF889FB765013CF1 /* libWirebenchHardware.a */; };
 		9D9683E9D69CF950DC716C77 /* libWirebenchEngine.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0DE89F76DAE17E00752B8088 /* libWirebenchEngine.a */; };
 		9F2BD67325E58D2DEA1D4C0B /* PinEditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFB491146495A2E0CE28694 /* PinEditTests.swift */; };
+		9F91F794A2B8F43FA231551F /* shield-frame.json in Resources */ = {isa = PBXBuildFile; fileRef = 445B3545599ABC25E6FD65E8 /* shield-frame.json */; };
 		A295AF9CE8298D7E563A1BCB /* ConstructContainerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 384871C81AA5AF1DEE66012B /* ConstructContainerTests.swift */; };
 		A2EAAC77A98EDE615385B206 /* CanvasLayerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C7614C4127E685CACB030D /* CanvasLayerTests.swift */; };
 		A446D83323815D8388711D0B /* VariableDBFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6974AC3B1E1B79F722126E2A /* VariableDBFTests.swift */; };
+		A44C047767185FACB66E877C /* mara_vm.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 33DD841039620CCC8498EF0B /* mara_vm.h */; };
+		A493EFB8ED8DACD0D612F073 /* DuinoSimTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B7376F3CAFD9F56913FF13 /* DuinoSimTests.swift */; };
 		A6CD94966E5EC775638818B6 /* MaraflowExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EF3C446C417C2F901234269 /* MaraflowExportTests.swift */; };
 		A790DF224293391DDD06D8C5 /* SourceEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA447E1207C0519330F1F2F2 /* SourceEditor.swift */; };
 		A7BA2C37A0F3A502393524AD /* libWirebenchModel.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 659FD92378460AC9C29BD93B /* libWirebenchModel.a */; };
@@ -190,6 +206,7 @@
 		A85295B1F29BE350F84F0DA8 /* UnsavedChanges.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0C4DA883B9D0EFE20B350F /* UnsavedChanges.swift */; };
 		A9C0C9A0D9E194A3FC0510D1 /* ExtraProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A10111F174B039CF5D630B /* ExtraProperties.swift */; };
 		AB9ACC187C10F3115C9DB1DB /* AppModel+Macros.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4D58BD229377BC8D5DF041 /* AppModel+Macros.swift */; };
+		AFCD83AA8C87EDDE624ABBEC /* duino_sim.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 92BA787D1A5F19064E112BF7 /* duino_sim.cpp */; };
 		B0C856907BA34CE316C38224 /* HardwareLinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D70E169075ACB139A57154E /* HardwareLinkView.swift */; };
 		B1BE653499D966388C7A63A2 /* BlockLabels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25D4941EDC68ED2AF636ABA2 /* BlockLabels.swift */; };
 		B2F616207D19D2ACDC7DC857 /* WireRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2437401011473AB721DC8E8 /* WireRouter.swift */; };
@@ -217,14 +234,17 @@
 		CE6CB3623EF005C916EFC117 /* WiringInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB5EB1CD3AA28D95824F5EF /* WiringInteraction.swift */; };
 		CF700BF2F1C7A68FB8B42622 /* DuinoCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1609728B7CC47FE2BE30916 /* DuinoCompiler.swift */; };
 		CFD9FECF342C402ED2D8FF04 /* PLCProjectBuild.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C56A5843EBF7FD25F0D7DC0 /* PLCProjectBuild.swift */; };
+		D1156D7C3F21641918C24CC4 /* DuinoSim.swift in Sources */ = {isa = PBXBuildFile; fileRef = 346C45214A17886CBFA86F2A /* DuinoSim.swift */; };
 		D131AD0EECEFF849F0B77697 /* BlockDefaultsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 311F867BC3B1ED5558E9C335 /* BlockDefaultsTests.swift */; };
 		D2C345BE124743C337030F72 /* MacroCalls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C516C6C36DF899C8FAE3685 /* MacroCalls.swift */; };
 		D2D4F71AF6378D8386408BB9 /* AgentBlockDocs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74B6A26390D3040BEA010A2E /* AgentBlockDocs.swift */; };
+		D31EB48BB087972B07DD71D1 /* board.usdz in Resources */ = {isa = PBXBuildFile; fileRef = CCD8A8063C8BEF1A9AAB7D35 /* board.usdz */; };
 		D3B7A2F22FC5FFE8B8E83FF1 /* ControlFlowAndRegulationBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4F3D262ED80B91CE1787A40 /* ControlFlowAndRegulationBlocks.swift */; };
 		D44257E7770A02DB53A9BDB9 /* AgentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F405A4E1004CEE5C4B02279 /* AgentModel.swift */; };
 		D4729C7144F14861260964C3 /* OtherBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F07E8637A09E92A56CB0FB /* OtherBlocks.swift */; };
 		D69D31CE11802A792D0806EF /* BlockPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3EB846CF7C1154941BA3CEB /* BlockPaletteView.swift */; };
 		D772A8CC42BECF0E778E46B9 /* PLCProgramTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B46A6B0CA2A9B02B8C797F7 /* PLCProgramTable.swift */; };
+		D79C7686252EB07FA8FC3350 /* WirebenchDuinoSim.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4276908B6046F50D8EB63FE0 /* WirebenchDuinoSim.h */; };
 		D85272AECB99EFDF36E7FE95 /* PinChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04254240CA93E4024D4F54D5 /* PinChain.swift */; };
 		D91E47691F3E58A38D5A9C2C /* PLCProgramImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5FBA15CB21201C5C3CF4D68 /* PLCProgramImage.swift */; };
 		D966C6C37A1FAE82A003033F /* MaraflowGraphicsLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABD56456B4CC659EA4B3511 /* MaraflowGraphicsLayer.swift */; };
@@ -298,6 +318,13 @@
 			remoteGlobalIDString = 38A3D984C36A86A0C7DDDA9D;
 			remoteInfo = WirebenchLibrary;
 		};
+		1ECDE0990D78AD8B16F1B4F7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 03EC499D3F1A614C591B004B;
+			remoteInfo = WirebenchDuinoSim;
+		};
 		2226F06820B3A7AB03ED125D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
@@ -353,6 +380,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = 833583B47C072E6C28864FCF;
 			remoteInfo = WirebenchSimCxx;
+		};
+		49A96B0294928C829156D299 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 88A4C674EC6556B105717A9A;
+			remoteInfo = WirebenchMaraVMC;
+		};
+		510F6A87717A2FF8F421D3CB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 88A4C674EC6556B105717A9A;
+			remoteInfo = WirebenchMaraVMC;
 		};
 		5741C60535C1F26311DB1D12 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -424,6 +465,13 @@
 			remoteGlobalIDString = 38A3D984C36A86A0C7DDDA9D;
 			remoteInfo = WirebenchLibrary;
 		};
+		8567F224A7C668A1601D7B95 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 03EC499D3F1A614C591B004B;
+			remoteInfo = WirebenchDuinoSim;
+		};
 		878FF74A14FA6C9FD4F667A9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
@@ -444,6 +492,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = 38A3D984C36A86A0C7DDDA9D;
 			remoteInfo = WirebenchLibrary;
+		};
+		964B974B1D36A22F8827926B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 88A4C674EC6556B105717A9A;
+			remoteInfo = WirebenchMaraVMC;
+		};
+		A447D32931430CD580BB7165 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 03EC499D3F1A614C591B004B;
+			remoteInfo = WirebenchDuinoSim;
 		};
 		A592B7195302AA40443016D9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -529,9 +591,37 @@
 			remoteGlobalIDString = 38A3D984C36A86A0C7DDDA9D;
 			remoteInfo = WirebenchLibrary;
 		};
+		FBB8DB69EAB6A46381F53AA4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17898D6D19BBBE3225C79310 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 88A4C674EC6556B105717A9A;
+			remoteInfo = WirebenchMaraVMC;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		2424761551894712B54754A7 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "include/$(PRODUCT_NAME)";
+			dstSubfolderSpec = 16;
+			files = (
+				A44C047767185FACB66E877C /* mara_vm.h in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2CD6003183B30CB287CE9070 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "include/$(PRODUCT_NAME)";
+			dstSubfolderSpec = 16;
+			files = (
+				D79C7686252EB07FA8FC3350 /* WirebenchDuinoSim.h in CopyFiles */,
+				1565E94FE17FA93F8F9EABEC /* module.modulemap in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		81F6EC2AA25075BC1E661B9A /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -577,6 +667,7 @@
 		128BDC19F30B9CB6A321CC01 /* wirebench_bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = wirebench_bridge.h; sourceTree = "<group>"; };
 		134702F26D358DD31C09695B /* GraphicShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphicShapes.swift; sourceTree = "<group>"; };
 		16C122636CE140AAC9A0B6E8 /* DataFidelityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataFidelityTests.swift; sourceTree = "<group>"; };
+		172C37B365793EB60700661F /* libWirebenchDuinoSim.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libWirebenchDuinoSim.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		17F4B69A0037F962D143AD01 /* LiveValuesLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveValuesLayer.swift; sourceTree = "<group>"; };
 		1859EEBA92463666FEC80985 /* BuiltInProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInProfiles.swift; sourceTree = "<group>"; };
 		18F0FC4DAE0F7C17361B30FF /* WirebenchSimCxx.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WirebenchSimCxx.h; sourceTree = "<group>"; };
@@ -585,6 +676,7 @@
 		1AFB491146495A2E0CE28694 /* PinEditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinEditTests.swift; sourceTree = "<group>"; };
 		1B0C4DA883B9D0EFE20B350F /* UnsavedChanges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsavedChanges.swift; sourceTree = "<group>"; };
 		1C712014446B3DA5608BF7DF /* MaraflowImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowImporter.swift; sourceTree = "<group>"; };
+		1D87A744369C57E5FA70005A /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
 		1DCC1D1C0283DC0FA777338A /* RawDeflate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawDeflate.swift; sourceTree = "<group>"; };
 		1FD1D4D64AC3F9AAEB381A0A /* BlockPinContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockPinContractTests.swift; sourceTree = "<group>"; };
 		2002CE84CA8326D87EE2455C /* PLCConfigurationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCConfigurationView.swift; sourceTree = "<group>"; };
@@ -610,6 +702,8 @@
 		323ACD8F6286FEC1DDB46816 /* PLCProgramBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCProgramBuilder.swift; sourceTree = "<group>"; };
 		3266C70D1198285F73498C74 /* MaraflowStInterpreter.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MaraflowStInterpreter.h; sourceTree = "<group>"; };
 		3329AD26CD2C2E960FDE1380 /* PLCCommandGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCCommandGuide.swift; sourceTree = "<group>"; };
+		33DD841039620CCC8498EF0B /* mara_vm.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mara_vm.h; sourceTree = "<group>"; };
+		346C45214A17886CBFA86F2A /* DuinoSim.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuinoSim.swift; sourceTree = "<group>"; };
 		34A10111F174B039CF5D630B /* ExtraProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtraProperties.swift; sourceTree = "<group>"; };
 		3596F50AC2E5D51C6D954062 /* PCCSerializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCCSerializer.swift; sourceTree = "<group>"; };
 		35A11E59FF889FB765013CF1 /* libWirebenchHardware.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libWirebenchHardware.a; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -620,6 +714,7 @@
 		384871C81AA5AF1DEE66012B /* ConstructContainerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConstructContainerTests.swift; sourceTree = "<group>"; };
 		38DA5B3CDD515265E062DBCB /* SerializerCoordinateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SerializerCoordinateTests.swift; sourceTree = "<group>"; };
 		38F7D9364C1ED5F6A7E6ACFE /* GraphicColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphicColor.swift; sourceTree = "<group>"; };
+		3B9E021415876D2D756CA4A9 /* DuinoSimView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuinoSimView.swift; sourceTree = "<group>"; };
 		3C56A5843EBF7FD25F0D7DC0 /* PLCProjectBuild.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCProjectBuild.swift; sourceTree = "<group>"; };
 		3DA55DA3DC80022D4590C16E /* LegacyExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyExportTests.swift; sourceTree = "<group>"; };
 		3E5EE4E61E054E304A3B715A /* WirebenchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WirebenchTests.swift; sourceTree = "<group>"; };
@@ -627,11 +722,14 @@
 		3F405A4E1004CEE5C4B02279 /* AgentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentModel.swift; sourceTree = "<group>"; };
 		3F4C71BB4552209B636940AB /* AdvancedLogicAndBitBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedLogicAndBitBlocks.swift; sourceTree = "<group>"; };
 		3FDD0B9ABFE1EC870844890D /* DuinoAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuinoAppTests.swift; sourceTree = "<group>"; };
+		4276908B6046F50D8EB63FE0 /* WirebenchDuinoSim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WirebenchDuinoSim.h; sourceTree = "<group>"; };
 		428A92865C6701E249926280 /* PLCConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCConfiguration.swift; sourceTree = "<group>"; };
 		4340CA34CCD3A3828DEE3361 /* SegmentDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentDisplayView.swift; sourceTree = "<group>"; };
 		43D184DB9E0227CD26EF5045 /* MaraflowPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowPaletteTests.swift; sourceTree = "<group>"; };
+		445B3545599ABC25E6FD65E8 /* shield-frame.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "shield-frame.json"; sourceTree = "<group>"; };
 		463F8B9E940072B65C7F72DF /* WirebenchCLI */ = {isa = PBXFileReference; includeInIndex = 0; path = WirebenchCLI; sourceTree = BUILT_PRODUCTS_DIR; };
 		47A824BCC5A9588423C46774 /* PlayLoopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayLoopTests.swift; sourceTree = "<group>"; };
+		48BDF1FF3514552BBA88D909 /* libWirebenchMaraVMC.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libWirebenchMaraVMC.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		49B56CB5D6ED2D0A9ED16C35 /* D3NetBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D3NetBlocks.swift; sourceTree = "<group>"; };
 		49BDBFA29CD7EE9AAB113E91 /* PinDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinDisplay.swift; sourceTree = "<group>"; };
 		4AA8CC39941AC87246E1205F /* PLCProjectShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCProjectShapes.swift; sourceTree = "<group>"; };
@@ -666,10 +764,12 @@
 		66DBB357D44DB46F45F38D35 /* ProfileAndSchedulingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileAndSchedulingTests.swift; sourceTree = "<group>"; };
 		67D05A6C8C9F0343FAF5ACE3 /* WirebenchDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WirebenchDocumentTests.swift; sourceTree = "<group>"; };
 		681156E596E36D4F100CCF5B /* BlockFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockFactory.swift; sourceTree = "<group>"; };
+		688EE9CA566B9CF5E557AB4A /* board-frame.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "board-frame.json"; sourceTree = "<group>"; };
 		68F8E9CEFAAF52922F88ABF1 /* UndoHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoHistory.swift; sourceTree = "<group>"; };
 		694F9DCDD2F400D0580C8E34 /* AgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTests.swift; sourceTree = "<group>"; };
 		6974AC3B1E1B79F722126E2A /* VariableDBFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariableDBFTests.swift; sourceTree = "<group>"; };
 		6997279DC32369691803EE6D /* GridSnap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridSnap.swift; sourceTree = "<group>"; };
+		69CDDFEE93578B9F74FCBED2 /* board-manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "board-manifest.json"; sourceTree = "<group>"; };
 		6A40EE6050622064D29F578F /* DbNetFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DbNetFrame.swift; sourceTree = "<group>"; };
 		6B372253848FC7E7ED8A0138 /* TimingAndPeripheralBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimingAndPeripheralBlocks.swift; sourceTree = "<group>"; };
 		6CC7E0E4FC2659452B7AD5A3 /* ExtendedBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtendedBlocks.swift; sourceTree = "<group>"; };
@@ -698,12 +798,15 @@
 		8AC95CFD4F72DAD3400EEA72 /* PaletteDragSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteDragSource.swift; sourceTree = "<group>"; };
 		8B5115D39C9D9C3E95880FC1 /* AppModel+Duino.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Duino.swift"; sourceTree = "<group>"; };
 		8BC7FB03E932E9FED48369AB /* InspectorSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorSnapshot.swift; sourceTree = "<group>"; };
+		8BDF631E7FF965A7B9F0FDA5 /* DuinoSimSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuinoSimSession.swift; sourceTree = "<group>"; };
 		8CD5DEE94DEFF5CA0AB0F63E /* StructuredTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredTextTests.swift; sourceTree = "<group>"; };
 		8D485081B79CD7AE8BAB1C91 /* Wirebench.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wirebench.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		902A86520F3DF387A2449265 /* BlockConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockConfig.swift; sourceTree = "<group>"; };
 		905B369E5C9D1EC191B2D52A /* SelfWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfWiringTests.swift; sourceTree = "<group>"; };
 		9288A8B208D942C715DCF246 /* PCCFidelityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCCFidelityTests.swift; sourceTree = "<group>"; };
+		92BA787D1A5F19064E112BF7 /* duino_sim.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = duino_sim.cpp; sourceTree = "<group>"; };
 		93144C50CA9C72FEDB6D1374 /* PCCGraphicBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCCGraphicBuilder.swift; sourceTree = "<group>"; };
+		94B7376F3CAFD9F56913FF13 /* DuinoSimTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuinoSimTests.swift; sourceTree = "<group>"; };
 		97047895F9CEA0C60CD90FD7 /* MaraflowQtSceneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraflowQtSceneTests.swift; sourceTree = "<group>"; };
 		9736DDA9034C602C71F0D0A7 /* PulseGenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PulseGenTests.swift; sourceTree = "<group>"; };
 		98D644DB218E598DC6A13ACF /* MaraflowStInterpreter.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = MaraflowStInterpreter.cpp; sourceTree = "<group>"; };
@@ -765,6 +868,7 @@
 		C85B533AE71B53B9125AA5E3 /* ProgramOptimizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramOptimizerTests.swift; sourceTree = "<group>"; };
 		CA6EC807772ACBB08AF7148D /* PLCClassShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCClassShapes.swift; sourceTree = "<group>"; };
 		CA998EB7E16E9F90B58507E8 /* WireSeparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireSeparation.swift; sourceTree = "<group>"; };
+		CCD8A8063C8BEF1A9AAB7D35 /* board.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = board.usdz; sourceTree = "<group>"; };
 		CD6BED43B959E3AFB1409329 /* BridgeCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeCommands.swift; sourceTree = "<group>"; };
 		CF5524CBA5F6C3A016ED4428 /* PLCSymbolTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCSymbolTable.swift; sourceTree = "<group>"; };
 		D012FE232405E25D474730A3 /* DevicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicesTests.swift; sourceTree = "<group>"; };
@@ -786,6 +890,8 @@
 		E06822B22CFDB66E4BF7727D /* ModuleCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleCardView.swift; sourceTree = "<group>"; };
 		E086C34530C239419D064071 /* TortureCorpusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TortureCorpusTests.swift; sourceTree = "<group>"; };
 		E118E0A105DAE2E94550D7B5 /* PLCProjectSymbols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PLCProjectSymbols.swift; sourceTree = "<group>"; };
+		E1D59AFEB07A9BC95769F8E2 /* mara_vm.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mara_vm.c; sourceTree = "<group>"; };
+		E268894246356F22AD3F224E /* shield.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = shield.usdz; sourceTree = "<group>"; };
 		E30425DC93B990EADD1C0209 /* BlockTypeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockTypeCatalog.swift; sourceTree = "<group>"; };
 		E4AB8FFBAC5C37948916DC93 /* MacroInstancing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroInstancing.swift; sourceTree = "<group>"; };
 		E513A6D4D5D2EDA5CCE74DB7 /* AppearanceMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceMode.swift; sourceTree = "<group>"; };
@@ -809,7 +915,7 @@
 		F9A42D656A9C7A4D8C4BCD9B /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		FAFAA9C136EA927854F270D1 /* AppModel+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Clipboard.swift"; sourceTree = "<group>"; };
 		FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaraProtFrame.swift; sourceTree = "<group>"; };
-		"TEMP_247008E8-8434-4D37-ABFF-459B95B9BBA0" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		"TEMP_A57BA915-020F-4850-A228-A33F3D859A5D" /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -824,6 +930,8 @@
 				3832A5A14E633A3F781BE61F /* libWirebenchHardware.a in Frameworks */,
 				3F423348169CB89DD8619377 /* libWirebenchSource.a in Frameworks */,
 				9244DFAE9C872B7F1587EA8B /* libWirebenchSimCxx.a in Frameworks */,
+				7316E69B7DB1ACFC60B98679 /* libWirebenchDuinoSim.a in Frameworks */,
+				8B3EB21DB5A374BCCE1BA614 /* libWirebenchMaraVMC.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -838,6 +946,8 @@
 				9D5CCB561AF0F6C07D99EB16 /* libWirebenchHardware.a in Frameworks */,
 				165B2A6342301EAEEED28478 /* libWirebenchSource.a in Frameworks */,
 				32E95F58ACF62766F32C24A2 /* libWirebenchSimCxx.a in Frameworks */,
+				708B24678F82148968DC8EFB /* libWirebenchDuinoSim.a in Frameworks */,
+				180A71F339452F03C52E9471 /* libWirebenchMaraVMC.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -852,18 +962,37 @@
 				A7BA2C37A0F3A502393524AD /* libWirebenchModel.a in Frameworks */,
 				5399EE79EEEAB82ABC99E0E4 /* libWirebenchSource.a in Frameworks */,
 				765AB45AB3CCA654B64A63C8 /* libWirebenchSimCxx.a in Frameworks */,
+				07270CD9DC73550BF924C4FE /* libWirebenchDuinoSim.a in Frameworks */,
+				1A90ADA0986F0D68455BAAAA /* libWirebenchMaraVMC.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		10CC8B04293348777A7B0292 /* WirebenchDuinoSim */ = {
+			isa = PBXGroup;
+			children = (
+				92BA787D1A5F19064E112BF7 /* duino_sim.cpp */,
+				D312EE74984BC3956D6D252B /* include */,
+			);
+			path = WirebenchDuinoSim;
+			sourceTree = "<group>";
+		};
 		173042ADD99F088C7E9C4418 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
 				8D58FDC7CF40D449BBDFCF8C /* WirebenchTests */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		2923B1173ED62593D1AA8A95 /* include */ = {
+			isa = PBXGroup;
+			children = (
+				33DD841039620CCC8498EF0B /* mara_vm.h */,
+			);
+			path = include;
 			sourceTree = "<group>";
 		};
 		2D64DC0AD5D3A894A2E324BD /* WirebenchBridge */ = {
@@ -896,6 +1025,18 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		46D19670801A2C3E11BB2EF7 /* SimulatorAssets */ = {
+			isa = PBXGroup;
+			children = (
+				688EE9CA566B9CF5E557AB4A /* board-frame.json */,
+				69CDDFEE93578B9F74FCBED2 /* board-manifest.json */,
+				CCD8A8063C8BEF1A9AAB7D35 /* board.usdz */,
+				445B3545599ABC25E6FD65E8 /* shield-frame.json */,
+				E268894246356F22AD3F224E /* shield.usdz */,
+			);
+			path = SimulatorAssets;
+			sourceTree = "<group>";
+		};
 		513B1014FE526719A95DA200 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
@@ -903,9 +1044,11 @@
 				2D64DC0AD5D3A894A2E324BD /* WirebenchBridge */,
 				BCADA3D0F820831A94F80FF2 /* WirebenchCLI */,
 				DC880366171A05B52334B611 /* WirebenchCore */,
+				10CC8B04293348777A7B0292 /* WirebenchDuinoSim */,
 				61474C1A20889BC6E6BF3A23 /* WirebenchEngine */,
 				79D48182F756021A1A08C944 /* WirebenchHardware */,
 				A33DE67BB7D17FB4071B93CF /* WirebenchLibrary */,
+				EDA5664081A0D86C8DD613EF /* WirebenchMaraVMC */,
 				79B67372C918B2D399AD95F4 /* WirebenchModel */,
 				B36F0EF7B2C70F6DCBDF4F76 /* WirebenchSimCxx */,
 				394371D482AF32021BE600EB /* WirebenchSource */,
@@ -947,6 +1090,7 @@
 				6568813B97185D5274CCC006 /* CardGeometry.swift */,
 				D1609728B7CC47FE2BE30916 /* DuinoCompiler.swift */,
 				523181B8359A194E3DEEC85D /* DuinoMacroExpansion.swift */,
+				8BDF631E7FF965A7B9F0FDA5 /* DuinoSimSession.swift */,
 				6997279DC32369691803EE6D /* GridSnap.swift */,
 				8BC7FB03E932E9FED48369AB /* InspectorSnapshot.swift */,
 				2BE308E8C5F717AEF90229AF /* MaraflowExporter.swift */,
@@ -971,6 +1115,7 @@
 			children = (
 				6A40EE6050622064D29F578F /* DbNetFrame.swift */,
 				D5D3CFE585EF3BDF0442C0B6 /* DbNetSession.swift */,
+				346C45214A17886CBFA86F2A /* DuinoSim.swift */,
 				C06E4A561F3D27B32C99984E /* MaraDiscovery.swift */,
 				BB552BAD99E895F922648697 /* MaraProtClient.swift */,
 				FEB17D59DE2BAA9E250C92E6 /* MaraProtFrame.swift */,
@@ -1003,6 +1148,7 @@
 				F3EB846CF7C1154941BA3CEB /* BlockPaletteView.swift */,
 				75F3F6D5EFC02316420ED21D /* BuildReportView.swift */,
 				D454E2B899E7A7139D23B88B /* CanvasView.swift */,
+				3B9E021415876D2D756CA4A9 /* DuinoSimView.swift */,
 				D033803C6CC77DAA300B0921 /* FilePanels.swift */,
 				B3749C8BFB8305FC76DBE482 /* GlassSegmentedPicker.swift */,
 				38F7D9364C1ED5F6A7E6ACFE /* GraphicColor.swift */,
@@ -1028,6 +1174,7 @@
 				192F797A1A8417DF9659BAA1 /* Theme.swift */,
 				1B0C4DA883B9D0EFE20B350F /* UnsavedChanges.swift */,
 				9D1BFC6E6D84EBA9F99859BA /* WirebenchApp.swift */,
+				46D19670801A2C3E11BB2EF7 /* SimulatorAssets */,
 			);
 			path = WirebenchApp;
 			sourceTree = "<group>";
@@ -1059,6 +1206,7 @@
 				7F974746B5B6C0CFFCDEDADB /* DirigoGraphicBindingTests.swift */,
 				3FDD0B9ABFE1EC870844890D /* DuinoAppTests.swift */,
 				2281243B554DF6448C2AF785 /* DuinoCompilerTests.swift */,
+				94B7376F3CAFD9F56913FF13 /* DuinoSimTests.swift */,
 				64AC77CA1F3C7176DDFF2EA0 /* EditorTortureTests.swift */,
 				82CD1B6F9CA520F438021A52 /* ExecutionModelTests.swift */,
 				B0B9B302F55970CCFF0A4957 /* ExtraPropertyTests.swift */,
@@ -1139,9 +1287,11 @@
 			children = (
 				6CDBAD8D6BE96F090AD87D85 /* libWirebenchBridge.a */,
 				52EE8F91AB776FE144249CEF /* libWirebenchCore.a */,
+				172C37B365793EB60700661F /* libWirebenchDuinoSim.a */,
 				0DE89F76DAE17E00752B8088 /* libWirebenchEngine.a */,
 				35A11E59FF889FB765013CF1 /* libWirebenchHardware.a */,
 				198627A3D8D9CF17A6BBEE51 /* libWirebenchLibrary.a */,
+				48BDF1FF3514552BBA88D909 /* libWirebenchMaraVMC.a */,
 				659FD92378460AC9C29BD93B /* libWirebenchModel.a */,
 				2168034C145775113407163A /* libWirebenchSimCxx.a */,
 				77AD64915A1C2E53357992FD /* libWirebenchSource.a */,
@@ -1223,6 +1373,15 @@
 			path = WirebenchCLI;
 			sourceTree = "<group>";
 		};
+		D312EE74984BC3956D6D252B /* include */ = {
+			isa = PBXGroup;
+			children = (
+				1D87A744369C57E5FA70005A /* module.modulemap */,
+				4276908B6046F50D8EB63FE0 /* WirebenchDuinoSim.h */,
+			);
+			path = include;
+			sourceTree = "<group>";
+		};
 		DC880366171A05B52334B611 /* WirebenchCore */ = {
 			isa = PBXGroup;
 			children = (
@@ -1253,6 +1412,15 @@
 			path = WirebenchCore;
 			sourceTree = "<group>";
 		};
+		EDA5664081A0D86C8DD613EF /* WirebenchMaraVMC */ = {
+			isa = PBXGroup;
+			children = (
+				E1D59AFEB07A9BC95769F8E2 /* mara_vm.c */,
+				2923B1173ED62593D1AA8A95 /* include */,
+			);
+			path = WirebenchMaraVMC;
+			sourceTree = "<group>";
+		};
 		FD36D7C051E1EBD9DEDFA3A6 /* Agent */ = {
 			isa = PBXGroup;
 			children = (
@@ -1267,10 +1435,10 @@
 			path = Agent;
 			sourceTree = "<group>";
 		};
-		"TEMP_82129185-A3D6-45BE-BC59-082A7B71F5EB" /* Wirebench */ = {
+		"TEMP_42CDAC6E-BE38-4C3F-82AA-1C647E0591D3" /* Wirebench */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_247008E8-8434-4D37-ABFF-459B95B9BBA0" /* Release.xcconfig */,
+				"TEMP_A57BA915-020F-4850-A228-A33F3D859A5D" /* Release.xcconfig */,
 			);
 			path = Wirebench;
 			sourceTree = "<group>";
@@ -1278,6 +1446,25 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		03EC499D3F1A614C591B004B /* WirebenchDuinoSim */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8480AD78B444BAC7B426AFA4 /* Build configuration list for PBXNativeTarget "WirebenchDuinoSim" */;
+			buildPhases = (
+				2CD6003183B30CB287CE9070 /* CopyFiles */,
+				65E3FEED26FBB7002F091174 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9BC8800F7A15BFB294648DBD /* PBXTargetDependency */,
+			);
+			name = WirebenchDuinoSim;
+			packageProductDependencies = (
+			);
+			productName = WirebenchDuinoSim;
+			productReference = 172C37B365793EB60700661F /* libWirebenchDuinoSim.a */;
+			productType = "com.apple.product-type.library.static";
+		};
 		10A83414220177BD29FA4ABE /* WirebenchCLI */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9D2973FA6167F847CDB2FCB8 /* Build configuration list for PBXNativeTarget "WirebenchCLI" */;
@@ -1295,6 +1482,8 @@
 				30FCBE2F09FFD9960AD883AF /* PBXTargetDependency */,
 				849D5887F417C2121FD756C8 /* PBXTargetDependency */,
 				9CAAAC79FAEF23BD9869E5C5 /* PBXTargetDependency */,
+				D3ED686E18D516C074E9BEB4 /* PBXTargetDependency */,
+				FF0E5BC73909B9BBB2B240F8 /* PBXTargetDependency */,
 			);
 			name = WirebenchCLI;
 			packageProductDependencies = (
@@ -1328,6 +1517,7 @@
 			buildConfigurationList = 3E60B8559552C9175F2B713B /* Build configuration list for PBXNativeTarget "Wirebench" */;
 			buildPhases = (
 				AB36D8E6952F75A31358A7BB /* Sources */,
+				4A750F69C03D6A5581D1A5B7 /* Resources */,
 				1F6E9118930A6CAE6AFA788C /* Frameworks */,
 			);
 			buildRules = (
@@ -1340,6 +1530,8 @@
 				E21F0515D964EB04FF997589 /* PBXTargetDependency */,
 				B5CA94FD5D635F70D2DCFB99 /* PBXTargetDependency */,
 				21C143AAA17F6EC9529BC92D /* PBXTargetDependency */,
+				0DF8096EAC1FA1121EC0844A /* PBXTargetDependency */,
+				15B91BA3D548623CF8970958 /* PBXTargetDependency */,
 			);
 			name = Wirebench;
 			packageProductDependencies = (
@@ -1407,6 +1599,24 @@
 			productReference = 2168034C145775113407163A /* libWirebenchSimCxx.a */;
 			productType = "com.apple.product-type.library.static";
 		};
+		88A4C674EC6556B105717A9A /* WirebenchMaraVMC */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 888207F97C925EE1441D6023 /* Build configuration list for PBXNativeTarget "WirebenchMaraVMC" */;
+			buildPhases = (
+				2424761551894712B54754A7 /* CopyFiles */,
+				FC2E419B9F3031F0A1FB58F2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WirebenchMaraVMC;
+			packageProductDependencies = (
+			);
+			productName = WirebenchMaraVMC;
+			productReference = 48BDF1FF3514552BBA88D909 /* libWirebenchMaraVMC.a */;
+			productType = "com.apple.product-type.library.static";
+		};
 		9FA7C2D169C0D123FD4C407A /* WirebenchModel */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A6FCC509E802DF2FA9422406 /* Build configuration list for PBXNativeTarget "WirebenchModel" */;
@@ -1447,6 +1657,8 @@
 				1D1775A4D76F11B57A04CCAB /* PBXTargetDependency */,
 				105D07BB1C1EDA018FD43F97 /* PBXTargetDependency */,
 				FCEFD7E3142799E304C57B47 /* PBXTargetDependency */,
+				A70D6FFFB2CA34F2DCBB3D56 /* PBXTargetDependency */,
+				BEA10A3E1C9BD83A41281699 /* PBXTargetDependency */,
 			);
 			name = WirebenchTests;
 			packageProductDependencies = (
@@ -1548,6 +1760,8 @@
 				F9E2602AE857C7EAB66730D6 /* WirebenchCore */,
 				38A3D984C36A86A0C7DDDA9D /* WirebenchLibrary */,
 				833583B47C072E6C28864FCF /* WirebenchSimCxx */,
+				88A4C674EC6556B105717A9A /* WirebenchMaraVMC */,
+				03EC499D3F1A614C591B004B /* WirebenchDuinoSim */,
 				FCFD82A5B9BDAD384B9236D7 /* WirebenchEngine */,
 				12E33E0B78DAFD28AFA90B00 /* WirebenchHardware */,
 				9FA7C2D169C0D123FD4C407A /* WirebenchModel */,
@@ -1559,6 +1773,21 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4A750F69C03D6A5581D1A5B7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B50A3F93129105AD0EB87AC /* board-frame.json in Resources */,
+				2F41172ACC4D42C8E7EAA43B /* board-manifest.json in Resources */,
+				D31EB48BB087972B07DD71D1 /* board.usdz in Resources */,
+				9F91F794A2B8F43FA231551F /* shield-frame.json in Resources */,
+				065070E1BA9FDD3E31B3D40E /* shield.usdz in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		09987A4598EBB1719B52B419 /* Copy Swift Objective-C Interface Header */ = {
@@ -1709,6 +1938,7 @@
 				5EDEBED04528EE6663E86CAC /* CardGeometry.swift in Sources */,
 				CF700BF2F1C7A68FB8B42622 /* DuinoCompiler.swift in Sources */,
 				66522A6CB505E1A9D948EF92 /* DuinoMacroExpansion.swift in Sources */,
+				4DA825F7593FF5E009E7C859 /* DuinoSimSession.swift in Sources */,
 				37D3F1C9D381AAEC1577E5A5 /* GridSnap.swift in Sources */,
 				E357BD1B32FA12F976900142 /* HelpData.swift in Sources */,
 				758235DD532EA3CB9E978E5D /* HelpModel.swift in Sources */,
@@ -1725,6 +1955,14 @@
 				5A5B9E7C32E12E80ED91787F /* WireLayout.swift in Sources */,
 				36035D76DA00F4D7F899EA4C /* WireRouteCache.swift in Sources */,
 				CE6CB3623EF005C916EFC117 /* WiringInteraction.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		65E3FEED26FBB7002F091174 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AFCD83AA8C87EDDE624ABBEC /* duino_sim.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1746,6 +1984,7 @@
 			files = (
 				27901125BB5633013E5C5996 /* DbNetFrame.swift in Sources */,
 				28C92805438C3A46CAE2CFF9 /* DbNetSession.swift in Sources */,
+				D1156D7C3F21641918C24CC4 /* DuinoSim.swift in Sources */,
 				82E8A88C8E0F6947A514894E /* MaraDiscovery.swift in Sources */,
 				8199DA4644F8C18D02922BFA /* MaraProtClient.swift in Sources */,
 				331E79D09B9EEAB686D91451 /* MaraProtFrame.swift in Sources */,
@@ -1786,6 +2025,7 @@
 				D69D31CE11802A792D0806EF /* BlockPaletteView.swift in Sources */,
 				810A2712A6A8E0685735C88C /* BuildReportView.swift in Sources */,
 				58ABC81641071EA4B96541C1 /* CanvasView.swift in Sources */,
+				452A2A50F61A67EE7003F20E /* DuinoSimView.swift in Sources */,
 				23466B7B7F8C0349BA8CC25D /* FilePanels.swift in Sources */,
 				5A0E94F0AD3F9043F8980E35 /* GlassSegmentedPicker.swift in Sources */,
 				E2CB9D45DB878B668E5586F4 /* GraphicColor.swift in Sources */,
@@ -1880,6 +2120,7 @@
 				71081E3BAED8B276DA039B4D /* DirigoGraphicBindingTests.swift in Sources */,
 				2200342C2930ED5DEB9DF4AC /* DuinoAppTests.swift in Sources */,
 				2DECDD1018F93667BA22249C /* DuinoCompilerTests.swift in Sources */,
+				A493EFB8ED8DACD0D612F073 /* DuinoSimTests.swift in Sources */,
 				0D3DEFE53FB04657930CE788 /* EditorTortureTests.swift in Sources */,
 				C6713BE4A99A892837AC3948 /* ExecutionModelTests.swift in Sources */,
 				6F877ED05F58AB35635DCE24 /* ExtraPropertyTests.swift in Sources */,
@@ -1954,6 +2195,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FC2E419B9F3031F0A1FB58F2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9132605AACC01BDFDDD3A89C /* mara_vm.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FD6127F31D75B05CC9A71952 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -2000,6 +2249,11 @@
 			target = FCFD82A5B9BDAD384B9236D7 /* WirebenchEngine */;
 			targetProxy = EC48E7DE26D9A3F6F7819112 /* PBXContainerItemProxy */;
 		};
+		0DF8096EAC1FA1121EC0844A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 03EC499D3F1A614C591B004B /* WirebenchDuinoSim */;
+			targetProxy = 1ECDE0990D78AD8B16F1B4F7 /* PBXContainerItemProxy */;
+		};
 		105D07BB1C1EDA018FD43F97 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = DF7B32A28E3F0E0F7B9B41E6 /* WirebenchSource */;
@@ -2014,6 +2268,11 @@
 			isa = PBXTargetDependency;
 			target = FCFD82A5B9BDAD384B9236D7 /* WirebenchEngine */;
 			targetProxy = 5D15F400177AC2C9F562838D /* PBXContainerItemProxy */;
+		};
+		15B91BA3D548623CF8970958 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 88A4C674EC6556B105717A9A /* WirebenchMaraVMC */;
+			targetProxy = 510F6A87717A2FF8F421D3CB /* PBXContainerItemProxy */;
 		};
 		1926D338F8FEA61D3C8FD6C3 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2095,10 +2354,20 @@
 			target = F9E2602AE857C7EAB66730D6 /* WirebenchCore */;
 			targetProxy = 725DB59948F85683620322D6 /* PBXContainerItemProxy */;
 		};
+		9BC8800F7A15BFB294648DBD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 88A4C674EC6556B105717A9A /* WirebenchMaraVMC */;
+			targetProxy = FBB8DB69EAB6A46381F53AA4 /* PBXContainerItemProxy */;
+		};
 		9CAAAC79FAEF23BD9869E5C5 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 833583B47C072E6C28864FCF /* WirebenchSimCxx */;
 			targetProxy = 3BA47858315D3C353389C8A6 /* PBXContainerItemProxy */;
+		};
+		A70D6FFFB2CA34F2DCBB3D56 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 03EC499D3F1A614C591B004B /* WirebenchDuinoSim */;
+			targetProxy = 8567F224A7C668A1601D7B95 /* PBXContainerItemProxy */;
 		};
 		AE760052AB66AF8C490696BC /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2110,10 +2379,20 @@
 			target = DF7B32A28E3F0E0F7B9B41E6 /* WirebenchSource */;
 			targetProxy = BC2CC03E69A892FF94A4AA52 /* PBXContainerItemProxy */;
 		};
+		BEA10A3E1C9BD83A41281699 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 88A4C674EC6556B105717A9A /* WirebenchMaraVMC */;
+			targetProxy = 49A96B0294928C829156D299 /* PBXContainerItemProxy */;
+		};
 		D1CCD0B1F6792B030EF03B21 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = F9E2602AE857C7EAB66730D6 /* WirebenchCore */;
 			targetProxy = A592B7195302AA40443016D9 /* PBXContainerItemProxy */;
+		};
+		D3ED686E18D516C074E9BEB4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 03EC499D3F1A614C591B004B /* WirebenchDuinoSim */;
+			targetProxy = A447D32931430CD580BB7165 /* PBXContainerItemProxy */;
 		};
 		D9ABD92A4FA152F7198AFF6E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2169,6 +2448,11 @@
 			isa = PBXTargetDependency;
 			target = 833583B47C072E6C28864FCF /* WirebenchSimCxx */;
 			targetProxy = D5D8D6DB65E687321E755F86 /* PBXContainerItemProxy */;
+		};
+		FF0E5BC73909B9BBB2B240F8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 88A4C674EC6556B105717A9A /* WirebenchMaraVMC */;
+			targetProxy = 964B974B1D36A22F8827926B /* PBXContainerItemProxy */;
 		};
 		FFA803FD8B1EFF7514F602BD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2321,7 +2605,7 @@
 		};
 		425F11E043331A2F28A2B6AF /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_247008E8-8434-4D37-ABFF-459B95B9BBA0" /* Release.xcconfig */;
+			baseConfigurationReference = "TEMP_A57BA915-020F-4850-A228-A33F3D859A5D" /* Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -2364,7 +2648,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_SWIFT_FLAGS = "-package-name Wirebench $(WIREBENCH_AI_FLAGS)";
@@ -2374,6 +2658,24 @@
 				WIREBENCH_AI_FLAGS = "";
 			};
 			name = Release;
+		};
+		4D3300E60AC22C8B373C9420 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_MODULE_VERIFIER = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu11 gnu++14";
+				PRODUCT_BUNDLE_IDENTIFIER = com.wirebench.WirebenchMaraVMC;
+				PRODUCT_NAME = WirebenchMaraVMC;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
 		};
 		60E4CACD257A122A90FC711E /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -2393,6 +2695,49 @@
 				SKIP_INSTALL = YES;
 			};
 			name = Debug;
+		};
+		6240AF9D7002B681017228D6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_MODULE_VERIFIER = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu11 gnu++14";
+				PRODUCT_BUNDLE_IDENTIFIER = com.wirebench.WirebenchMaraVMC;
+				PRODUCT_NAME = WirebenchMaraVMC;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		7446F3581172E98F9662589E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEFINES_MODULE = YES;
+				ENABLE_MODULE_VERIFIER = YES;
+				GCC_OPTIMIZATION_LEVEL = 2;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Sources/WirebenchDuinoSim/include $(SRCROOT)/Sources/WirebenchMaraVMC/include";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MODULEMAP_FILE = "$(SRCROOT)/Sources/WirebenchDuinoSim/include/module.modulemap";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu11 gnu++14";
+				OTHER_CPLUSPLUSFLAGS = "-pipe";
+				PRODUCT_BUNDLE_IDENTIFIER = com.wirebench.WirebenchDuinoSim;
+				PRODUCT_NAME = WirebenchDuinoSim;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
 		};
 		82027836B73949BA93E20545 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -2573,6 +2918,31 @@
 			};
 			name = Debug;
 		};
+		D9EBF06CA99E12AAF30C426A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEFINES_MODULE = YES;
+				ENABLE_MODULE_VERIFIER = YES;
+				GCC_OPTIMIZATION_LEVEL = 2;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Sources/WirebenchDuinoSim/include $(SRCROOT)/Sources/WirebenchMaraVMC/include";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MODULEMAP_FILE = "$(SRCROOT)/Sources/WirebenchDuinoSim/include/module.modulemap";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu11 gnu++14";
+				OTHER_CPLUSPLUSFLAGS = "-pipe";
+				PRODUCT_BUNDLE_IDENTIFIER = com.wirebench.WirebenchDuinoSim;
+				PRODUCT_NAME = WirebenchDuinoSim;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
 		DC45C8AA2B75F424EE9649E4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2651,7 +3021,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2782,6 +3152,24 @@
 			buildConfigurations = (
 				20340C02A8801C98DA21EF33 /* Debug */,
 				D0258A0B8DE12E10983929A5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8480AD78B444BAC7B426AFA4 /* Build configuration list for PBXNativeTarget "WirebenchDuinoSim" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D9EBF06CA99E12AAF30C426A /* Debug */,
+				7446F3581172E98F9662589E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		888207F97C925EE1441D6023 /* Build configuration list for PBXNativeTarget "WirebenchMaraVMC" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D3300E60AC22C8B373C9420 /* Debug */,
+				6240AF9D7002B681017228D6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

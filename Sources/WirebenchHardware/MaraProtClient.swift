@@ -204,6 +204,39 @@ public final class MaraProtClient: @unchecked Sendable {
         return state
     }
 
+    /// Reads the PLC real-time clock as signed Unix seconds.
+    public func rtcGet() throws -> Int64 {
+        let payload = try transceive(.rtcGet, [], timeout: timeout)
+        guard payload.count >= 8 else { throw ClientError.malformedResponse("RTC_GET returned \(payload.count) bytes") }
+        return Int64(bitPattern: readLE64(payload, 0))
+    }
+
+    /// VM_CONTROL answered with both reply bytes: the run state and the e-stop flag.
+    public func controlVMWithEStopState(_ action: UInt8) throws -> (state: MaraProt.VMRunState, eStopActive: Bool) {
+        let payload = try transceive(.vmControl, [action], timeout: timeout)
+        guard payload.count >= 2 else { throw ClientError.malformedResponse("VM_CONTROL returned \(payload.count) bytes") }
+        return (MaraProt.VMRunState(rawValue: payload[0]) ?? .stopped, payload[1] != 0)
+    }
+
+    /// Sets the PLC real-time clock.
+    public func rtcSet(unixSeconds: Int64) throws {
+        _ = try transceive(.rtcSet, le64(unixSeconds), timeout: timeout)
+    }
+
+    /// Scans a 1-Wire bus on `dioPin` for DS18B20 ROM addresses (up to 8 sensors).
+    public func oneWireScan(dioPin: UInt8 = 13) throws -> [UInt64] {
+        let payload = try transceive(.oneWireScan, [dioPin], timeout: timeout)
+        guard !payload.isEmpty else { throw ClientError.malformedResponse("ONEWIRE_SCAN returned no bytes") }
+        let count = min(Int(payload[0]), 8, (payload.count - 1) / 8)
+        return (0..<count).map { readLE64(payload, 1 + $0 * 8) }
+    }
+
+    /// Asks the device to jump into the STM32F407 ROM USB DFU bootloader. The connection does not survive the reset.
+    public func enterROMDFU() throws {
+        let payload = try transceive(.enterRomDfu, le32(0xDF00B007), timeout: timeout)
+        guard payload.first == 1 else { throw ClientError.malformedResponse("DFU entry was not accepted") }
+    }
+
     /// Replaces the device's watch list with `slotIds`, chunked to the frame limit. Returns the epoch
     /// the next poll must acknowledge.
     @discardableResult
@@ -401,6 +434,11 @@ public final class MaraProtClient: @unchecked Sendable {
          UInt8(truncatingIfNeeded: value >> 16), UInt8(truncatingIfNeeded: value >> 24)]
     }
 
+    private func le64(_ value: Int64) -> [UInt8] {
+        let raw = UInt64(bitPattern: value)
+        return (0..<8).map { UInt8(truncatingIfNeeded: raw >> ($0 * 8)) }
+    }
+
     private func readLE16(_ bytes: [UInt8], _ offset: Int) -> UInt16 {
         guard offset + 1 < bytes.count else { return 0 }
         return UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
@@ -410,5 +448,12 @@ public final class MaraProtClient: @unchecked Sendable {
         guard offset + 3 < bytes.count else { return 0 }
         return UInt32(bytes[offset]) | (UInt32(bytes[offset + 1]) << 8)
             | (UInt32(bytes[offset + 2]) << 16) | (UInt32(bytes[offset + 3]) << 24)
+    }
+
+    private func readLE64(_ bytes: [UInt8], _ offset: Int) -> UInt64 {
+        guard offset + 7 < bytes.count else { return 0 }
+        var value: UInt64 = 0
+        for index in 0..<8 { value |= UInt64(bytes[offset + index]) << (index * 8) }
+        return value
     }
 }

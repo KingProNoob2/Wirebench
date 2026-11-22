@@ -22,6 +22,10 @@ extern "C" {
 #define VM_MAX_LONG_SLOTS        256U
 #define VM_MAX_FLOAT_SLOTS       1024U
 #define VM_MAX_STATE_SLOTS       512U
+#define VM_MAX_MOVAVG_INSTANCES  8U
+#define VM_MOVAVG_MAX_WIN        64U
+#define VM_MAX_ARRAYS            8U
+#define VM_ARRAY_LEN             64U
 #define VM_MAX_LOOP_FUEL         4096U
 #define VM_SLOT_ALWAYS_ENABLED   0xFFFFU
 #define VM_SLOT_TYPE_SHIFT       14U
@@ -93,7 +97,13 @@ typedef enum {
     VM_OP_RANDOM      = 0x2F,
     VM_OP_PID         = 0x30,
     VM_OP_LOWPASS     = 0x31,
+    VM_OP_MOVING_AVG  = 0x32,
     VM_OP_DEBOUNCE    = 0x33,
+    VM_OP_RET_READ    = 0x36,
+    VM_OP_RET_WRITE   = 0x37,
+    VM_OP_ARRAY_READ  = 0x38,
+    VM_OP_ARRAY_WRITE = 0x39,
+    VM_OP_INT_CAPTURE = 0x3A,
     VM_OP_CMP_EQ      = 0x40,
     VM_OP_CMP_NE      = 0x41,
     VM_OP_CMP_GT      = 0x42,
@@ -192,6 +202,12 @@ typedef struct {
     int64_t        longRam[VM_MAX_LONG_SLOTS];
     float          floatRam[VM_MAX_FLOAT_SLOTS];
     VmStateSlot_t  stateRam[VM_MAX_STATE_SLOTS];
+    float          movAvgBuf[VM_MAX_MOVAVG_INSTANCES][VM_MOVAVG_MAX_WIN];
+    float          movAvgSum[VM_MAX_MOVAVG_INSTANCES];
+    uint8_t        movAvgHead[VM_MAX_MOVAVG_INSTANCES];
+    uint8_t        movAvgCount[VM_MAX_MOVAVG_INSTANCES];
+    float          arrayRam[VM_MAX_ARRAYS][VM_ARRAY_LEN];
+    uint32_t       rngState;
 } VmInstance_t;
 
 // Initialize a caller-allocated VmInstance_t and attach the HAL driver vtable.

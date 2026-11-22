@@ -1,3 +1,4 @@
+import AppKit
 import WirebenchModel
 import SwiftUI
 import UniformTypeIdentifiers
@@ -23,23 +24,6 @@ extension UTType {
 
     /// Dirigo's variables file, the dBase III table it writes beside a project.
     static var dbaseTable: UTType { UTType(filenameExtension: "dbf") ?? .data }
-}
-
-/// A minimal `FileDocument` so SwiftUI can present the normal save panel.
-///
-/// It is deliberately **not** the source of the bytes: the document is written by the model against the
-/// destination the panel returns, so every save goes through one code path.
-struct WirebenchSaveDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.wirebenchProject] }
-    static var writableContentTypes: [UTType] { [.wirebenchProject] }
-
-    init() {}
-
-    init(configuration: ReadConfiguration) throws {}
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: Data())
-    }
 }
 
 /// The save panel for a Maraflow export.
@@ -206,3 +190,50 @@ extension View {
     }
 }
 
+
+/// The Save panel. SwiftUI's `fileExporter` is an *export* panel — it says "Export As:" and offers
+/// an Export button, which is wrong for Save — so the save-as flow presents a real `NSSavePanel`
+/// ("Save As:", Save) instead. Like the exporter documents above, the panel is not the source of
+/// the bytes: the destination URL goes to the model, which writes the project itself.
+struct SavePanelPresenter: NSViewRepresentable {
+    @Bindable var model: AppModel
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.presentIfNeeded(attachedTo: view)
+    }
+
+    @MainActor
+    final class Coordinator {
+        let model: AppModel
+        private var presenting = false
+
+        init(model: AppModel) { self.model = model }
+
+        func presentIfNeeded(attachedTo view: NSView) {
+            guard model.pendingFilePanel == .saveAs, !presenting else { return }
+            presenting = true
+            // Present off the view-update pass: beginning a sheet synchronously inside
+            // updateNSView leaves the panel on screen but unable to take clicks.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.wirebenchProject]
+                panel.canCreateDirectories = true
+                panel.showsTagField = false
+                panel.nameFieldStringValue = self.model.saveAsDefaultName
+                // A sheet (`beginSheet`) presented from a SwiftUI scene accepts no clicks in
+                // practice; the modal session of `runModal` is the path that actually works.
+                NSApp.activate(ignoringOtherApps: true)
+                let response = panel.runModal()
+                self.presenting = false
+                if response == .OK, let url = panel.url {
+                    self.model.didChooseSaveURL(url)
+                } else {
+                    self.model.savePanelWasCancelled()
+                }
+            }
+        }
+    }
+}

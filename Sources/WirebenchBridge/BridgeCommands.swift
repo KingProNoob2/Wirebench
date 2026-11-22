@@ -19,6 +19,9 @@ import WirebenchModel
 /// - `setSetting {key: appearance|snapToGrid|scrollZooms|optimize|pinPitch|cardWidth|macroCallerSpace, value}`
 /// - `build` → `{report}`, `export {kind: pbd|csv|dbf|pcc, path}`
 /// - `refreshPorts`, `selectPort {path}`, `upload` (opens the port itself, and closes it after)
+/// - the Duino-S hardware link: `setHardwareFamily {family: dirigo|duinoS}`, `duinoSetTransport {transport: usbCDC|ethernet}`,
+///   `duinoSetHost {value}`, `duinoSetPort {value}`, `duinoDiscover`, `duinoSelectDevice {endpoint}`,
+///   `duinoBuild` → `{report}`, `duinoUpload`, `duinoWatchStart`, `duinoWatchStop`. The state is `hardware.duino` in the scene.
 /// - `plcConfig` → `{plc: {commands, catalogue}}`, `plcAdd {tag?}`, `plcSetCommand {index, tag}`, `plcSetPar {index, which, value}`, `plcRemove {index}`: the PLC configuration; each returns the new `plc`
 /// - `selectMany {ids, graphics}` (blocks and shapes at once), `selectGraphic {indices}`, `dragGraphic`/`moveGraphic {indices, dx, dy}`, `resizeShape {index, w, h}`,
 ///   `addShape {kind: rectangle|ellipse, x?, y?}`, `addText {text?, x?, y?}`, `editText {index, text}`, `deleteGraphic {indices}`
@@ -74,7 +77,11 @@ enum BridgeCommands {
                 else { model.saveProject() }
                 return ["ok": true]
             } catch { return ["ok": false, "error": error.localizedDescription] }
-        case "new": model.createNewProject()           // asks first (the scene's `question`) when there is something to lose
+        case "new":
+            // Asks first (the scene's `question`) when there is something to lose; the platform
+            // defaults to Maraflow, the legacy Wirebench mode is opt-in.
+            let platform = ProjectPlatform(rawValue: arguments["platform"] as? String ?? "") ?? .maraflow
+            model.createNewProject(platform: platform)
         case "requestOpen": model.openProjectFile()    // likewise; then the scene's `panel` is `open`
         case "openFile":
             guard let path = arguments["path"] as? String else { return ["ok": false] }
@@ -325,6 +332,43 @@ enum BridgeCommands {
         case "refreshPorts": model.refreshPorts()
         case "selectPort": model.selectedPortPath = arguments["path"] as? String ?? ""
         case "upload": model.uploadCompiledProgram()
+        // The Duino-S path: the Qt Hardware tab's family picker, link fields, discovery, build,
+        // upload and live watch. `hardware.family` in the scene picks which UI the tab shows.
+        case "setHardwareFamily":
+            guard let family = HardwareFamily(rawValue: arguments["family"] as? String ?? "") else { return ["ok": false] }
+            model.hardwareFamily = family
+        case "duinoSetTransport":
+            guard let transport = DuinoTransport(rawValue: arguments["transport"] as? String ?? "") else { return ["ok": false] }
+            model.duinoTransport = transport
+        case "duinoSetHost": model.duinoHost = arguments["value"] as? String ?? model.duinoHost
+        case "duinoSetPort":
+            if let port = int(arguments, "value") { model.duinoTCPPort = min(65_535, max(1, port)) }
+        case "duinoDiscover":
+            guard model.hardwareFamily == .duinoS else { return ["ok": false, "error": "Duino-S is not the selected family"] }
+            Task { await model.discoverDuinoDevices() }
+        case "duinoSelectDevice":
+            guard let endpoint = arguments["endpoint"] as? String,
+                  let device = model.duinoDiscoveredDevices.first(where: { $0.endpoint == endpoint }) else { return ["ok": false] }
+            model.selectDuinoDevice(device)
+        case "duinoBuild":
+            guard let project = model.project, !project.modules.isEmpty else {
+                return ["ok": false, "error": "There is no project to compile for the Duino-S."]
+            }
+            do {
+                let compiled = try DuinoCompiler.compile(project: project)
+                session.duinoCompiled = compiled
+                return ["ok": true, "report": [
+                    "imageBytes": compiled.image.count, "slots": compiled.slots.count,
+                    "notes": compiled.notes] as [String: Any]]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        case "duinoUpload":
+            guard model.hardwareFamily == .duinoS else { return ["ok": false, "error": "Duino-S is not the selected family"] }
+            let compiled = session.duinoCompiled
+            Task { await model.uploadDuinoProgram(compiled: compiled) }
+        case "duinoWatchStart": model.startDuinoWatch()
+        case "duinoWatchStop": model.stopDuinoWatch()
         case "plcConfig":
             return ["ok": true, "plc": plcState(model)]
         case "plcAdd":
@@ -419,14 +463,12 @@ enum BridgeCommands {
 #endif
         case "palette":
             let query = arguments["query"] as? String ?? ""
-            // The SwiftUI picker's scope and order: every catalogue type but the bare macro ones, best match first, ties going to
-            // the block likelier to be added next (what was added before, the selected block, what is on the page), and with no
-            // query the likeliest first.
-            let scope = BlockTypeCatalog.all.filter(BlockPaletteSearch.isOffered)
+            // The Qt palette lists only the open project's platform: the modes are separate.
+            let scope = BlockTypeCatalog.all.filter { BlockPaletteSearch.isOffered($0, in: model.projectPlatform) }
             let chances = model.blockUsage.probabilities(for: scope, in: model.blockSuggestionContext)
             let ranked = BlockPaletteSearch.ranked(scope, for: query, chances: chances, byChanceWithoutQuery: true)
             return ["ok": true, "blocks": ranked.map { info in
-                ["guid": info.guid.uuidString, "name": info.blockName,
+                ["guid": info.guid.uuidString, "name": BlockPaletteSearch.displayBlockName(for: info),
                  "category": BlockPaletteSearch.displayName(for: info.category), "summary": info.summary]
             }]
         default:

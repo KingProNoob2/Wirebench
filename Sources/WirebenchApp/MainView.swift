@@ -172,14 +172,9 @@ public struct MainView: View {
                       allowedContentTypes: [.wirebenchProject, .pccProject, .maraflowProject, .xml],
                       allowsMultipleSelection: false,
                       onCompletion: chosenFile("Could not open that file") { model.openProject(at: $0) })
-        .fileExporter(isPresented: panelBinding(.saveAs),
-                      document: WirebenchSaveDocument(),
-                      contentType: .wirebenchProject,
-                      defaultFilename: model.saveAsDefaultName,
-                      onCompletion: savedFile("Could not save the project", kind: .critical,
-                                              onNoDestination: { model.savePanelWasCancelled() }) {
-                          model.didChooseSaveURL($0)
-                      })
+        // Save uses a real NSSavePanel (SavePanelPresenter), not fileExporter: an exporter panel
+        // says "Export As:", and a Save deserves "Save As:" with a Save button.
+        .background(SavePanelPresenter(model: model))
         .fileExporter(isPresented: panelBinding(.export),
                       document: LegacySaveDocument(project: model.project),
                       contentType: .pccProject,
@@ -597,7 +592,8 @@ public struct MainView: View {
                     onInsertMacro: { model.addMacroCall(sheet: $0) },
                     onInsertInterface: { model.addMacroInterface($0) },
                     usage: model.blockUsage,
-                    context: model.blockSuggestionContext
+                    context: model.blockSuggestionContext,
+                    platform: model.projectPlatform
                 )
             }
 

@@ -18,6 +18,7 @@ struct HardwareLinkSection<Report: View>: View {
     @ViewBuilder let report: () -> Report
     /// Remembered, so the log is where it was left.
     @AppStorage("hardware.showLog") private var showingLog = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -38,7 +39,7 @@ struct HardwareLinkSection<Report: View>: View {
                                      options: DuinoTransport.allCases,
                                      title: { $0.title },
                                      accessibilityLabel: "Duino-S transport")
-                    .help("USB CDC virtual COM port, or the Duino-S Ethernet TCP server on port 5020")
+                    .help("USB CDC, Ethernet TCP, or the in-process Duino-S emulator")
             }
             statusRow
             if (model.hardwareFamily != .duinoS || model.duinoTransport == .usbCDC),
@@ -48,7 +49,10 @@ struct HardwareLinkSection<Report: View>: View {
             if model.hardwareFamily == .duinoS, model.duinoTransport == .ethernet {
                 ethernetFields
             }
-            if model.hardwareFamily == .duinoS {
+            if model.hardwareFamily == .duinoS, model.duinoTransport == .emulator {
+                emulatorFields
+            }
+            if model.hardwareFamily == .duinoS, model.duinoTransport != .emulator {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Spacer(minLength: 4)
@@ -90,17 +94,19 @@ struct HardwareLinkSection<Report: View>: View {
         // an adapter plugged in after launch.
         .onAppear {
             model.refreshPorts()
-            if model.hardwareFamily == .duinoS, model.duinoDiscoveredDevices.isEmpty {
+            if model.hardwareFamily == .duinoS, model.duinoTransport != .emulator,
+               model.duinoDiscoveredDevices.isEmpty {
                 Task { await model.discoverDuinoDevices() }
             }
         }
         .onChange(of: model.hardwareFamily) { _, family in
-            if family == .duinoS, model.duinoDiscoveredDevices.isEmpty {
+            if family == .duinoS, model.duinoTransport != .emulator,
+               model.duinoDiscoveredDevices.isEmpty {
                 Task { await model.discoverDuinoDevices() }
             }
         }
-        .onChange(of: model.duinoTransport) { _, _ in
-            if model.hardwareFamily == .duinoS {
+        .onChange(of: model.duinoTransport) { _, transport in
+            if model.hardwareFamily == .duinoS, transport != .emulator {
                 Task { await model.discoverDuinoDevices() }
             }
         }
@@ -112,6 +118,11 @@ struct HardwareLinkSection<Report: View>: View {
         // The link is opened by an upload and closed after it, so "connected" is only what an upload in progress looks like.
         if model.isHardwareConnected { return "Connected" }
         if model.hardwareFamily == .duinoS {
+            if model.duinoTransport == .emulator {
+                guard let session = model.duinoSimSession else { return "Emulator stopped" }
+                if !session.isPowered { return "Emulator · DC disconnected" }
+                return "Emulator · 127.0.0.1:\(session.port) · \(String(describing: session.vmState))"
+            }
             if model.duinoTransport == .ethernet {
                 let host = model.duinoHost.trimmingCharacters(in: .whitespaces)
                 return host.isEmpty ? "No Ethernet host" : "TCP \(host):\(model.duinoTCPPort)"
@@ -122,15 +133,29 @@ struct HardwareLinkSection<Report: View>: View {
         return model.availablePorts.isEmpty ? "No serial port" : "Ready to upload"
     }
 
+    private var statusColor: Color {
+        if model.hardwareFamily == .duinoS, model.duinoTransport == .emulator {
+            return model.duinoSimSession?.isPowered == true ? Theme.signalHigh : Color.secondary.opacity(0.4)
+        }
+        return model.isHardwareConnected ? Theme.signalHigh : Color.secondary.opacity(0.4)
+    }
+
+    private var statusIsActive: Bool {
+        if model.hardwareFamily == .duinoS, model.duinoTransport == .emulator {
+            return model.duinoSimSession?.isPowered == true
+        }
+        return model.isHardwareConnected
+    }
+
     /// Whether there is a port to upload to, and a rescan.
     private var statusRow: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(model.isHardwareConnected ? Theme.signalHigh : Color.secondary.opacity(0.4))
+                .fill(statusColor)
                 .frame(width: 6, height: 6)
             Text(statusText)
                 .font(.callout)
-                .foregroundStyle(model.isHardwareConnected ? .primary : .secondary)
+                .foregroundStyle(statusIsActive ? .primary : .secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 4)
@@ -181,6 +206,33 @@ struct HardwareLinkSection<Report: View>: View {
         }
     }
 
+    private var emulatorFields: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                if model.startDuinoSimulator() != nil {
+                    openWindow(id: "duinosim")
+                }
+            } label: {
+                Label(model.duinoSimSession == nil ? "Start Emulator" : "Open Emulator",
+                      systemImage: model.duinoSimSession == nil ? "play.circle.fill" : "cube.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .glassButtonStyle(prominent: model.duinoSimSession == nil)
+            .controlSize(.regular)
+            if let session = model.duinoSimSession {
+                Text(session.isPowered ? "Local VM and 3D hardware are ready." : "Open the emulator to reconnect DC power.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !model.duinoSimError.isEmpty {
+                Text(model.duinoSimError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var portPicker: some View {
         Picker("Serial Port", selection: $model.selectedPortPath) {
             ForEach(model.availablePorts) { port in
@@ -218,17 +270,21 @@ struct HardwareLinkSection<Report: View>: View {
 
             if model.hardwareFamily == .duinoS {
                 if model.isWatchingDuino {
-                    Button("Stop Watch") { model.stopDuinoWatch() }
-                        .glassButtonStyle()
-                        .controlSize(.regular)
-                        .frame(maxWidth: .infinity)
+                    Button { model.stopDuinoWatch() } label: {
+                        // The frame is on the label, like Build Project above: a frame around the
+                        // button only pads it, a wide label stretches the bezel to full width.
+                        Text("Stop Watch").frame(maxWidth: .infinity)
+                    }
+                    .glassButtonStyle()
+                    .controlSize(.regular)
                 } else {
-                    Button("Watch") { model.startDuinoWatch() }
-                        .glassButtonStyle()
-                        .controlSize(.regular)
-                        .frame(maxWidth: .infinity)
-                        .disabled(model.project == nil || !model.isDuinoLinkConfigured || model.isUploading)
-                        .help("Poll the Duino-S VM and show the selected slots live")
+                    Button { model.startDuinoWatch() } label: {
+                        Text("Watch").frame(maxWidth: .infinity)
+                    }
+                    .glassButtonStyle()
+                    .controlSize(.regular)
+                    .disabled(model.project == nil || !model.isDuinoLinkConfigured || model.isUploading)
+                    .help("Poll the Duino-S VM and show the selected slots live")
                 }
             }
         }

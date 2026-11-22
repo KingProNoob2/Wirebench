@@ -76,6 +76,65 @@ struct MaraProtTests {
         #expect(ping.uptimeMilliseconds == 99)
     }
 
+    @Test("An mDNS query asks for each known hostname with the unicast-response bit")
+    func mdnsQueryCodec() {
+        let query = MaraDiscovery.mdnsQuery(hostnames: ["duinos", "lwip"])
+        #expect(query.count == 46)
+        #expect(query[4] == 0 && query[5] == 2) // two questions
+        #expect(Array(query[12...18]) == [6] + Array("duinos".utf8))
+        #expect(Array(query[19...24]) == [5] + Array("local".utf8))
+        #expect(Array(query[26...29]) == [0x00, 0x01, 0x80, 0x01]) // A record, IN class + QU
+        #expect(Array(query[30...34]) == [4] + Array("lwip".utf8))
+        #expect(Array(query[35...40]) == [5] + Array("local".utf8))
+        #expect(Array(query[42...45]) == [0x00, 0x01, 0x80, 0x01])
+        // The default query covers the current firmware hostname and the earlier name.
+        let defaults = MaraDiscovery.mdnsQuery()
+        #expect(defaults[5] == 3) // three questions: duinos, f407plc, lwip
+        #expect(Array(defaults[12...18]) == [6] + Array("duinos".utf8))
+        #expect(Array(defaults[30...37]) == [7] + Array("f407plc".utf8))
+    }
+
+    @Test("An mDNS response yields the A records from its answer and additional sections")
+    func mdnsResponseParsing() {
+        // One question "duino-s.local", one answer with a compressed name, one additional record.
+        var response = MaraDiscovery.mdnsQuery(hostnames: ["duino-s"])
+        response[2] = 0x84; response[3] = 0x00 // authoritative answer
+        response[6] = 0x00; response[7] = 0x01 // one answer
+        response[8] = 0x00; response[9] = 0x01 // one additional record
+        response += [0xC0, 0x0C,             // name: pointer to the question
+                     0x00, 0x01, 0x00, 0x01, // type A, class IN
+                     0x00, 0x00, 0x00, 0x78, // TTL
+                     0x00, 0x04, 192, 168, 1, 50,
+                     0xC0, 0x0C,
+                     0x00, 0x01, 0x00, 0x01,
+                     0x00, 0x00, 0x00, 0x78,
+                     0x00, 0x04, 10, 0, 0, 7]
+        #expect(MaraDiscovery.mdnsAddresses(in: response) == ["192.168.1.50", "10.0.0.7"])
+        #expect(MaraDiscovery.mdnsAddresses(in: [0, 1, 2]) == [])
+    }
+
+    @Test("mDNS discovery validates an answering board through GET_INFO")
+    func mdnsDiscovery() throws {
+        let responder = try FakeMdnsResponder()
+        defer { responder.stop() }
+        let server = try FakeTCPServer()
+        defer { server.stop() }
+        let devices = MaraDiscovery.discoverViaMdns(port: server.port, probeTimeout: 0.5, mdnsTimeout: 1,
+                                                    destination: ("127.0.0.1", responder.port))
+        #expect(devices.count == 1)
+        #expect(devices.first?.endpoint == "127.0.0.1")
+        #expect(devices.first?.info.modelId == 0x0407)
+        #expect(responder.answered)
+    }
+
+    @Test("mDNS discovery with no answers finds nothing without falling back to a scan")
+    func mdnsDiscoverySilent() {
+        // Nothing listens on this port, so no board answers and the mDNS stage returns empty.
+        let devices = MaraDiscovery.discoverViaMdns(port: 5020, probeTimeout: 0.2, mdnsTimeout: 0.3,
+                                                    destination: ("127.0.0.1", 54399))
+        #expect(devices.isEmpty)
+    }
+
     @Test("A loopback scan finds a Duino-S by its GET_INFO identity")
     func discoveryProbe() throws {
         let server = try FakeTCPServer()
@@ -94,6 +153,21 @@ struct MaraProtTests {
         let server = try FakeTCPServer(modelID: 0x1234, modelName: "Other")
         defer { server.stop() }
         #expect(MaraDiscovery.probe(host: "127.0.0.1", port: server.port) == nil)
+    }
+
+    @Test("The client reads and sets the RTC, scans 1-Wire and enters ROM DFU")
+    func rtcOneWireDfu() throws {
+        let device = FakeDuino()
+        let client = MaraProtClient(transport: device)
+        try client.connect()
+        #expect(try client.rtcGet() == 1_735_689_000)
+        try client.rtcSet(unixSeconds: 1_700_000_000)
+        #expect(device.rtcSetSeconds == 1_700_000_000)
+        let roms = try client.oneWireScan(dioPin: 7)
+        #expect(device.oneWirePin == 7)
+        #expect(roms == [0x2801_2345_6789_ABCD, 0x28FF_AABB_CCDD_EEFF])
+        try client.enterROMDFU()
+        #expect(device.dfuMagic == 0xDF00B007)
     }
 
     @Test("The client performs PING, GET_INFO and a chunked image upload")
@@ -256,6 +330,9 @@ private final class FakeSerialDuino: @unchecked Sendable {
 private final class FakeDuino: MaraProtTransport {
     var receivedChunks = 0
     var started = false
+    var rtcSetSeconds: Int64?
+    var oneWirePin: UInt8?
+    var dfuMagic: UInt32?
     private var watchSlots: [UInt16] = []
     private var watchEpoch: UInt16 = 0
     private var changed: Set<UInt16> = []
@@ -366,6 +443,26 @@ private final class FakeDuino: MaraProtTransport {
                 position += size
             }
             payload = [UInt8(truncatingIfNeeded: count), UInt8(truncatingIfNeeded: count >> 8)]
+        case .rtcGet:
+            let seconds = UInt64(bitPattern: 1_735_689_000)
+            payload = (0..<8).map { UInt8(truncatingIfNeeded: seconds >> ($0 * 8)) }
+        case .rtcSet:
+            var value: UInt64 = 0
+            for index in 0..<8 { value |= UInt64(request.payload[index]) << (index * 8) }
+            rtcSetSeconds = Int64(bitPattern: value)
+            payload = []
+        case .oneWireScan:
+            oneWirePin = request.payload.first ?? 13
+            var roms: [UInt8] = [2]
+            for rom in [UInt64(0x2801_2345_6789_ABCD), UInt64(0x28FF_AABB_CCDD_EEFF)] {
+                roms += (0..<8).map { UInt8(truncatingIfNeeded: rom >> ($0 * 8)) }
+            }
+            payload = roms
+        case .enterRomDfu:
+            let magic = UInt32(request.payload[0]) | (UInt32(request.payload[1]) << 8)
+                | (UInt32(request.payload[2]) << 16) | (UInt32(request.payload[3]) << 24)
+            dfuMagic = magic
+            payload = [magic == 0xDF00B007 ? 1 : 0]
         default:
             status = MaraProt.Status.opcode.rawValue
             payload = []
@@ -375,5 +472,68 @@ private final class FakeDuino: MaraProtTransport {
                                   opcode: request.opcode, payload: payload,
                                   isResponse: true, isError: status != 0, status: status)
         return try reply.encoded()
+    }
+}
+
+/// A stand-in lwIP mDNS responder: answers any query with an A record for 127.0.0.1, sent
+/// unicast to the querier the way the QU bit asks.
+private final class FakeMdnsResponder: @unchecked Sendable {
+    let port: UInt16
+    private let fd: Int32
+    private var running = true
+    private(set) var answered = false
+
+    init() throws {
+        let socketFD = socket(AF_INET, SOCK_DGRAM, 0)
+        guard socketFD >= 0 else { throw POSIXError(.EIO) }
+        fd = socketFD
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(0).bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else { throw POSIXError(.EIO) }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        var actual = sockaddr_in()
+        let named = withUnsafeMutablePointer(to: &actual) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socketFD, $0, &length) }
+        }
+        guard named == 0 else { throw POSIXError(.EIO) }
+        port = UInt16(bigEndian: actual.sin_port)
+        Thread.detachNewThread { [self] in serve() }
+    }
+
+    func stop() { running = false; _ = close(fd) }
+
+    private func serve() {
+        var buffer = [UInt8](repeating: 0, count: 1500)
+        var source = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let received = withUnsafeMutablePointer(to: &source) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                recvfrom(fd, &buffer, buffer.count, 0, $0, &length)
+            }
+        }
+        guard received >= 12 else { return }
+        answered = true
+        // Keep the question section, mark the packet an authoritative answer with one A record.
+        var response = Array(buffer.prefix(received))
+        response[2] = 0x84; response[3] = 0x00
+        response[6] = 0x00; response[7] = 0x01
+        response += [0xC0, 0x0C,             // name: pointer to the question
+                     0x00, 0x01, 0x00, 0x01, // type A, class IN
+                     0x00, 0x00, 0x00, 0x78, // TTL
+                     0x00, 0x04, 127, 0, 0, 1]
+        _ = withUnsafePointer(to: &source) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { address in
+                response.withUnsafeBytes { bytes in
+                    sendto(fd, bytes.baseAddress, response.count, 0, address, length)
+                }
+            }
+        }
     }
 }

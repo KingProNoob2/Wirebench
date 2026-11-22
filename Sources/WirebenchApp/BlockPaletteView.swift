@@ -21,6 +21,9 @@ struct BlockPaletteView: View {
     /// lists the likeliest first, and Return adds the first one.
     var usage = BlockUsageModel()
     var context = BlockUsageModel.Context()
+    /// Which project's palette this is: the modes are separate, so a Maraflow project offers
+    /// Maraflow's blocks and a Wirebench project the legacy catalogue — never both.
+    var platform: ProjectPlatform = .wirebench
 
     @State private var query = ""
     @State private var selectedCategory: String?
@@ -62,7 +65,8 @@ struct BlockPaletteView: View {
 
     private var matches: [BlockTypeInfo] {
         let scope = BlockTypeCatalog.all.filter { info in
-            BlockPaletteSearch.isOffered(info) && (selectedCategory == nil || info.category == selectedCategory)
+            BlockPaletteSearch.isOffered(info, in: platform)
+                && (selectedCategory == nil || info.category == selectedCategory)
         }
         // Only *All Blocks* is ordered by what is likely: a category is for browsing, and stays alphabetical.
         return Self.ranked(scope, for: query, chances: usage.probabilities(for: scope, in: context),

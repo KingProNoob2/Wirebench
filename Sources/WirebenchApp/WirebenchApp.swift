@@ -37,6 +37,12 @@ struct WirebenchApp: App {
         }
         .defaultSize(width: 380, height: 540)
 #endif
+        // The Duino-S simulator: the KiCad board in 3D, driven by the on-device simulator.
+        Window("Duino-S Simulator", id: "duinosim") {
+            DuinoSimWindowView(model: model)
+                .wirebenchAppearance(model)
+        }
+        .defaultSize(width: 960, height: 640)
         // The Structured Text editor: its own window, since it is a source buffer beside the sheet rather than a pane of it.
         Window("Structured Text", id: "swift") {
             SwiftIDEView(model: model)
@@ -192,8 +198,11 @@ struct WirebenchApp: App {
         // File stays about the document: New/Open/Save and the things that add to or tidy the sheet
         // are here too, matching the order the editor grew up with.
         CommandGroup(replacing: .newItem) {
-            Button("New Project") { model.createNewProject() }
+            Button("New Maraflow Project") { model.createNewProject(platform: .maraflow) }
                 .keyboardShortcut("n", modifiers: .command)
+
+            Button("New Wirebench Project (legacy)") { model.createNewProject(platform: .wirebench) }
+                .keyboardShortcut("n", modifiers: [.command, .option])
 
             Button("Open Project\u{2026}") { model.openProjectFile() }
                 .keyboardShortcut("o", modifiers: .command)

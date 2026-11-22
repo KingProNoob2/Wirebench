@@ -66,7 +66,7 @@ Sources used:
 
 - `https://github.com/supopur/Duino-S_FW/blob/master/MARAPROT.md`
 - `https://github.com/supopur/Duino-S_FW` (`Core/Inc/mara_vm.h`, `Core/Src/mara_vm.c`,
-  `Core/Inc/plc_hal.h`, `Core/Src/plc_hal.c`)
+  `Core/Inc/mara_prot.h`, `Core/Src/mara_prot.c`, `Core/Inc/plc_hal.h`, `Core/Src/plc_hal.c`)
 - `https://github.com/supopur/maraflow` (`MflwEmitter.java`, `MaraProtClient.java`,
   `NativeMaraVm.java`)
 
@@ -113,28 +113,37 @@ Every thread ends with `HALT` (`0x00`). Instructions are 8-byte words
 
 ## Compiler coverage
 
-Implemented from Maraflow's emitter and the firmware VM:
+Implemented from Maraflow's emitter and the firmware VM (synced to upstream maraflow `c11f917` /
+Duino-S_FW `a21f518`, 2026-11-20):
 
 - BOOL: And/Nand/Or/Nor/Xor/Xnor, Not, RS/SR
-- Math: Add/Sub/Mul/Min/Max, Div/Mod, Abs/Neg/Sqrt/Sin/Cos, Clamp
-- Comparators: EQ/NE/GT/GE/LT/LE
-- Switches: Sel
-- Timers: Timer (TON), SinglePulse (one-shot)
+- Math: Add/Sub/Mul/Min/Max, Div/Mod (int/long/float, divide-by-zero writes 0 and raises the error
+  pin), Abs/Neg/Sqrt/Sin/Cos, Clamp (the VM normalises swapped bounds), Scale, Random, PID
+- Comparators: EQ/NE/GT/GE/LT/LE, InRange (swapped bounds normalised), Hysteresis
+- Switches: Sel, Mux, Demux
+- Filters: LowPass, MovingAvg (window 1...64, at most 8 instances per image), Debounce
+- Timers: Timer (TON/TOF/TP via the `TimerMode` property), PulseGen, PulseLen, SinglePulse
+  (one-shot), Counter (CTUD, edge-counted), DateTime (RTC timestamp)
+- Arrays: ArrayRead/ArrayWrite (8 arrays × 64 float elements, out-of-bounds flagged)
+- Execution: ReadReg/WriteReg (shared named register slots, optional rising trigger, optional
+  retentive EEPROM backing via RET_READ/RET_WRITE), Interrupt (INT_CAPTURE)
+- Safety: EStop (ESTOP_CHECK: Safe/Trip/Source outputs, manual reset input)
 - Conversion: PackBits/UnpackBits
 - I/O: IREF/OREF, PWM
 - Visual variables/Value: initial values and slot names
 - FBD macro sheets (inline expansion, nested)
 - Native Sybas/Dirigo blocks that have both a `MaraflowExporter.bridge` entry and an emitter case:
-  And/Or/Xor/Not/RS, IAdd/ISub/IMul, IAbs/INeg, FSqrt/FSin/FCos, FAdd/FSub/FMul, ISwitch,
-  and the visual variable types.
+  And/Or/Xor/Not/RS, IAdd/ISub/IMul, IAbs/INeg, FSqrt/FSin/FCos, FAdd/FSub/FMul, ISwitch, PulseGen,
+  SinglePulse, and the visual variable types.
 
 Explicitly rejected with a compile error:
 
-- ST and LD pages (FBD only in this pass)
+- ST and LD pages (FBD only in this pass; Maraflow's ST and LD compilation is not ported)
 - Blocks with no `MaraflowDefinition` and no bridge mapping
-- Native blocks whose bridge exists but whose emitter case is not written yet, including Div,
-  8xDI/8xDO, PulseGen and the other larger blocks
-- VM opcodes not implemented by the portable firmware VM (for example PulseGen)
+- Blocks whose VM opcode does not exist or is not emitted yet, including `IO.8xDI`/`IO.8xDO`
+  (no emitter upstream either), `Math.Pow` (no VM opcode), and the Modbus/REST/SPI transfers
+  (no VM behavior upstream either). The shield blocks `Comm.I2C.TMP75`, `Comm.DS18B20.DS18B20Read`
+  and `IO.CH455G` are emitted (`COMM_EXEC`) since the simulator renders the shield.
 
 A wire from a display/unsupported block is treated as constant 0 and reported in `notes`; it does
 not abort the image.
@@ -206,10 +215,16 @@ a model other than 0x0407, uploads with auto-start and prints progress.
 - USB station ID `0` (P2P) is the default; RS-485 needs `1..247` and a real transport.
 - Ethernet: connect to the device's IP at TCP port 5020. The firmware is point-to-point on TCP, so
   station `0` is used there too.
-- Discovery: the firmware starts lwIP with DHCP, but `lwipopts.h` leaves `LWIP_MDNS_RESPONDER` and
-  `LWIP_NETBIOS_RESPONDER` at their default 0, and `LWIP_NETIF_HOSTNAME` is 0, so there is no mDNS,
-  NetBIOS or hostname to query. Discovery scans the local IPv4 subnets on TCP 5020 and validates
-  GET_INFO (`modelId 0x0407`, name `Duino - S`). USB discovery probes each CDC port the same way.
+- Discovery: the firmware (upstream `b6828d4`/`1c36826`, 2026-11-20) vendors lwIP's mdns and
+  netbiosns apps, enables IGMP on the ETH MAC, and answers mDNS A-record queries for
+  `duinos.local` (registered in `init_mdns_netbios_cb`; the first responder build used `f407plc`),
+  advertised as the `duinos._maraprot._tcp` service on port 5020, and NetBIOS name queries for
+  `DUINOS` (`LWIP_NETBIOS_RESPOND_NAME_QUERY` is 1, in `USER CODE 1` of `lwipopts.h`). Wirebench
+  sends one multicast query for A records on `duinos`, `f407plc` and `lwip` — each question carries
+  the unicast-response (QU) bit, so replies come back directly, no port-5353 bind needed — and
+  validates every answer with GET_INFO as before. Only when no mDNS answer validates does the
+  subnet scan run, so older firmware still works. A NetBIOS client is not implemented: mDNS covers
+  discovery, and one protocol is enough to maintain.
 - Frame: `4D 50 10 ST SEQlo SEQhi OP STATUS LENlo LENhi payload CRC16lo CRC16hi`; CRC-16-CCITT
   poly `0x1021`, init `0xFFFF`, over header+payload.
 - Upload: `VM_UPLOAD_BEGIN` (total size + full-image CRC32) → repeated `VM_UPLOAD_CHUNK`
@@ -229,12 +244,16 @@ and does not yet validate them against the board map.
 - `DuinoCompilerTests` build MFLW images and **load/step them in the actual portable `mara_vm.c`**:
   - Bool And
   - wired Int comparator
-  - Timer/TON elapsed time
+  - Timer (TON elapsed time, TOF off-delay via `TimerMode`)
+  - Counter up/down/reset, PulseGen alternating output
+  - Scale, InRange (swapped bounds), Hysteresis latching
+  - ArrayWrite → ArrayRead round-trip with out-of-bounds flag
+  - WriteReg → ReadReg, Mux/Demux, EStop safe state
   - nested FBD macro project
   - image header/model/CRC checks
 - `MaraProtTests` cover CRC vectors, frame round-trip/corruption, client ping/info/status, chunked
-  upload, watch subscribe/poll, slot read/write, a real pseudo-terminal serial exchange, and a real
-  loopback TCP exchange.
+  upload, watch subscribe/poll, slot read/write, RTC get/set, 1-Wire scan, ROM DFU entry, a real
+  pseudo-terminal serial exchange, and a real loopback TCP exchange.
 
 Run:
 
@@ -248,10 +267,216 @@ swift test --disable-sandbox --filter 'DuinoCompilerTests|MaraProtTests'
 2. RS-485 transport; USB CDC and Ethernet TCP 5020 are implemented.
 3. ST/LD pages (Maraflow's `StBytecodeCompiler`/ladder) are not ported.
 4. Broad native Dirigo block coverage; many `TM*` blocks still have no Duino-S mapping.
-5. `IO.8xDI`/`IO.8xDO` and PulseGen: importer/bridge exists, emitter case/VM support still missing.
-6. E-stop configuration, retentive/EEPROM parameters and the project's declared target model are not
-   carried into the image yet; the compiler always emits model 0x0407.
-7. Firmware update/DFU entry.
+5. `IO.8xDI`/`IO.8xDO`: importer/bridge exists; there is no emitter for them upstream either, and the
+   VM has no packed digital I/O opcode, so they stay rejected. PulseGen is implemented since the
+   2026-11-20 upstream sync brought `VM_OP_PULSE_GEN`.
+6. Project-level e-stop configuration, retentive/EEPROM parameters and the project's declared target
+   model are not carried into the image header yet; the compiler always emits model 0x0407. The
+   `Main.Safety.EStop` and `Main.Execution.ReadReg`/`WriteReg` blocks do emit their opcodes.
+7. Firmware update/DFU: `MaraProtClient.enterROMDFU()` (opcode `0xF3`) is implemented; there is no UI
+   for it and no DFU file transfer (the device jumps to the ROM USB bootloader).
 8. No physical Duino-S has been tested yet. The protocol and image path are validated against the
    firmware VM, a frame-level fake, and a pseudo-terminal serial pair, not real hardware.
 9. Project target/profile is a global Hardware Link choice; it is not yet stored in the project.
+
+## Upstream sync (2026-11-20)
+
+The vendored portable VM (`Sources/WirebenchMaraVMC`) matches Duino-S_FW `a21f518` ("implement
+remaining MaraVM opcodes, float div/mod, timers, filters, arrays, and safety"); it was `26d6cc9`
+before. Instruction layouts verified against the new VM: `CTUD` grew to 20 bytes with a state-slot
+index at +16, `TON` selects TON/TOF/TP through its flags byte, and the compiler's `Div`/`Mod`,
+`Timer` and `SinglePulse` emissions still match. The client gained `rtcGet`, `rtcSet`,
+`oneWireScan` and `enterROMDFU` (opcodes `0x40`/`0x41`/`0x50`/`0xF3`, per the new `MARAPROT.md`
+spec). The 44-byte `GET_INFO` and 32-byte `VM_STATUS` layouts were already current.
+
+## The Mara-first transition (2026-11-21)
+
+The Duino-S (Maramat/MaraProt/MFLW) path is now the center of the app; the Sybas/Dirigo Duino-P
+path is a half-maintained legacy option. This tranche:
+
+- `AppModel.hardwareFamily` defaults to `duinoS`: new projects and opened `.pcc` files start
+  Mara-centered, and the legacy picker entry reads "Sybas Duino-P (legacy)". Build/Upload route by
+  family as before; switching families is the explicit opt-out.
+- The Qt front end gained the Duino-S hardware link, until now SwiftUI-only. The scene's
+  `hardware` section carries `family` and a `duino` object (transport, endpoint fields, discovery
+  results, last GET_INFO, watch table with a `watchRevision` counter); the Qt Hardware tab renders
+  the family picker, USB/Ethernet transport, endpoint fields, **Find Duino-S** (mDNS/subnet
+  discovery with a pickable device list), Build project, Build && upload, and Watch/Stop watch with
+  live values. New bridge commands: `setHardwareFamily`, `duinoSetTransport`, `duinoSetHost`,
+  `duinoSetPort`, `duinoDiscover`, `duinoSelectDevice`, `duinoBuild`, `duinoUpload`,
+  `duinoWatchStart`, `duinoWatchStop` (documented in `BridgeCommands.swift`).
+- Tests: two `BuildExportTests` and one `DuinoAppTests` expectation pinned `.dirigo`/the old title;
+  the Qt dialog was verified headless (`WIREBENCH_DIALOG=hardware WIREBENCH_SCREENSHOT=...`) for
+  both families.
+
+Still legacy-first, deliberately: the Qt Build report tab shows Dirigo table statistics; the
+Duino-S build feedback there is the message line only. Watch forcing (SLOT_WRITE_BATCH) is still
+unwired in both UIs.
+
+## Maraflow feature sync (2026-11-21, second tranche)
+
+- **Block catalogue**: added the two definitions missing from `MaraflowDefinitions.swift`
+  (`IO.CH455G`, `Comm.I2C.TMP75`; the other four of maraflow's new blocks were already mirrored)
+  and regenerated `Sources/WirebenchSimCxx/MaraflowVariants.h` with `tools/gen_maraflow_variants.py
+  --write` — the C++ core dispatches generic maraflow blocks by the definition's index in
+  `MaraflowCatalog.all`, so the header must be regenerated after any catalogue edit (95 → 97
+  definitions; the count is pinned by `MaraflowImportTests`).
+- **Palette is Mara-first** (`BlockPaletteSearch`): a Dirigo block whose name collides with a
+  Maraflow definition is now labelled "X (Dirigo)" and the Maraflow twin keeps the clean name (the
+  old rule was the reverse); equal matches in search/browse rank Maraflow-native blocks first. The
+  Qt palette uses `displayBlockName` now too, so both front ends read the same.
+- **ST editor**: a Maraflow ST page no longer compiles to nothing. The editor still highlights,
+  and now also parses for the declarations outline when the source is inside Wirebench's subset
+  and runs the subset compile as an *advisory* check — full IEC 61131-3 constructs (CASE, FOR,
+  WHILE, …, which Maraflow's interpreter accepts) are listed under "Outside the Wirebench subset"
+  rather than "Problems". Apply to Page writes back and rebuilds as before.
+
+## Project platforms: New File separates Maraflow from Wirebench (2026-11-21, third tranche)
+
+The New File choice creates either a **Maraflow project** (default) or a **Wirebench project
+(legacy)**, and the modes do not mix:
+
+- `ProjectPlatform` (`maraflow`/`wirebench`) with `AppModel.projectPlatform` derived from
+  `project.maraflow != nil` (imports and new projects). `createNewProject(platform:)` defaults to
+  Maraflow; a new Maraflow project carries the minimal Maraflow envelope (`MaraflowExtras`) that
+  `MaraflowExporter` writes, so save/export `.mfl` work from the first save, and starts on the
+  Duino-S family; Wirebench mode keeps the Sybas Duino-E profile and the Duino-P family.
+- Both front ends expose the choice the same way, with no popup: the File menu has two items —
+  "New Maraflow Project" (⌘N) and "New Wirebench Project (legacy)" (⌥⌘N) in SwiftUI; the same two
+  rows in the Qt menu — and the no-project welcome panel in both apps has three buttons: New
+  Maraflow Project (accented default), New Wirebench Project, Open…. The bridge `new` command takes
+  `{platform}`, defaulting to maraflow.
+- The palettes are separated by `BlockPaletteSearch.isOffered(_:in:)`: a Maraflow project offers
+  Maraflow-native blocks, macros and the ST/LD page types; a Wirebench project offers the Dirigo
+  catalogue — neither lists the other's blocks. The scene's `hardware` section reports `platform`.
+- Verified headless: new Maraflow project lists only "Maraflow ·" blocks; Wirebench lists only
+  Dirigo ones. `DuinoAppTests.newProjectPlatforms` pins the behavior.
+
+## ST interpreter 1:1 verification (2026-11-21)
+
+The Maraflow ST page interpreter (`Sources/WirebenchSimCxx/MaraflowStInterpreter.cpp`, a port of
+maraflow's `cz.maramat.sim.StInterpreter`) was audited feature-by-feature against the current
+maraflow source (last change `4576071`, 2026-11-14) and verified by porting maraflow's own
+`StInterpreterTest` expectations into `MaraflowImportTests.stMaraflowParity`, which runs the same
+program through the C++ core as an imported ST page:
+
+- positional FB calls (`And(1, 0, 0)`), named args (`En := 1`), and `=>` output bindings
+  (`Q => RS_Q`) — including the `Inst_*` : INT declaration convention;
+- `Random`/`Rnd` in all three arities (named TRIG/MIN/MAX, positional bounds, zero-arg 0..1);
+- `SinglePulse` edge state **across scans** plus `Counter` — maraflow's exact four-scan
+  Clk 1,1,0,1 sequence (pulse, no re-trigger, low, second edge → CV 2, Q on).
+
+Surface audit: keyword set, END_ spellings, `AND/&/OR/XOR/NOT/MOD`, CASE ranges (`1..5:`),
+`//` `(* *)` `/* */` comments, the 16-name FB table (SR/RS/TON/TOF/TP/TIMER/CTU/CTD/CTUD/
+R_TRIG/F_TRIG/RANDOM/RND/SINGLEPULSE/ONESHOT/COUNTER/CNTR) with `Inst_`-prefix stripping and
+declaration-type resolution, positional-parameter tables, and the 1000-iteration loop cap all
+match. One deliberate, now-aligned deviation: the port keeps FB state per call site between scans;
+maraflow's own tests expect the same stateful behavior.
+
+## Maraflow simulation parity sweep (2026-11-21)
+
+A block-by-block audit of the C++ core's Maraflow generic blocks against maraflow's
+`SimulationEngine` closed the gaps it found. Previously ported and verified: Bool ops/RS/SR,
+math (+Div/Mod zero handling), comparators, Sel/Mux, TON, PulseGen/PulseLen/SinglePulse, Counter,
+DateTime/DecodeDate, conversion, I/O channels, ReadReg/WriteReg, Interrupt, EStop, and the ST/LD
+runtimes. This sweep added, with Maraflow's exact semantics:
+
+- **Timer TOF and TP** (`TimerMode` property, matched on the headword of "TOF (Off-Delay)" etc.),
+  alongside the existing TON;
+- **InRange** (swapped bounds normalise) and **Hysteresis** (Schmitt latch);
+- **MovingAvg** (running window, `WindowSize` up to 256, `Rst` clears), **LowPass** (first sample
+  passes through, alpha clamped 0...1), **Debounce** (delay accumulation);
+- **ArrayRead/ArrayWrite** over named 64-element stores, out-of-bounds flagged;
+- **Demux** (routes to the addressed output), **PID** (positional form, integral reset);
+- **EncodeDate** (UTC civil calendar, fields clamped); **PackBits/UnpackBits MSB** (`BitOrder`);
+- the simulated sensors: **TMP75** (25 °C, Ok), **DS18B20** (22.5 °C, Ok), **CH455G** (active).
+
+The `TimerMode`, `WindowSize`, `BitOrder` and `ArrayName` properties now cross into the core.
+Maraflow's evaluator implements no behavior for Modbus/REST/SPI/I2CRead/Encoder and the Visual
+displays, and neither does the core (no-op on both sides, verified). `MaraflowImportTests.
+maraflowGenericBlockParity` pins all of the above through the C++ core.
+
+## The Duino-S simulator (2026-11-21, backend)
+
+`Sources/WirebenchDuinoSim` is a software Duino-S: the firmware's own portable `mara_vm.c`
+(linked from `WirebenchMaraVMC`, the single copy of the VM) behind a MaraProt v1 TCP server on
+localhost, port 5020 by default. It is a C-ABI C++ static library exactly like `WirebenchSimCxx`
+(module map, `project.yml` target, linked by `WirebenchHardware`; `xcodegen generate` run).
+
+- Protocol: the full MARAPROT.md surface — ping, GET_INFO (model 0x0407, "Duino - S"), VM_STATUS,
+  VM_CONTROL (stop/start/pause/e-stop reset/clear fault), chunked upload with full-image CRC
+  verification and `VM_LoadImage` validation, WATCH_SUBSCRIBE/POLL with epochs and per-client
+  delta tracking, SLOT_READ/WRITE_BATCH, RTC_GET/SET, ONEWIRE_SCAN (empty), DFU entry (acked).
+  Point-to-point transports accept any station id; corrupt frames are dropped silently.
+- Execution: a 10 ms scan thread steps VM threads 1...5 with the measured dt and records
+  per-thread execution times for VM_STATUS. One live instance per process (the HAL has no
+  user-data pointer; instances resolve through thread-local storage).
+- HAL: virtual DI/AI inputs and DO/AO/PWM outputs (readable/writable through the C API and the
+  `DuinoSim` Swift owner in `WirebenchHardware`), host clock, real RNG, an in-memory retentive
+  store, and the firmware's simulated peripherals (TMP75 25 °C, DS18B20 22.5 °C, CH455G ack).
+- Swift: `DuinoSim(port:)` in `WirebenchHardware` — `MaraTCPTransport(host: "127.0.0.1", port:)`
+  connects to it like any board; `sim.setDigitalInput`, `sim.digitalOutput`, `tripEStop` etc. let
+  the UI (or a test) drive the "pins". `setPowered` models the DC input: off stops the scan,
+  clears volatile outputs/display and disconnects protocol clients; on resets and resumes the
+  retained image if it was running.
+- Tests (`DuinoSimTests`, serialized): a full device round trip (info → upload a compiled image
+  with auto-start → watch the pulse output flip → slot write/read → pause/resume/stop → RTC), the
+  e-stop path with masks, DI→DO bridging through the running VM, and a power cycle that drops the
+  protocol connection before rebooting the retained program. USB-CDC transport simulation is not
+  done, and DFU is acknowledged but performs no reset.
+
+## Shield hardware emulation (2026-11-21, from the KiCad projects)
+
+The KiCad designs (`Duino-S` main board, `Duino-S-Shield`) were audited against the simulator;
+everything the VM can touch is now emulated:
+
+- **Main board**: STM32F407 (the real `mara_vm.c`), DP83848/RJ45 Ethernet (the MaraProt TCP
+  server), BL24C256A I2C EEPROM (the retentive store — now file-backed, `setEEPROMPath`, 32 KiB
+  image, survives simulator restarts), USB-C CDC and the MAX13487 RS-485 transceiver are the only
+  parts not simulated (no client support either; a pty/second-port transport is possible later).
+  DC power is host-controlled through `setPowered`; ESD needs no model and the DIO LEDs follow the
+  DO map.
+- **Shield**: TMP75 and DS18B20 temperatures are host-set (`setTemperature`), the CH455G
+  7-segment display decodes from the VM's last `COMM_EXEC` into text/segments (`sim.display`),
+  and the 1-Wire bus takes an attachable DS18B20 (`setOneWireSensor`) so `ONEWIRE_SCAN` finds it.
+  Buttons/switches/pots/LDR are ordinary DI/AI channels.
+- The compiler gained `COMM_EXEC` emitters for `Comm.I2C.TMP75`, `Comm.DS18B20.DS18B20Read` and
+  `IO.CH455G`. `DuinoSimTests.shieldHardware` pins sensors, display, 1-Wire and EEPROM
+  persistence across a simulated power cycle.
+
+## Simulator 3D UI (2026-11-22, RealityKit)
+
+The macOS app has a Duino-S Simulator window (Hardware Link → Emulator → Start Emulator, or
+`Window("Duino-S Simulator", id: "duinosim")`). Hardware Link offers USB, Ethernet and Emulator;
+Emulator shows the shared session's power/VM status and resolves uploads/watch to its localhost TCP
+port. `AppModel` owns that session and the 3D window consumes the same instance. Its data flow is:
+
+1. **Offline assets:** `tools/sim3d/export-board.sh` runs `kicad-cli pcb export glb
+   --subst-models`, Blender headless USDC conversion and `usdzip`. `manifest.py` reads both KiCad
+   schematic netlists and records component node names and channels in `board-manifest.json`.
+   These are bundled resources, not rendered by KiCad or Blender while the app runs.
+2. **Emulator:** `WirebenchDuinoSim` owns the firmware's actual `mara_vm.c`. A 10 ms thread scans
+   the running image and a MaraProt v1 server on 127.0.0.1:5020 accepts the normal uploader/client.
+   The HAL callbacks read/write host-side DI/AI/DO/AO/PWM maps and simulated peripherals.
+3. **Shared UI state:** `DuinoSimSession` polls that same instance through the C API at ~20 Hz,
+   with no TCP loopback for rendering. It publishes VM/power/e-stop state, 28 DI + 28 DO, four AI,
+   two AO, eight PWM channels, temperatures and CH455G state. SwiftUI and RealityKit both observe
+   this one object. Control writes go directly to the same HAL maps; the next VM scan sees them.
+4. **Renderer:** RealityKit loads the two USDZ models and aligns their J1/J2/J4/J8 headers. DO/PWM
+   state changes main-board and shield LED materials. A generated three-digit segment mesh on LED1
+   renders numeric or raw CH455G output with decimal points and brightness. The entities are owned
+   by a scene-reference store rather than asynchronous value-type `@State`; uninitialized or disabled
+   numeric output remains visible as a dim placeholder/last value, while valid enabled output uses
+   full brightness. Mesh picking resolves a hit through its USD parents to a manifest entry.
+
+Entity drag orbits, Option-drag/scroll pans and pinch zooms (1...80, default 18). Taps on J7 toggle
+power; SW1/SW2/SW4 pulse DI10/11/12; main SW3/SW4 pulse active-low DI14/15; shield SW3 switches
+AI3 between R22 and R24. The tabbed hardware pane (Controls/Analog/Pins) provides Run/Pause/Stop,
+holdable pushbuttons, four potentiometers (0...4095), LDR illumination, TMP75/DS18B20, 1-Wire
+attachment and all mapped header DI toggles, plus AO/PWM monitors. Analog `IREF`/`OREF` slots are
+allocated as 32-bit Int for AI/AO references rather than the legacy Boolean definition.
+
+Tests cover every shield DI/AI through an uploaded VM image, session-level AI3 switching and
+momentary release, power cycling, and numeric/raw 3D segment decoding. Individual header pins do
+not yet have separate 3D tap targets (the drawer drives them); Qt and LED fade animation remain out
+of scope.

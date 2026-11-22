@@ -777,6 +777,10 @@ struct LoweredScan {
     /// Which instances the body actually calls; an uncalled one is not emitted at all.
     var calledCalls: Set<Int> = []
     var calledBlocks: Set<Int> = []
+    /// Which instances the body reads an output of, in any order: a read before the call line is a
+    /// feedback wire (a pulse machine), legal as long as the instance is called somewhere.
+    var referencedCalls: Set<Int> = []
+    var referencedBlocks: Set<Int> = []
 }
 
 /// Lowers one unit's body.
@@ -818,6 +822,16 @@ struct Lowering {
             }
         }
         try lower(statements, into: &scan)
+        // A read is a wire, whatever the program order: what is not legal is reading an instance
+        // the body never calls — its block would have no scan to run in.
+        for index in scan.referencedBlocks where !scan.calledBlocks.contains(index) {
+            throw SourceError(line: scan.blockCalls[index].line,
+                              message: "'\(scan.blockCalls[index].name)' is read but never called")
+        }
+        for index in scan.referencedCalls where !scan.calledCalls.contains(index) {
+            throw SourceError(line: scan.calls[index].line,
+                              message: "'\(scan.calls[index].macro.name)' is read but never called")
+        }
         return scan
     }
 
@@ -1307,9 +1321,7 @@ struct Lowering {
             }
             switch instance(instanceName) {
             case .macro(let index, let block):
-                guard scan.calledCalls.contains(index) else {
-                    throw SourceError(line: expression.line, message: "'\(instanceName)' is read before it is called")
-                }
+                scan.referencedCalls.insert(index)
                 guard let position = block.outputs.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) else {
                     throw SourceError(line: expression.line,
                                       message: "'\(block.name)' has no output '\(name)'; it has "
@@ -1317,9 +1329,7 @@ struct Lowering {
                 }
                 return .bool(.macroCall(index, position))
             case .block(let index):
-                guard scan.calledBlocks.contains(index) else {
-                    throw SourceError(line: expression.line, message: "'\(instanceName)' is read before it is called")
-                }
+                scan.referencedBlocks.insert(index)
                 let call = scan.blockCalls[index]
                 let labels = BlockLabels.outputLabels(for: call.guid)
                 guard let position = labels.firstIndex(where: { $0.lowercased() == name.lowercased() }) else {

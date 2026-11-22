@@ -285,7 +285,7 @@ struct MaraflowImportTests {
 
     @Test("Every static Maraflow definition is a native block")
     func everyDefinitionIsNative() {
-        #expect(MaraflowCatalog.all.count == 95)
+        #expect(MaraflowCatalog.all.count == 97)
         #expect(MaraflowCatalog.ported.count == MaraflowCatalog.all.count)
         #expect(MaraflowCatalog.all.allSatisfy { BlockTypeCatalog.info(forGuid: $0.guid) != nil })
     }
@@ -614,6 +614,232 @@ struct MaraflowImportTests {
         #expect(core.outPins(moduleId: read0.id)[0].asInt == 2, "page variables persist between scans")
         #expect(core.outPins(moduleId: read1.id)[0].asInt == 4)
         #expect(outcome.notes.contains { $0.contains("native ST interpreter") })
+    }
+
+    /// The generic blocks Maraflow's SimulationEngine implements that the C++ core lacked, checked
+    /// against Maraflow's own semantics: InRange (swapped bounds), Hysteresis, LowPass (first
+    /// sample passes through), Debounce (delay elapses), named Arrays, Demux, PID, Timer TOF/TP
+    /// (TimerMode), PackBits MSB (BitOrder), EncodeDate, and the simulated sensors.
+    @Test("The C++ core matches Maraflow for every generic block it implements")
+    func maraflowGenericBlockParity() throws {
+        let en = [("En", "Enable Execution", "BOOL", "1")]
+        var entries: [(String, String)] = [
+            ("project.name", "GenericParity"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "FBD"),
+            ("page.0.blockCount", "17"),
+            ("page.0.wireCount", "0"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "20"),
+            ("page.1.wireCount", "0"),
+        ]
+        var order = 10
+        func b(_ definition: String, _ name: String, _ ins: [(String, String, String, String)],
+               _ outs: [(String, String, String, String)], props: [(String, String)] = []) {
+            entries += Self.block("page.0.block.\(order / 10 - 1).", id: name, definition: definition,
+                                  type: name, name: name, gridX: 2, gridY: order / 10, order: order,
+                                  inputs: en + ins, outputs: outs, properties: props)
+            order += 10
+        }
+        b("Main.Comparators.InRange", "InRange", [("In", "In", "INT", "5"), ("Min", "Min", "INT", "10"), ("Max", "Max", "INT", "0")],
+          [("Y", "Y", "BOOL", "0")])
+        b("Main.Comparators.Hysteresis", "Hyst", [("In", "In", "FLOAT", "25"), ("Lo", "Lo", "FLOAT", "10"), ("Hi", "Hi", "FLOAT", "20")],
+          [("Y", "Y", "BOOL", "0")])
+        b("Main.Filters.LowPass", "LowPass", [("In", "In", "FLOAT", "8"), ("Alp", "Alp", "FLOAT", "0.5")],
+          [("Y", "Y", "FLOAT", "0")])
+        b("Main.Filters.Debounce", "Debounce", [("In", "In", "BOOL", "1"), ("Tms", "Tms", "INT", "25")],
+          [("Y", "Y", "BOOL", "0")])
+        b("Main.Arrays.ArrayWrite", "ArrWrite", [("Idx", "Idx", "INT", "3"), ("Val", "Val", "INT", "42")],
+          [("Oob", "Oob", "BOOL", "0")], props: [("ArrayName", "ARR_0")])
+        b("Main.Arrays.ArrayRead", "ArrRead", [("Idx", "Idx", "INT", "3")],
+          [("Val", "Val", "INT", "0"), ("Oob", "Oob", "BOOL", "0")], props: [("ArrayName", "ARR_0")])
+        b("Main.Arrays.ArrayRead", "ArrReadOob", [("Idx", "Idx", "INT", "99")],
+          [("Val", "Val", "INT", "0"), ("Oob", "Oob", "BOOL", "0")], props: [("ArrayName", "ARR_0")])
+        b("Main.Switches.Demux", "Demux", [("Adr", "Adr", "INT", "1"), ("In", "In", "INT", "7")],
+          [("Y0", "Y0", "INT", "0"), ("Y1", "Y1", "INT", "0")])
+        b("Math.PID", "PID", [("PV", "PV", "FLOAT", "0"), ("SP", "SP", "FLOAT", "10"), ("Kp", "Kp", "FLOAT", "2"),
+                              ("Ki", "Ki", "FLOAT", "0"), ("Kd", "Kd", "FLOAT", "0"), ("Rst", "Rst", "BOOL", "0")],
+          [("Out", "Out", "FLOAT", "0")])
+        b("Main.Timers.Timer", "TOF", [("In", "In", "BOOL", "0"), ("PT", "PT", "INT", "10")],
+          [("Q", "Q", "BOOL", "0")], props: [("TimerMode", "TOF (Off-Delay)")])
+        b("Main.Timers.Timer", "TP", [("In", "In", "BOOL", "1"), ("PT", "PT", "INT", "10")],
+          [("Q", "Q", "BOOL", "0")], props: [("TimerMode", "TP (Pulse)")])
+        b("Main.Conversion.PackBits", "PackMSB",
+          [("B0", "B0", "BOOL", "1")] + (1..<8).map { ("B\($0)", "B\($0)", "BOOL", "0") },
+          [("Y", "Y", "INT", "0")], props: [("BitOrder", "MSB")])
+        b("Main.Timers.EncodeDate", "Encode", [("Yr", "Yr", "INT", "2026"), ("Mon", "Mon", "INT", "1"), ("Day", "Day", "INT", "1"),
+                                               ("Hr", "Hr", "INT", "0"), ("Min", "Min", "INT", "0"), ("Sec", "Sec", "INT", "0")],
+          [("Ts", "Ts", "LONG", "0")])
+        b("Comm.I2C.TMP75", "TMP75", [], [("Tmp", "Tmp", "FLOAT", "0"), ("Ok", "Ok", "BOOL", "0")])
+        b("Comm.DS18B20.DS18B20Read", "DS18B20", [], [("Tmp", "Tmp", "FLOAT", "0"), ("Ok", "Ok", "BOOL", "0")])
+        b("IO.CH455G", "CH455G", [("Val", "Val", "FLOAT", "0"), ("Dec", "Dec", "INT", "1"), ("Brt", "Brt", "INT", "8")],
+          [("Act", "Act", "BOOL", "0")])
+        b("Main.Filters.MovingAvg", "MovAvg", [("In", "In", "FLOAT", "4"), ("Rst", "Rst", "BOOL", "0")],
+          [("Y", "Y", "FLOAT", "0")], props: [("WindowSize", "2")])
+        // The observations, one register each.
+        let readings: [(String, Int)] = [("InRange", 0), ("Hyst", 1), ("LowPass", 2), ("Debounce", 3),
+                                         ("ArrRead.Val", 4), ("ArrRead.Oob", 5), ("ArrReadOob.Val", 6), ("ArrReadOob.Oob", 7),
+                                         ("Demux.Y0", 8), ("Demux.Y1", 9), ("PID.Out", 10), ("TOF.Q", 11), ("TP.Q", 12),
+                                         ("PackMSB.Y", 13), ("Encode.Ts", 14), ("TMP75.Tmp", 15), ("TMP75.Ok", 16),
+                                         ("DS18B20.Tmp", 17), ("CH455G.Act", 18), ("MovAvg.Y", 19)]
+        for (index, (name, reg)) in readings.enumerated() {
+            entries += Self.block("page.1.block.\(index).", id: "read\(reg)", definition: "Main.Execution.ReadReg",
+                                  type: "ReadReg", name: "R\(reg)", gridX: 2 + index, gridY: 2, order: 100 + index,
+                                  inputs: [("En", "Enable", "BOOL", "1")],
+                                  outputs: [("Out", "Value", "INT", "0")],
+                                  properties: [("RegisterName", "REG_\(reg)")])
+        }
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "genericparity")
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        /// The named block's `pin`-th output, as Maraflow's INT register read reports it (float
+        /// results truncate toward zero, as DataType.convertValue does).
+        func value(_ name: String, _ pin: Int = 0) -> Int {
+            let module = outcome.project.modules.first { $0.name == name }!
+            return core.outPins(moduleId: module.id)[pin].asInt
+        }
+        let epoch = Date(timeIntervalSince1970: 0)
+        for step in 1...5 {
+            core.step(deltaMs: 5, now: epoch)
+            if step == 1 {
+                #expect(value("InRange") == 1, "swapped bounds normalise")
+                #expect(value("Hyst") == 1, "above the high threshold latches on")
+                #expect(value("LowPass") == 8, "the first sample passes through")
+                #expect(value("ArrRead") == 42 && value("ArrRead", 1) == 0, "the ArrayWrite is visible to the ArrayRead")
+                #expect(value("ArrReadOob") == 0 && value("ArrReadOob", 1) == 1, "out-of-bounds reads 0 and flags")
+                #expect(value("Demux") == 0 && value("Demux", 1) == 7, "demux routes to the addressed output")
+                #expect(value("PID") == 20, "P-only: Kp * (SP - PV)")
+                #expect(value("TOF") == 1, "TOF still high while the off-delay runs")
+                #expect(value("TP") == 1, "TP pulses on the first scan")
+                #expect(value("PackMSB") == 128, "MSB order puts B0 on bit 7")
+                #expect(value("Encode") == 1_767_225_600, "2026-01-01 00:00:00 UTC")
+                #expect(value("TMP75") == 25 && value("TMP75", 1) == 1, "the simulated TMP75 reads 25 deg C")
+                #expect(value("DS18B20") == 22, "the simulated DS18B20 reads 22.5 deg C, truncated to 22 on the INT register")
+                #expect(value("CH455G") == 1, "the display reports active")
+                #expect(value("MovAvg") == 4, "the first sample is the average")
+            }
+            if step == 2 { #expect(value("TP") == 0, "TP expires after PT") }
+            if step == 4 { #expect(value("Debounce") == 0, "20 ms of 25 ms debounce has not elapsed") }
+            if step == 5 {
+                #expect(value("Debounce") == 1, "25 ms of debounce elapsed")
+                #expect(value("TOF") == 0, "TOF drops after the delay")
+            }
+        }
+    }
+
+    /// A Maraflow `SwitchMode=Toggle` BoolVar must latch, not pulse: before this fix the importer
+    /// left the block in the push-button default, so every canvas click fired a two-tick pulse and
+    /// the variable could never be switched off (Kyvadlovy provoz.mfl).
+    @Test("A Maraflow Toggle BoolVar is a latch in both the block and the click path")
+    func maraflowBoolVarToggle() throws {
+        func module(_ attributes: [(String, String)]) -> PCCModule {
+            var module = BlockFactory.makeModule(guid: BoolVarBlock.guid, id: 1, name: "BoolVar1",
+                                                 x: 0, y: 0, order: 10, threadId: 1, page: "Main")
+            module.rawAttributes = AttributeBag(attributes)
+            return module
+        }
+        let toggle = module([("MARAFLOW_PROP_SwitchMode", "Toggle")])
+        #expect(BlockRole.boolVarMode(of: toggle) == .toggleSwitch)
+        #expect((BlockRegistry.shared.create(for: toggle) as? BoolVarBlock)?.mode == .toggleSwitch)
+        let momentary = module([("MARAFLOW_PROP_SwitchMode", "Momentary")])
+        #expect(BlockRole.boolVarMode(of: momentary) == .pushButton)
+        // No attribute at all keeps Dirigo's default: a push button.
+        let plain = module([])
+        #expect(BlockRole.boolVarMode(of: plain) == .pushButton)
+        // An explicit Dirigo SimulMode still wins over the Maraflow property.
+        let explicit = module([("SimulMode", "1"), ("MARAFLOW_PROP_SwitchMode", "Momentary")])
+        #expect(BlockRole.boolVarMode(of: explicit) == .toggleSwitch)
+    }
+
+    /// The reference expectations are Maraflow's own `StInterpreterTest` (positional and named FB
+    /// calls, `=>` output bindings, Random/Rnd, and SinglePulse+Counter edge state across scans),
+    /// driven here through the C++ core exactly the way an imported ST page runs.
+    @Test("ST interpreter matches Maraflow's StInterpreterTest expectations")
+    func stMaraflowParity() throws {
+        let code = """
+        VAR
+            Pos : INT := 0;
+            Named : INT := 0;
+            Inst_RS : INT := 0;
+            RS_Q : BOOL := 0;
+            RS_nQ : BOOL := 1;
+            R1 : INT := 0;
+            R2 : INT := 0;
+            R3 : FLOAT := 0.0;
+            Ranges_Ok : BOOL := 1;
+            scan : INT := 0;
+            Clk : BOOL := 0;
+            Pulse_Out : BOOL := 0;
+            Inst_Counter : INT := 0;
+            Cntr_Q : BOOL := 0;
+            Cntr_CV : INT := 0;
+        END_VAR
+        Pos := And(1, 0, 0);
+        Named := And(En := 1, X1 := 1, X2 := 1);
+        REG_0 := Pos;
+        REG_1 := Named;
+        Inst_RS(En := 1, S := 1, R := 0, Q => RS_Q, nQ => RS_nQ);
+        REG_2 := RS_Q;
+        REG_3 := RS_nQ;
+        R1 := Random(Trig := 1, Min := 10, Max := 20);
+        R2 := Rnd(5, 15);
+        R3 := Random();
+        Ranges_Ok := (R1 >= 10) AND (R1 <= 20) AND (R2 >= 5) AND (R2 <= 15) AND (R3 >= 0.0) AND (R3 <= 1.0);
+        REG_4 := Ranges_Ok;
+        scan := scan + 1;
+        Clk := (scan = 1) OR (scan = 4);
+        Pulse_Out := SinglePulse(Clk);
+        Inst_Counter(CU := Pulse_Out, CD := 0, R := 0, PV := 2, Q => Cntr_Q, CV => Cntr_CV);
+        REG_5 := Pulse_Out;
+        REG_6 := Cntr_CV;
+        REG_7 := Cntr_Q;
+        """
+        var entries: [(String, String)] = [
+            ("project.name", "STParity"),
+            ("project.pageCount", "2"),
+            ("page.0.name", "Logic"),
+            ("page.0.language", "ST"),
+            ("page.0.stCode", code),
+            ("page.0.stVarCount", "0"),
+            ("page.0.blockCount", "0"),
+            ("page.0.wireCount", "0"),
+            ("page.0.stThreadId", "2"),
+            ("page.0.stOrder", "10"),
+            ("page.1.name", "Read"),
+            ("page.1.language", "FBD"),
+            ("page.1.blockCount", "8"),
+            ("page.1.wireCount", "0"),
+        ]
+        for reg in 0..<8 {
+            entries += Self.block("page.1.block.\(reg).", id: "read\(reg)", definition: "Main.Execution.ReadReg",
+                                  type: "ReadReg", name: "Read\(reg)", gridX: 2 + reg, gridY: 2, order: 100 + reg,
+                                  inputs: [("En", "Enable", "BOOL", "1")],
+                                  outputs: [("Out", "Value", "INT", "0")],
+                                  properties: [("RegisterName", "REG_\(reg)")])
+        }
+        let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "stparity")
+        let reads = (0..<8).map { reg in
+            try! #require(outcome.project.modules.first { $0.name == "Read\(reg)" })
+        }
+        func reg(_ index: Int) -> Int {
+            Int(core.outPins(moduleId: reads[index].id)[0].asInt)
+        }
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(reg(0) == 0, "positional And(1, 0, 0) is 0")
+        #expect(reg(1) == 1, "named And(En, X1, X2) is 1")
+        #expect(reg(2) == 1, "RS with S=1 sets Q")
+        #expect(reg(3) == 0, "RS with S=1 clears nQ")
+        #expect(reg(4) == 1, "Random/Rnd results stay in their ranges")
+        // Maraflow's four-scan SinglePulse + Counter sequence (Clk 1, 1, 0, 1).
+        #expect(reg(5) == 1 && reg(6) == 1 && reg(7) == 0, "scan 1: pulse, counter at 1, Q low")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(reg(5) == 0 && reg(6) == 1, "scan 2: no re-trigger while Clk stays 1")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(reg(5) == 0 && reg(6) == 1, "scan 3: Clk low")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(reg(5) == 1 && reg(6) == 2 && reg(7) == 1, "scan 4: second edge, counter at 2, Q high")
     }
 
     @Test("ST interpreter runs control flow, calls and expressions")

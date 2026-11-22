@@ -650,29 +650,38 @@ public struct CanvasView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Project Open", systemImage: "cpu")
-        } description: {
-            Text("Open a .wbp project (or a legacy .pcc), or start a new one.")
-        } actions: {
+        VStack(spacing: 14) {
+            Image(systemName: "cpu")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("No Project Open")
+                .font(.title2.bold())
+            Text("Open a Wirebench .wbp or a Maraflow .mfl project (or a legacy .pcc), or start a new one.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 400)
             HStack(spacing: 10) {
                 Button {
-                    model.createNewProject()
+                    model.createNewProject(platform: .maraflow)
                 } label: {
-                    Text("New Project").frame(minWidth: 110)
+                    Text("New Maraflow Project").frame(minWidth: 160)
+                }
+                .keyboardShortcut(.defaultAction)
+                Button {
+                    model.createNewProject(platform: .wirebench)
+                } label: {
+                    Text("New Wirebench Project").frame(minWidth: 160)
                 }
                 Button {
                     model.openProjectFile()
                 } label: {
-                    Text("Open…").frame(minWidth: 110)
+                    Text("Open…").frame(minWidth: 90)
                 }
-                .keyboardShortcut(.defaultAction)
             }
             .controlSize(.extraLarge)
-            .padding(.top, 6)
         }
-        // Sized to its content, in a glass panel of its own, rather than spread over the whole canvas.
-        .fixedSize()
+        // Sized to its content, in a glass panel of its own, centered in the workspace.
         .padding(.horizontal, 36)
         .padding(.vertical, 28)
         .glassPanel(cornerRadius: 24)

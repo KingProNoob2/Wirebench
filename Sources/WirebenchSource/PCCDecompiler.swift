@@ -210,22 +210,41 @@ private final class PageReader {
             instanceDeclarations.append(text)
             boundBlocks.insert(module.id)
         }
+        var callDeclarations: [Int: String] = [:]
         for module in callModules {
             let macro = module.rawAttributes["MACRO_NAME"] ?? "Macro"
             guard let type = macroStructByCallName[macro] else {
                 unsupported.append("\(module.name) call of \(macro)")
                 continue
             }
-            instanceDeclarations.append("    \(callNames[module.id] ?? "call") : \(type);")
+            callDeclarations[module.id] = "    \(callNames[module.id] ?? "call") : \(type);"
             boundCalls.insert(module.id)
         }
+
+        // The calls that wire those instances' inputs, and their parameters. A call whose arguments
+        // cannot be expressed is dropped together with its declaration, and the pass repeats: a read
+        // of a dropped call must not become a `Name.Pin` reference to an instance that has no call —
+        // the compiler refuses that, and so must recovery, or the recovered source stops compiling.
+        var calls: [String] = []
+        while true {
+            var rendered: [String] = []
+            var failed: Set<Int> = []
+            for module in callModules where boundCalls.contains(module.id) {
+                if let text = macroCall(module) {
+                    rendered.append(text)
+                } else {
+                    failed.insert(module.id)
+                }
+            }
+            calls = rendered
+            guard !failed.isEmpty else { break }
+            boundCalls.subtract(failed)
+        }
+        instanceDeclarations.append(contentsOf: callModules.compactMap { module in
+            boundCalls.contains(module.id) ? callDeclarations[module.id] : nil
+        })
         variableDeclarations.append(contentsOf: instanceDeclarations)
 
-        // The calls that wire those instances' inputs, and their parameters.
-        var calls: [String] = []
-        for module in callModules where boundCalls.contains(module.id) {
-            if let text = macroCall(module) { calls.append(text) }
-        }
         for module in blockModules where boundBlocks.contains(module.id) {
             guard let name = blockNames[module.id] else { continue }
             calls.append(blockCall(module, name: name))
@@ -284,7 +303,7 @@ private final class PageReader {
         if isMacro {
             if let outputsBlock = project.macroInterface(.outputs, onSheet: page) {
                 for (index, name) in interface.outputs.enumerated() {
-                    guard let value = expression(module: outputsBlock.id, pin: index, depth: 0) else {
+                    guard let value = booleanValue(module: outputsBlock.id, pin: index) else {
                         unsupported.append("\(outputsBlock.name) pin \(name)")
                         continue
                     }
@@ -300,7 +319,9 @@ private final class PageReader {
                         unsupported.append("\(module.name) output \(index)")
                         continue
                     }
-                    guard let value = expression(module: module.id, pin: pin, depth: 0) else {
+                    // A channel pin is Boolean whatever the catalogue's type table says: an unwired
+                    // constant must come out as `true`/`false`, not the number 1.
+                    guard let value = booleanValue(module: module.id, pin: pin) else {
                         unsupported.append("\(module.name) input \(name)")
                         continue
                     }
@@ -376,7 +397,18 @@ private final class PageReader {
         let labels = BlockLabels.inputLabels(for: module.guid, totalPins: module.inPins.count)
         for pin in module.inPins.indices {
             guard let value = expression(module: module.id, pin: pin, depth: 0) else {
-                unsupported.append("\(module.name) input \(pin)")
+                // Say what the wire actually is: "And input X0" alone sends the user hunting the
+                // sheet for a pin that looks fine. A wired pin that cannot be expressed (a numeric
+                // output read as a signal, the common case — the subset is BOOL-only) names its
+                // producer; an unwired pin is a constant and never lands here.
+                if pin < labels.count,
+                   let source = wires[module.id]?[pin],
+                   let producer = modules.first(where: { $0.id == source.module }) {
+                    unsupported.append("\(module.name) input \(labels[pin]) "
+                                       + "(wired from \(producer.name); not expressible in the ST subset)")
+                } else {
+                    unsupported.append("\(module.name) input \(pin)")
+                }
                 continue
             }
             arguments.append("\(labels[pin]) := \(value)")

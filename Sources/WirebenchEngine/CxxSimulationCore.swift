@@ -425,7 +425,8 @@ public final class CxxSimulationCore {
                 }
             }
             for key in ["RegisterName", "TriggerMode", "InterruptSource", "TriggerEdge",
-                        "CaptureMode", "LatchPolicy", "SimPulseValue"] {
+                        "CaptureMode", "LatchPolicy", "SimPulseValue",
+                        "TimerMode", "WindowSize", "BitOrder", "ArrayName"] {
                 guard let value = mod.rawAttributes["MARAFLOW_PROP_\(key)"] else { continue }
                 key.withCString { keyCString in
                     value.withCString { valueCString in

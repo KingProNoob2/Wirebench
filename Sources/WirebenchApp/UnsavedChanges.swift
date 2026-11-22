@@ -39,4 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateCancel
         }
     }
+
+    /// No window restoration: nothing of the session survives a relaunch (the model is not
+    /// document-based and the last project is not reopened), so restoring would only bring the
+    /// secondary windows — the Structured Text editor above all — back over a fresh launch and hide
+    /// the main window's no-project screen.
+    func applicationShouldRestoreWindows(_ sender: NSApplication) -> Bool { false }
 }

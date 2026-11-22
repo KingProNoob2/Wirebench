@@ -659,7 +659,9 @@ public struct SourceParser {
             default: break
             }
         }
-        guard current.kind == .identifier else {
+        // A block type may be named like a keyword (`And`, `Or`, `Not`): ST is case-insensitive,
+        // so the lexer yields the keyword token, but a type position takes it as the type name.
+        guard current.kind == .identifier || current.kind == .keyword else {
             throw error("expected a type but found \(describe(current))")
         }
         return .instance(advance().text)
@@ -1113,7 +1115,10 @@ public struct SourceParser {
         if isSymbol(")") { _ = advance(); return arguments }
         var seen: Set<String> = []
         while true {
-            guard current.kind == .identifier, peek().kind == .symbol, peek().text == ":=" else {
+            // A pin or parameter may be named like a keyword (Equitherm's `BY`); a label position
+            // takes an identifier or a keyword, while `BY` stays reserved everywhere else.
+            guard [.identifier, .keyword].contains(current.kind),
+                  peek().kind == .symbol, peek().text == ":=" else {
                 throw error("an argument is 'name := value'")
             }
             let label = advance().text

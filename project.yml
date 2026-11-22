@@ -17,7 +17,7 @@ fileGroups:
 
 settings:
   base:
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     SWIFT_VERSION: "6.0"
     ENABLE_USER_SCRIPT_SANDBOXING: false
     ALWAYS_SEARCH_USER_PATHS: false
@@ -98,6 +98,43 @@ targets:
         GCC_OPTIMIZATION_LEVEL: 2
         OTHER_CPLUSPLUSFLAGS: -pipe
         HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/WirebenchSimCxx/include
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
+        SKIP_INSTALL: true
+
+  # The Duino-S device simulator: the portable MaraVM plus a MaraProt v1 TCP server, as a C library
+  # The vendored portable MaraVM C engine (shared by the Swift test harness and the Duino-S
+  # simulator, so the VM implementation exists exactly once).
+  WirebenchMaraVMC:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchMaraVMC
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchMaraVMC
+        SKIP_INSTALL: true
+
+  # The Duino-S device simulator: the portable MaraVM plus a MaraProt v1 TCP server, as a C library
+  # like the simulation core.
+  WirebenchDuinoSim:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/WirebenchDuinoSim
+    dependencies:
+      # The VM implementation lives in exactly one place (WirebenchMaraVMC); this target links it.
+      - target: WirebenchMaraVMC
+    settings:
+      groups: [recommendedLibrary]
+      base:
+        PRODUCT_NAME: WirebenchDuinoSim
+        DEFINES_MODULE: true
+        MODULEMAP_FILE: $(SRCROOT)/Sources/WirebenchDuinoSim/include/module.modulemap
+        GCC_OPTIMIZATION_LEVEL: 2
+        OTHER_CPLUSPLUSFLAGS: -pipe
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/WirebenchDuinoSim/include $(SRCROOT)/Sources/WirebenchMaraVMC/include
         CLANG_CXX_LANGUAGE_STANDARD: c++17
         CLANG_CXX_LIBRARY: libc++
         SKIP_INSTALL: true
@@ -200,6 +237,9 @@ targets:
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx
+      # The Duino-S simulator is exercised over a real TCP connection by the protocol tests.
+      - target: WirebenchDuinoSim
+      - target: WirebenchMaraVMC
     settings:
       groups: [recommended]
       base:
@@ -222,6 +262,9 @@ targets:
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx
+      # The Duino-S simulator is exercised over a real TCP connection by the protocol tests.
+      - target: WirebenchDuinoSim
+      - target: WirebenchMaraVMC
     info:
       path: Info.plist
       properties:
@@ -291,6 +334,9 @@ targets:
       # Static archives do not carry their own dependencies, so anything that links WirebenchEngine has to
       # link the C++ core too — otherwise the linker reports every `wirebench_sim_*` symbol as undefined.
       - target: WirebenchSimCxx
+      # The Duino-S simulator is exercised over a real TCP connection by the protocol tests.
+      - target: WirebenchDuinoSim
+      - target: WirebenchMaraVMC
     settings:
       groups: [recommended]
       base:

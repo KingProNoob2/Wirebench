@@ -12,6 +12,7 @@ Popup {
     property string exportExtension: ""
     property string message: ""
     readonly property var hw: controller.hardware
+    readonly property var duino: (hw && hw.duino) || ({})
 
     function show(which) {
         tab = which
@@ -148,52 +149,189 @@ Popup {
         Item {
             visible: dialog.tab === 1
             anchors { left: parent.left; right: parent.right; top: tabs.bottom; bottom: parent.bottom; margins: 20 }
-
+            // The Duino-S is the center of the app; Duino-P is the half-maintained legacy path.
             Row {
-                id: status
-                spacing: 8
-                Rectangle { width: 10; height: 10; radius: 5; anchors.verticalCenter: parent.verticalCenter
-                            color: dialog.hw.connected ? AppTheme.live : AppTheme.faint }
-                Text { text: dialog.hw.connected ? "Connected to " + dialog.hw.port : (dialog.hw.port !== "" ? "Ready to upload · " + dialog.hw.port : ((dialog.hw.ports || []).length === 0 ? "No serial port" : "Choose a serial port")); color: AppTheme.text
-                       font.pixelSize: 14; font.weight: Font.Bold }
+                id: familyRow
+                spacing: 4
+                IconButton { label: "Maramat Duino-S"; active: dialog.hw.family !== "dirigo"
+                             onClicked: controller.command({cmd: "setHardwareFamily", family: "duinoS"}) }
+                IconButton { label: "Sybas Duino-P (legacy)"; active: dialog.hw.family === "dirigo"
+                             onClicked: controller.command({cmd: "setHardwareFamily", family: "dirigo"}) }
             }
 
-            Rectangle {
-                id: portBox
-                anchors { left: parent.left; right: parent.right; top: status.bottom; topMargin: 12 }
-                height: Math.min(150, Math.max(46, (dialog.hw.ports || []).length * 34 + 12))
-                radius: 10; color: AppTheme.field
-                Text { visible: (dialog.hw.ports || []).length === 0; anchors.centerIn: parent; color: AppTheme.faint; font.pixelSize: 12
-                       text: "No serial ports found" }
-                ListView {
-                    anchors { fill: parent; margins: 6 }
-                    clip: true
-                    model: dialog.hw.ports || []
-                    delegate: Rectangle {
-                        required property var modelData
-                        width: ListView.view.width; height: 32; radius: 7
-                        readonly property bool chosen: dialog.hw.port === modelData.path
-                        color: chosen ? Qt.rgba(AppTheme.accent.r, AppTheme.accent.g, AppTheme.accent.b, 0.18) : (hov.containsMouse ? AppTheme.hover : "transparent")
-                        Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.name || modelData.path; color: AppTheme.text; font.pixelSize: 12 }
-                        Text { anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter } text: modelData.path; color: AppTheme.faint; font.pixelSize: 11 }
-                        MouseArea { id: hov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                    onClicked: controller.command({cmd: "selectPort", path: modelData.path}) }
+            // ── Duino-S link ───────────────────────────────────────────────────────────────────
+            Column {
+                id: duinoSection
+                anchors { left: parent.left; right: parent.right; top: familyRow.bottom; topMargin: 12
+                          bottom: progress.top; bottomMargin: 8 }
+                spacing: 10
+                visible: dialog.hw.family !== "dirigo"
+
+                Row {
+                    spacing: 4
+                    IconButton { label: "USB"; active: dialog.duino.transport !== "ethernet"
+                                 onClicked: controller.command({cmd: "duinoSetTransport", transport: "usbCDC"}) }
+                    IconButton { label: "Ethernet"; active: dialog.duino.transport === "ethernet"
+                                 onClicked: controller.command({cmd: "duinoSetTransport", transport: "ethernet"}) }
+                    Text { anchors.verticalCenter: parent.verticalCenter
+                           text: dialog.duino.modelName !== "" ? "Found " + dialog.duino.modelName : ""
+                           color: AppTheme.dim; font.pixelSize: 12 }
+                }
+
+                Row {
+                    id: ethRow
+                    visible: dialog.duino.transport === "ethernet"
+                    height: visible ? 32 : 0
+                    spacing: 8
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "IP"; color: AppTheme.faint; font.pixelSize: 12 }
+                    Rectangle { width: 150; height: 30; radius: 7; color: AppTheme.field
+                        TextInput { anchors.fill: parent; anchors.margins: 8
+                                    verticalAlignment: TextInput.AlignVCenter; clip: true
+                                    text: dialog.duino.host || ""; color: AppTheme.text; font.pixelSize: 12
+                                    onEditingFinished: controller.command({cmd: "duinoSetHost", value: text}) }
+                    }
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "Port"; color: AppTheme.faint; font.pixelSize: 12 }
+                    Rectangle { width: 70; height: 30; radius: 7; color: AppTheme.field
+                        TextInput { anchors.fill: parent; anchors.margins: 8
+                                    verticalAlignment: TextInput.AlignVCenter; clip: true
+                                    text: dialog.duino.port || 5020; color: AppTheme.text; font.pixelSize: 12
+                                    validator: IntValidator { bottom: 1; top: 65535 }
+                                    onEditingFinished: controller.command({cmd: "duinoSetPort", value: parseInt(text) || 5020}) }
+                    }
+                    IconButton { label: dialog.duino.discovering ? "Searching…" : "Find Duino-S"; icon: "reset"
+                                 onClicked: controller.command({cmd: "duinoDiscover"}) }
+                }
+
+                Text {
+                    visible: dialog.duino.discoveryStatus !== ""
+                    height: visible ? 18 : 0
+                    text: dialog.duino.discoveryStatus || ""; color: AppTheme.dim; font.pixelSize: 12
+                    width: parent.width; elide: Text.ElideRight
+                }
+
+                Rectangle {
+                    visible: (dialog.duino.devices || []).length > 0
+                    height: visible ? Math.min(110, (dialog.duino.devices || []).length * 32 + 10) : 0
+                    width: parent.width
+                    radius: 10; color: AppTheme.field
+                    ListView {
+                        anchors { fill: parent; margins: 5 }
+                        clip: true
+                        model: dialog.duino.devices || []
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: ListView.view.width; height: 30; radius: 7
+                            readonly property bool chosen: (dialog.duino.transport === "ethernet" && dialog.duino.host === modelData.endpoint)
+                                                            || (dialog.duino.transport !== "ethernet" && dialog.duino.serialPath === modelData.endpoint)
+                            color: chosen ? Qt.rgba(AppTheme.accent.r, AppTheme.accent.g, AppTheme.accent.b, 0.18) : (devHov.containsMouse ? AppTheme.hover : "transparent")
+                            Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.name || modelData.endpoint
+                                   color: AppTheme.text; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 20 }
+                            MouseArea { id: devHov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        onClicked: controller.command({cmd: "duinoSelectDevice", endpoint: modelData.endpoint}) }
+                        }
+                    }
+                }
+
+                Row {
+                    id: duinoButtons
+                    readonly property bool linked: dialog.duino.transport === "ethernet" ? (dialog.duino.host || "") !== ""
+                                                   : ((dialog.duino.serialPath || dialog.hw.port || "") !== "")
+                    spacing: 6
+                    IconButton { label: "Build project"; icon: "chip"
+                                 onClicked: {
+                                     const reply = controller.command({cmd: "duinoBuild"})
+                                     if (reply.ok) dialog.message = "Duino-S image: " + reply.report.imageBytes + " bytes, "
+                                                                    + reply.report.slots + " slot(s)"
+                                     else dialog.message = reply.error || "The project could not be compiled for the Duino-S."
+                                 } }
+                    IconButton { label: "Build && upload"; icon: "upload"; accented: true
+                                 enabled: parent.linked && !dialog.hw.uploading
+                                 onClicked: {
+                                     const reply = controller.command({cmd: "duinoBuild"})
+                                     if (reply.ok) controller.command({cmd: "duinoUpload"})
+                                     else dialog.message = reply.error || "The project could not be compiled for the Duino-S."
+                                 } }
+                    IconButton { label: (dialog.duino.watching ? "Stop watch" : "Watch"); icon: "chip"
+                                 onClicked: controller.command({cmd: dialog.duino.watching ? "duinoWatchStop" : "duinoWatchStart"}) }
+                }
+
+                Text {
+                    visible: dialog.duino.watchStatus !== "" && (dialog.duino.watch || []).length === 0
+                    height: visible ? 18 : 0
+                    text: dialog.duino.watchStatus || ""; color: AppTheme.dim; font.pixelSize: 12
+                    width: parent.width; elide: Text.ElideRight
+                }
+
+                Rectangle {
+                    visible: (dialog.duino.watch || []).length > 0
+                    height: visible ? Math.min(160, (dialog.duino.watch || []).length * 26 + 10) : 0
+                    width: parent.width
+                    radius: 10; color: AppTheme.field
+                    ListView {
+                        anchors { fill: parent; margins: 5 }
+                        clip: true
+                        model: dialog.duino.watch || []
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: ListView.view.width; height: 26; radius: 6; color: "transparent"
+                            Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.name
+                                   color: AppTheme.text; font.pixelSize: 12; width: parent.width * 0.62; elide: Text.ElideRight }
+                            Text { anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                                   text: modelData.value; color: AppTheme.live; font.pixelSize: 12; font.family: "monospace" }
+                        }
                     }
                 }
             }
 
-            Row {
-                id: hwButtons
-                anchors { top: portBox.bottom; topMargin: 12 }
-                spacing: 6
-                IconButton { label: "Refresh"; icon: "reset"; onClicked: controller.command({cmd: "refreshPorts"}) }
-                IconButton { label: "Build & upload"; icon: "upload"; accented: true; enabled: dialog.hw.port !== "" && !dialog.hw.uploading
-                             onClicked: controller.command({cmd: "upload"}) }
+            // ── Legacy Duino-P link ──────────────────────────────────────────────────────────────
+            Column {
+                anchors { left: parent.left; right: parent.right; top: familyRow.bottom; topMargin: 12
+                          bottom: progress.top; bottomMargin: 8 }
+                spacing: 10
+                visible: dialog.hw.family === "dirigo"
+
+                Row {
+                    spacing: 8
+                    Rectangle { width: 10; height: 10; radius: 5; anchors.verticalCenter: parent.verticalCenter
+                                color: dialog.hw.connected ? AppTheme.live : AppTheme.faint }
+                    Text { text: dialog.hw.connected ? "Connected to " + dialog.hw.port : (dialog.hw.port !== "" ? "Ready to upload · " + dialog.hw.port : ((dialog.hw.ports || []).length === 0 ? "No serial port" : "Choose a serial port")); color: AppTheme.text
+                           font.pixelSize: 14; font.weight: Font.Bold }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: Math.min(150, Math.max(46, (dialog.hw.ports || []).length * 34 + 12))
+                    radius: 10; color: AppTheme.field
+                    Text { visible: (dialog.hw.ports || []).length === 0; anchors.centerIn: parent; color: AppTheme.faint; font.pixelSize: 12
+                           text: "No serial ports found" }
+                    ListView {
+                        anchors { fill: parent; margins: 6 }
+                        clip: true
+                        model: dialog.hw.ports || []
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: ListView.view.width; height: 32; radius: 7
+                            readonly property bool chosen: dialog.hw.port === modelData.path
+                            color: chosen ? Qt.rgba(AppTheme.accent.r, AppTheme.accent.g, AppTheme.accent.b, 0.18) : (hov.containsMouse ? AppTheme.hover : "transparent")
+                            Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.name || modelData.path; color: AppTheme.text; font.pixelSize: 12 }
+                            Text { anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter } text: modelData.path; color: AppTheme.faint; font.pixelSize: 11 }
+                            MouseArea { id: hov; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        onClicked: controller.command({cmd: "selectPort", path: modelData.path}) }
+                        }
+                    }
+                }
+
+                Row {
+                    spacing: 6
+                    IconButton { label: "Refresh"; icon: "reset"; onClicked: controller.command({cmd: "refreshPorts"}) }
+                    IconButton { label: "Build & upload"; icon: "upload"; accented: true; enabled: dialog.hw.port !== "" && !dialog.hw.uploading
+                                 onClicked: controller.command({cmd: "upload"}) }
+                }
             }
 
             Column {
                 id: progress
-                anchors { left: parent.left; right: parent.right; top: hwButtons.bottom; topMargin: 14 }
+                anchors { left: parent.left; right: parent.right; bottom: logBox.top; bottomMargin: 8 }
                 spacing: 6
                 Text { text: (dialog.hw.phase || "") + (dialog.hw.status ? "  ·  " + dialog.hw.status : ""); color: AppTheme.dim
                        font.pixelSize: 12; width: parent.width; elide: Text.ElideRight; visible: text !== ""  }
@@ -205,7 +343,9 @@ Popup {
             }
 
             Rectangle {
-                anchors { left: parent.left; right: parent.right; top: progress.bottom; topMargin: 8; bottom: parent.bottom }
+                id: logBox
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 110
                 radius: 10; color: AppTheme.field
                 ScrollView {
                     anchors { fill: parent; margins: 10 }

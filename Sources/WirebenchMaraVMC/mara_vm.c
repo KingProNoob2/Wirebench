@@ -441,6 +441,12 @@ VmStatus_t VM_Reset(VmInstance_t *p_vm)
     memset(p_vm->longRam, 0, sizeof(p_vm->longRam));
     memset(p_vm->floatRam, 0, sizeof(p_vm->floatRam));
     memset(p_vm->stateRam, 0, sizeof(p_vm->stateRam));
+    memset(p_vm->movAvgBuf, 0, sizeof(p_vm->movAvgBuf));
+    memset(p_vm->movAvgSum, 0, sizeof(p_vm->movAvgSum));
+    memset(p_vm->movAvgHead, 0, sizeof(p_vm->movAvgHead));
+    memset(p_vm->movAvgCount, 0, sizeof(p_vm->movAvgCount));
+    memset(p_vm->arrayRam, 0, sizeof(p_vm->arrayRam));
+    p_vm->rngState      = 0x12345678U;
     p_vm->lastFaultCode = VM_OK;
     p_vm->lastFaultPc   = 0U;
     p_vm->scanCount     = 0U;
@@ -571,6 +577,34 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
         bool     enabled = (enSlot == VM_SLOT_ALWAYS_ENABLED) || (read_bool(p_vm, enSlot) != 0U);
 
         switch (opcode) {
+            case VM_OP_ESTOP_CHECK: {
+                nextPc = pc + 16U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t tripSlot = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t srcSlot  = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 12U]);
+                if (stateIdx < VM_MAX_STATE_SLOTS) {
+                    uint8_t rst     = enabled ? read_bool(p_vm, srcA) : 0U;
+                    uint8_t prevRst = p_vm->stateRam[stateIdx].prevBool;
+                    p_vm->stateRam[stateIdx].prevBool = rst;
+                    if (rst != 0U && prevRst == 0U && p_vm->estopActive != 0U) {
+                        p_vm->estopActive = 0U;
+                        p_vm->estopMask   = 0U;
+                        if (p_vm->runState == VM_STATE_ESTOP) {
+                            p_vm->runState = VM_STATE_RUNNING;
+                        }
+                    }
+                }
+                uint8_t tripped = (p_vm->estopActive != 0U) ? 1U : 0U;
+                write_bool(p_vm, dst, tripped ? 0U : 1U);
+                if (tripSlot != VM_SLOT_ALWAYS_ENABLED) {
+                    write_bool(p_vm, tripSlot, tripped);
+                }
+                if (srcSlot != VM_SLOT_ALWAYS_ENABLED) {
+                    write_int(p_vm, srcSlot, (int32_t)p_vm->estopMask);
+                }
+                break;
+            }
             case VM_OP_JMP: {
                 int16_t relBytes = (int16_t)srcA;
                 if (relBytes <= 0) {
@@ -759,6 +793,16 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                         else if (opcode == VM_OP_MIN) { r = (a < b) ? a : b; }
                         else                          { r = (a > b) ? a : b; }
                         write_float(p_vm, dst, r);
+                    } else if (dstType == VM_TYPE_LONG) {
+                        int64_t a = read_long(p_vm, srcA);
+                        int64_t b = read_long(p_vm, srcB);
+                        int64_t r = 0;
+                        if (opcode == VM_OP_ADD)      { r = a + b; }
+                        else if (opcode == VM_OP_SUB) { r = a - b; }
+                        else if (opcode == VM_OP_MUL) { r = a * b; }
+                        else if (opcode == VM_OP_MIN) { r = (a < b) ? a : b; }
+                        else                          { r = (a > b) ? a : b; }
+                        write_long(p_vm, dst, r);
                     } else {
                         int32_t a = read_int(p_vm, srcA);
                         int32_t b = read_int(p_vm, srcB);
@@ -780,14 +824,37 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                 uint16_t srcB    = read_u16_le(&p_vm->imageBuf[pc + 8U]);
                 uint16_t errSlot = read_u16_le(&p_vm->imageBuf[pc + 10U]);
                 if (enabled) {
-                    int32_t b = read_int(p_vm, srcB);
-                    if (b == 0) {
-                        write_int(p_vm, dst, 0);
-                        if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 1U); }
+                    uint8_t dstType = (uint8_t)(dst >> VM_SLOT_TYPE_SHIFT);
+                    if (dstType == VM_TYPE_FLOAT) {
+                        float a = read_float(p_vm, srcA);
+                        float b = read_float(p_vm, srcB);
+                        if (fabsf(b) < 1e-12f) {
+                            write_float(p_vm, dst, 0.0f);
+                            if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 1U); }
+                        } else {
+                            write_float(p_vm, dst, (opcode == VM_OP_DIV) ? (a / b) : fmodf(a, b));
+                            if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 0U); }
+                        }
+                    } else if (dstType == VM_TYPE_LONG) {
+                        int64_t b = read_long(p_vm, srcB);
+                        if (b == 0) {
+                            write_long(p_vm, dst, 0);
+                            if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 1U); }
+                        } else {
+                            int64_t a = read_long(p_vm, srcA);
+                            write_long(p_vm, dst, (opcode == VM_OP_DIV) ? (a / b) : (a % b));
+                            if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 0U); }
+                        }
                     } else {
-                        int32_t a = read_int(p_vm, srcA);
-                        write_int(p_vm, dst, (opcode == VM_OP_DIV) ? (a / b) : (a % b));
-                        if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 0U); }
+                        int32_t b = read_int(p_vm, srcB);
+                        if (b == 0) {
+                            write_int(p_vm, dst, 0);
+                            if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 1U); }
+                        } else {
+                            int32_t a = read_int(p_vm, srcA);
+                            write_int(p_vm, dst, (opcode == VM_OP_DIV) ? (a / b) : (a % b));
+                            if (errSlot != VM_SLOT_ALWAYS_ENABLED) { write_bool(p_vm, errSlot, 0U); }
+                        }
                     }
                 }
                 break;
@@ -816,11 +883,76 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                 uint16_t maxSlot = read_u16_le(&p_vm->imageBuf[pc + 10U]);
                 if (enabled) {
                     float v  = read_float(p_vm, srcA);
-                    float lo = read_float(p_vm, minSlot);
-                    float hi = read_float(p_vm, maxSlot);
+                    float a  = read_float(p_vm, minSlot);
+                    float b  = read_float(p_vm, maxSlot);
+                    float lo = (a < b) ? a : b;
+                    float hi = (a > b) ? a : b;
                     if (v < lo)      { v = lo; }
                     else if (v > hi) { v = hi; }
                     write_float(p_vm, dst, v);
+                }
+                break;
+            }
+            case VM_OP_SCALE: {
+                nextPc = pc + 16U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t iLoSlot = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t iHiSlot = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                uint16_t oLoSlot = read_u16_le(&p_vm->imageBuf[pc + 12U]);
+                uint16_t oHiSlot = read_u16_le(&p_vm->imageBuf[pc + 14U]);
+                if (enabled) {
+                    float inVal = read_float(p_vm, srcA);
+                    float iLo   = read_float(p_vm, iLoSlot);
+                    float iHi   = read_float(p_vm, iHiSlot);
+                    float oLo   = read_float(p_vm, oLoSlot);
+                    float oHi   = read_float(p_vm, oHiSlot);
+                    float span  = iHi - iLo;
+                    float res   = (fabsf(span) < 1e-12f) ? oLo : (oLo + ((inVal - iLo) / span) * (oHi - oLo));
+                    write_float(p_vm, dst, res);
+                }
+                break;
+            }
+            case VM_OP_RANDOM: {
+                nextPc = pc + 16U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t minSlot  = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t maxSlot  = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 12U]);
+                if (enabled && stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    uint8_t trig     = read_bool(p_vm, srcA);
+                    uint8_t prevTrig = p_st->prevBool;
+                    p_st->prevBool   = trig;
+                    if ((trig != 0U && prevTrig == 0U) || (p_st->prevAuxBool == 0U)) {
+                        float lo     = read_float(p_vm, minSlot);
+                        float hi     = read_float(p_vm, maxSlot);
+                        float minVal = (lo < hi) ? lo : hi;
+                        float maxVal = (lo > hi) ? lo : hi;
+                        uint32_t rnd;
+                        if (p_vm->hal.rng_next != NULL) {
+                            rnd = p_vm->hal.rng_next();
+                        } else {
+                            uint32_t x = p_vm->rngState;
+                            if (x == 0U) { x = 0x12345678U; }
+                            x ^= x << 13;
+                            x ^= x >> 17;
+                            x ^= x << 5;
+                            p_vm->rngState = x;
+                            rnd = x;
+                        }
+                        uint8_t dstType = (uint8_t)(dst >> VM_SLOT_TYPE_SHIFT);
+                        if (dstType == VM_TYPE_FLOAT) {
+                            float unit = (float)rnd / 4294967295.0f;
+                            p_st->accFloat = minVal + unit * (maxVal - minVal);
+                        } else {
+                            int64_t minI = (int64_t)floorf(minVal);
+                            int64_t maxI = (int64_t)floorf(maxVal);
+                            int64_t rVal = (maxI <= minI) ? minI : (minI + (int64_t)(rnd % (uint32_t)(maxI - minI + 1)));
+                            p_st->accFloat = (float)rVal;
+                        }
+                        p_st->prevAuxBool = 1U;
+                    }
+                    write_float(p_vm, dst, p_st->accFloat);
                 }
                 break;
             }
@@ -835,6 +967,195 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                     uint16_t rstSlot  = read_u16_le(&p_vm->imageBuf[pc + 16U]);
                     uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 18U]);
                     step_pid(p_vm, dst, srcA, spSlot, kpSlot, kiSlot, kdSlot, rstSlot, stateIdx, dt_us);
+                }
+                break;
+            }
+            case VM_OP_LOWPASS: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t alpSlot  = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                if (enabled && stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    float inVal = read_float(p_vm, srcA);
+                    float alpha = read_float(p_vm, alpSlot);
+                    if (alpha < 0.0f) { alpha = 0.0f; } else if (alpha > 1.0f) { alpha = 1.0f; }
+                    float y;
+                    if (p_st->prevBool == 0U) {
+                        y = inVal;
+                        p_st->prevBool = 1U;
+                    } else {
+                        y = p_st->accFloat + alpha * (inVal - p_st->accFloat);
+                    }
+                    p_st->accFloat = y;
+                    write_float(p_vm, dst, y);
+                }
+                break;
+            }
+            case VM_OP_MOVING_AVG: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t rstSlot = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t maIdx   = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                if (enabled && maIdx < VM_MAX_MOVAVG_INSTANCES) {
+                    uint8_t winSize = flags;
+                    if (winSize < 1U) { winSize = 1U; }
+                    if (winSize > VM_MOVAVG_MAX_WIN) { winSize = VM_MOVAVG_MAX_WIN; }
+                    float inVal = read_float(p_vm, srcA);
+                    if (read_bool(p_vm, rstSlot) != 0U) {
+                        p_vm->movAvgSum[maIdx]   = 0.0f;
+                        p_vm->movAvgHead[maIdx]  = 0U;
+                        p_vm->movAvgCount[maIdx] = 0U;
+                    }
+                    uint8_t head  = p_vm->movAvgHead[maIdx];
+                    uint8_t count = p_vm->movAvgCount[maIdx];
+                    if (count == winSize) {
+                        p_vm->movAvgSum[maIdx] -= p_vm->movAvgBuf[maIdx][head];
+                    } else {
+                        count++;
+                        p_vm->movAvgCount[maIdx] = count;
+                    }
+                    p_vm->movAvgBuf[maIdx][head] = inVal;
+                    p_vm->movAvgSum[maIdx]      += inVal;
+                    p_vm->movAvgHead[maIdx]      = (uint8_t)((head + 1U) % winSize);
+                    write_float(p_vm, dst, (count > 0U) ? (p_vm->movAvgSum[maIdx] / (float)count) : inVal);
+                }
+                break;
+            }
+            case VM_OP_DEBOUNCE: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t tmsSlot  = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                if (enabled && stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    uint8_t inVal = read_bool(p_vm, srcA);
+                    int32_t tMs   = read_int(p_vm, tmsSlot);
+                    if (tMs < 0) { tMs = 0; }
+                    if (inVal != p_st->latchedBool) {
+                        p_st->timer_ms += dt_ms;
+                        if (p_st->timer_ms >= (uint32_t)tMs) {
+                            p_st->latchedBool = inVal;
+                            p_st->timer_ms    = 0U;
+                        }
+                    } else {
+                        p_st->timer_ms = 0U;
+                    }
+                    write_bool(p_vm, dst, p_st->latchedBool);
+                }
+                break;
+            }
+            case VM_OP_RET_READ: {
+                if (enabled && p_vm->hal.retentive_read != NULL) {
+                    uint64_t raw = p_vm->hal.retentive_read(srcA);
+                    uint8_t dstType = (uint8_t)(dst >> VM_SLOT_TYPE_SHIFT);
+                    if (dstType == VM_TYPE_BOOL)       { write_bool(p_vm, dst, (raw != 0ULL) ? 1U : 0U); }
+                    else if (dstType == VM_TYPE_INT)   { write_int(p_vm, dst, (int32_t)(uint32_t)raw); }
+                    else if (dstType == VM_TYPE_LONG)  { write_long(p_vm, dst, (int64_t)raw); }
+                    else {
+                        uint32_t fBits = (uint32_t)raw;
+                        float fv = 0.0f;
+                        memcpy(&fv, &fBits, sizeof(fv));
+                        write_float(p_vm, dst, fv);
+                    }
+                }
+                break;
+            }
+            case VM_OP_RET_WRITE: {
+                if (enabled && p_vm->hal.retentive_write != NULL) {
+                    uint64_t raw = 0ULL;
+                    uint8_t srcType = (uint8_t)(dst >> VM_SLOT_TYPE_SHIFT);
+                    if (srcType == VM_TYPE_BOOL)       { raw = (uint64_t)read_bool(p_vm, dst); }
+                    else if (srcType == VM_TYPE_INT)   { raw = (uint64_t)(uint32_t)read_int(p_vm, dst); }
+                    else if (srcType == VM_TYPE_LONG)  { raw = (uint64_t)read_long(p_vm, dst); }
+                    else {
+                        float fv = read_float(p_vm, dst);
+                        uint32_t fBits = 0U;
+                        memcpy(&fBits, &fv, sizeof(fBits));
+                        raw = (uint64_t)fBits;
+                    }
+                    p_vm->hal.retentive_write(srcA, raw);
+                }
+                break;
+            }
+            case VM_OP_ARRAY_READ: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t oobSlot = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                if (enabled) {
+                    uint8_t arrIdx = flags;
+                    int32_t elemIdx = read_int(p_vm, srcA);
+                    bool oob = (arrIdx >= VM_MAX_ARRAYS) || (elemIdx < 0) || ((uint32_t)elemIdx >= VM_ARRAY_LEN);
+                    if (oob) {
+                        write_float(p_vm, dst, 0.0f);
+                    } else {
+                        write_float(p_vm, dst, p_vm->arrayRam[arrIdx][elemIdx]);
+                    }
+                    if (oobSlot != VM_SLOT_ALWAYS_ENABLED) {
+                        write_bool(p_vm, oobSlot, oob ? 1U : 0U);
+                    }
+                }
+                break;
+            }
+            case VM_OP_ARRAY_WRITE: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t valSlot = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                if (enabled) {
+                    uint8_t arrIdx = flags;
+                    int32_t elemIdx = read_int(p_vm, srcA);
+                    bool oob = (arrIdx >= VM_MAX_ARRAYS) || (elemIdx < 0) || ((uint32_t)elemIdx >= VM_ARRAY_LEN);
+                    if (!oob) {
+                        p_vm->arrayRam[arrIdx][elemIdx] = read_float(p_vm, valSlot);
+                    }
+                    if (dst != VM_SLOT_ALWAYS_ENABLED) {
+                        write_bool(p_vm, dst, oob ? 1U : 0U);
+                    }
+                }
+                break;
+            }
+            case VM_OP_INT_CAPTURE: {
+                nextPc = pc + 16U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t flgSlot  = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t diChan   = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 12U]);
+                if (enabled && stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    uint8_t capMode   = (uint8_t)(flags & 0x03U);       // 0=PULSE_WIDTH_US, 1=EDGE_COUNT, 2=GPIO_STATE
+                    uint8_t edgeMode  = (uint8_t)((flags >> 2U) & 0x03U); // 0=RISING, 1=FALLING, 2=BOTH
+                    uint8_t overwrite = (uint8_t)((flags >> 4U) & 0x01U); // 1=OVERWRITE_LATEST
+
+                    bool triggered = false;
+                    float captured = 0.0f;
+                    if (diChan != 0xFFFFU && p_vm->hal.di_read != NULL) {
+                        uint8_t cur  = p_vm->hal.di_read(diChan);
+                        uint8_t prev = p_st->prevBool;
+                        p_st->prevBool = cur;
+                        bool rising  = (cur != 0U && prev == 0U);
+                        bool falling = (cur == 0U && prev != 0U);
+                        if ((edgeMode == 0U && rising) || (edgeMode == 1U && falling) || (edgeMode == 2U && (rising || falling))) {
+                            triggered = true;
+                            if (capMode == 2U) { captured = (float)cur; }
+                        }
+                    }
+                    if (triggered) {
+                        if (capMode == 1U) {
+                            p_st->accFloat += 1.0f;
+                            p_st->latchedBool = 1U;
+                        } else if (p_st->latchedBool == 0U || overwrite != 0U) {
+                            p_st->accFloat = captured;
+                            p_st->latchedBool = 1U;
+                        }
+                    }
+                    write_float(p_vm, dst, p_st->accFloat);
+                    if (flgSlot != VM_SLOT_ALWAYS_ENABLED) {
+                        write_bool(p_vm, flgSlot, p_st->latchedBool);
+                    }
+                    if (read_bool(p_vm, srcA) != 0U && p_st->latchedBool != 0U) {
+                        p_st->latchedBool = 0U;
+                        if (capMode == 1U) { p_st->accFloat = 0.0f; }
+                    }
                 }
                 break;
             }
@@ -861,6 +1182,38 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                 }
                 break;
             }
+            case VM_OP_IN_RANGE: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t minSlot = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t maxSlot = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                if (enabled) {
+                    float v  = read_float(p_vm, srcA);
+                    float a  = read_float(p_vm, minSlot);
+                    float b  = read_float(p_vm, maxSlot);
+                    float lo = (a < b) ? a : b;
+                    float hi = (a > b) ? a : b;
+                    write_bool(p_vm, dst, (v >= lo && v <= hi) ? 1U : 0U);
+                }
+                break;
+            }
+            case VM_OP_HYSTERESIS: {
+                nextPc = pc + 16U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t loSlot   = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t hiSlot   = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 12U]);
+                if (enabled && stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    float v  = read_float(p_vm, srcA);
+                    float lo = read_float(p_vm, loSlot);
+                    float hi = read_float(p_vm, hiSlot);
+                    if (v >= hi)      { p_st->latchedBool = 1U; }
+                    else if (v <= lo) { p_st->latchedBool = 0U; }
+                    write_bool(p_vm, dst, p_st->latchedBool);
+                }
+                break;
+            }
             case VM_OP_SEL: {
                 nextPc = pc + 12U;
                 if (nextPc > p_vm->imageSizeBytes) { break; }
@@ -880,22 +1233,120 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                 uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 12U]);
                 if (stateIdx < VM_MAX_STATE_SLOTS) {
                     VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
-                    if (enabled && read_bool(p_vm, srcA) != 0U) {
-                        int32_t pt_ms = read_int(p_vm, ptSlot);
-                        if (pt_ms < 0) { pt_ms = 0; }
-                        p_st->timer_ms += dt_ms;
-                        if (p_st->timer_ms >= (uint32_t)pt_ms) {
-                            p_st->timer_ms = (uint32_t)pt_ms;
-                            write_bool(p_vm, dst, 1U);
+                    int32_t pt_ms = read_int(p_vm, ptSlot);
+                    if (pt_ms < 0) { pt_ms = 0; }
+                    uint8_t inVal = (enabled && read_bool(p_vm, srcA) != 0U) ? 1U : 0U;
+                    uint8_t qOut  = 0U;
+
+                    if (flags == 1U) {
+                        // TOF (Off-Delay)
+                        if (enabled) {
+                            if (inVal != 0U) {
+                                p_st->timer_ms = 0U;
+                            } else if (p_st->timer_ms < (uint32_t)pt_ms) {
+                                p_st->timer_ms += dt_ms;
+                                if (p_st->timer_ms > (uint32_t)pt_ms) {
+                                    p_st->timer_ms = (uint32_t)pt_ms;
+                                }
+                            }
+                            qOut = (inVal != 0U || p_st->timer_ms < (uint32_t)pt_ms) ? 1U : 0U;
                         } else {
-                            write_bool(p_vm, dst, 0U);
+                            p_st->timer_ms = (uint32_t)pt_ms;
+                            qOut = 0U;
                         }
+                    } else if (flags == 2U) {
+                        // TP (Pulse)
+                        uint8_t prevIn = p_st->prevBool;
+                        p_st->prevBool = inVal;
+                        if (enabled) {
+                            if (p_st->latchedBool == 0U && inVal != 0U && prevIn == 0U) {
+                                p_st->latchedBool = 1U;
+                                p_st->timer_ms    = 0U;
+                            }
+                            if (p_st->latchedBool != 0U) {
+                                p_st->timer_ms += dt_ms;
+                                if (p_st->timer_ms >= (uint32_t)pt_ms) {
+                                    p_st->latchedBool = 0U;
+                                    p_st->timer_ms    = (uint32_t)pt_ms;
+                                }
+                            }
+                            qOut = p_st->latchedBool;
+                        } else {
+                            p_st->latchedBool = 0U;
+                            p_st->timer_ms    = 0U;
+                            qOut = 0U;
+                        }
+                    } else {
+                        // TON (On-Delay)
+                        if (inVal != 0U) {
+                            p_st->timer_ms += dt_ms;
+                            if (p_st->timer_ms >= (uint32_t)pt_ms) {
+                                p_st->timer_ms = (uint32_t)pt_ms;
+                                qOut = 1U;
+                            }
+                        } else {
+                            p_st->timer_ms = 0U;
+                        }
+                    }
+                    write_bool(p_vm, dst, qOut);
+                    if (etSlot != VM_SLOT_ALWAYS_ENABLED) {
+                        write_int(p_vm, etSlot, (int32_t)p_st->timer_ms);
+                    }
+                }
+                break;
+            }
+            case VM_OP_PULSE_GEN: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t tLoSlot  = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                if (stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    if (enabled) {
+                        int32_t tHi = read_int(p_vm, srcA);
+                        int32_t tLo = read_int(p_vm, tLoSlot);
+                        if (tHi < 1) { tHi = 1; }
+                        if (tLo < 1) { tLo = 1; }
+                        uint64_t cycle = (uint64_t)(uint32_t)tHi + (uint64_t)(uint32_t)tLo;
+                        uint32_t pos = (uint32_t)(((uint64_t)p_st->timer_ms + (uint64_t)dt_ms) % cycle);
+                        p_st->timer_ms = pos;
+                        write_bool(p_vm, dst, (pos < (uint32_t)tHi) ? 1U : 0U);
                     } else {
                         p_st->timer_ms = 0U;
                         write_bool(p_vm, dst, 0U);
                     }
-                    if (etSlot != VM_SLOT_ALWAYS_ENABLED) {
-                        write_int(p_vm, etSlot, (int32_t)p_st->timer_ms);
+                }
+                break;
+            }
+            case VM_OP_PULSE_LEN: {
+                nextPc = pc + 12U;
+                if (nextPc > p_vm->imageSizeBytes) { break; }
+                uint16_t lenSlot  = read_u16_le(&p_vm->imageBuf[pc + 8U]);
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 10U]);
+                if (stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    uint8_t inVal  = (enabled && read_bool(p_vm, srcA) != 0U) ? 1U : 0U;
+                    uint8_t prevIn = p_st->prevBool;
+                    p_st->prevBool = inVal;
+                    if (enabled) {
+                        int32_t lenMs = read_int(p_vm, lenSlot);
+                        if (lenMs < 0) { lenMs = 0; }
+                        if (p_st->latchedBool == 0U && inVal != 0U && prevIn == 0U) {
+                            p_st->latchedBool = 1U;
+                            p_st->timer_ms    = 0U;
+                        }
+                        if (p_st->latchedBool != 0U) {
+                            p_st->timer_ms += dt_ms;
+                            if (p_st->timer_ms >= (uint32_t)lenMs) {
+                                p_st->latchedBool = 0U;
+                                p_st->timer_ms    = (uint32_t)lenMs;
+                            }
+                        }
+                        write_bool(p_vm, dst, p_st->latchedBool);
+                    } else {
+                        p_st->latchedBool = 0U;
+                        p_st->timer_ms    = 0U;
+                        write_bool(p_vm, dst, 0U);
                     }
                 }
                 break;
@@ -913,21 +1364,29 @@ VmStatus_t VM_StepThread(VmInstance_t *p_vm, uint8_t threadId, uint32_t dt_us)
                 break;
             }
             case VM_OP_CTUD: {
-                nextPc = pc + 16U;
+                nextPc = pc + 20U;
                 if (nextPc > p_vm->imageSizeBytes) { break; }
                 uint16_t cdSlot   = read_u16_le(&p_vm->imageBuf[pc + 8U]);
                 uint16_t rSlot    = read_u16_le(&p_vm->imageBuf[pc + 10U]);
                 uint16_t pvSlot   = read_u16_le(&p_vm->imageBuf[pc + 12U]);
                 uint16_t cvSlot   = read_u16_le(&p_vm->imageBuf[pc + 14U]);
-                // Counter state uses cvSlot directly and edge flags from prevBool/prevAuxBool if stateIdx encoded
-                if (enabled) {
+                uint16_t stateIdx = read_u16_le(&p_vm->imageBuf[pc + 16U]);
+                if (enabled && stateIdx < VM_MAX_STATE_SLOTS) {
+                    VmStateSlot_t *p_st = &p_vm->stateRam[stateIdx];
+                    uint8_t cu = read_bool(p_vm, srcA);
+                    uint8_t cd = read_bool(p_vm, cdSlot);
+                    bool cuEdge = (cu != 0U && p_st->prevBool == 0U);
+                    bool cdEdge = (cd != 0U && p_st->prevAuxBool == 0U);
+                    p_st->prevBool    = cu;
+                    p_st->prevAuxBool = cd;
+
                     int32_t cv = read_int(p_vm, cvSlot);
                     int32_t pv = read_int(p_vm, pvSlot);
                     if (read_bool(p_vm, rSlot) != 0U) {
                         cv = 0;
                     } else {
-                        if (read_bool(p_vm, srcA) != 0U)   { cv++; }
-                        if (read_bool(p_vm, cdSlot) != 0U) { cv--; }
+                        if (cuEdge) { cv++; }
+                        if (cdEdge && cv > 0) { cv--; }
                     }
                     write_int(p_vm, cvSlot, cv);
                     write_bool(p_vm, dst, (cv >= pv) ? 1U : 0U);

@@ -92,7 +92,7 @@ struct UnsavedChangesTests {
         let before = model.project
 
         model.createNewProject()
-        #expect(model.pendingUnsavedIntent == .newProject, "New asks before replacing the project")
+        #expect(model.pendingUnsavedIntent == .newProject(.maraflow), "New asks before replacing the project")
         model.answerUnsavedChanges(.cancel)
         #expect(model.pendingUnsavedIntent == nil)
 

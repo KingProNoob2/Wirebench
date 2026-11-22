@@ -9,17 +9,37 @@ public enum HardwareFamily: String, CaseIterable, Identifiable, Sendable {
     case duinoS
 
     public var id: String { rawValue }
-    public var title: String { self == .dirigo ? "Sybas Duino-P" : "Maramat Duino-S" }
+    public var title: String { self == .dirigo ? "Sybas Duino-P (legacy)" : "Maramat Duino-S" }
     public var shortTitle: String { self == .dirigo ? "Duino-P" : "Duino-S" }
+}
+
+/// The platform a project belongs to. The modes are separate: a Maraflow project offers Maraflow's
+/// blocks and compiles for the Duino-S; a Wirebench (.wbp) project is the legacy Dirigo lane.
+public enum ProjectPlatform: String, CaseIterable, Identifiable, Sendable {
+    case maraflow
+    case wirebench
+
+    public var id: String { rawValue }
+    public var title: String { self == .maraflow ? "Maraflow Project" : "Wirebench Project (legacy)" }
+    public var shortTitle: String { self == .maraflow ? "Maraflow" : "Wirebench" }
+    /// The hardware family a new project of this platform starts on.
+    public var family: HardwareFamily { self == .maraflow ? .duinoS : .dirigo }
 }
 
 /// Where a Duino-S is reached. MaraProt speaks the same frames over both.
 public enum DuinoTransport: String, CaseIterable, Identifiable, Sendable {
     case usbCDC
     case ethernet
+    case emulator
 
     public var id: String { rawValue }
-    public var title: String { self == .usbCDC ? "USB" : "Ethernet" }
+    public var title: String {
+        switch self {
+        case .usbCDC: return "USB"
+        case .ethernet: return "Ethernet"
+        case .emulator: return "Emulator"
+        }
+    }
 }
 
 /// A resolved Duino-S endpoint, Sendable so the watch task can carry it off the main actor.
@@ -33,7 +53,7 @@ public struct DuinoLink: Sendable, Equatable {
         switch transport {
         case .usbCDC:
             return MaraSerialTransport(path: serialPath)
-        case .ethernet:
+        case .ethernet, .emulator:
             return MaraTCPTransport(host: host, port: port)
         }
     }
@@ -42,11 +62,27 @@ public struct DuinoLink: Sendable, Equatable {
         switch transport {
         case .usbCDC: return serialPath
         case .ethernet: return "\(host):\(port)"
+        case .emulator: return "emulator \(host):\(port)"
         }
     }
 }
 
 public extension AppModel {
+    @discardableResult
+    @MainActor
+    func startDuinoSimulator() -> DuinoSimSession? {
+        if let duinoSimSession { return duinoSimSession }
+        do {
+            let session = try DuinoSimSession()
+            duinoSimSession = session
+            duinoSimError = ""
+            return session
+        } catch {
+            duinoSimError = error.localizedDescription
+            return nil
+        }
+    }
+
     /// The endpoint the next identify/upload/watch action should use, or nil when the fields are incomplete.
     func currentDuinoLink() -> DuinoLink? {
         switch duinoTransport {
@@ -57,10 +93,24 @@ public extension AppModel {
             let host = duinoHost.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !host.isEmpty, (1...65_535).contains(duinoTCPPort) else { return nil }
             return DuinoLink(transport: .ethernet, serialPath: "", host: host, port: UInt16(duinoTCPPort))
+        case .emulator:
+            guard let duinoSimSession, duinoSimSession.sim.isPowered else { return nil }
+            return DuinoLink(transport: .emulator, serialPath: "", host: "127.0.0.1", port: duinoSimSession.port)
         }
     }
 
     var isDuinoLinkConfigured: Bool { currentDuinoLink() != nil }
+
+    var duinoLinkMissingMessage: String {
+        switch duinoTransport {
+        case .usbCDC: return "No serial port. Plug in the Duino-S and rescan."
+        case .ethernet: return "Enter the Duino-S IP address and port."
+        case .emulator:
+            return duinoSimSession == nil
+                ? "Start the Duino-S emulator first."
+                : "Reconnect DC power in the emulator."
+        }
+    }
 
     /// Compiles the current project to MFLW and uploads it over USB CDC. The VM is started by the
     /// commit command, matching the way the Dirigo uploader starts the PLC after a table write.
@@ -72,9 +122,7 @@ public extension AppModel {
             return
         }
         guard let link = currentDuinoLink() else {
-            uploadStatus = duinoTransport == .usbCDC
-                ? "No serial port. Plug in the Duino-S and rescan."
-                : "Enter the Duino-S IP address and port."
+            uploadStatus = duinoLinkMissingMessage
             uploadPhase = ""
             uploadProgress = nil
             return
@@ -169,9 +217,7 @@ public extension AppModel {
             return
         }
         guard let link = currentDuinoLink() else {
-            duinoWatchStatus = duinoTransport == .usbCDC
-                ? "No serial port. Plug in the Duino-S and rescan."
-                : "Enter the Duino-S IP address and port."
+            duinoWatchStatus = duinoLinkMissingMessage
             return
         }
         duinoWatchStatus = "Starting watch…"
@@ -188,6 +234,7 @@ public extension AppModel {
         isWatchingDuino = false
         duinoWatchStatus = "Watch stopped."
         duinoWatchValues.removeAll()
+        duinoWatchRevision &+= 1
         duinoWatchSlotNames.removeAll()
         duinoWatchSlotTypes.removeAll()
     }
@@ -243,6 +290,7 @@ public extension AppModel {
                 self.duinoWatchSlotNames = names
                 self.duinoWatchSlotTypes = types
                 self.duinoWatchValues = values
+                self.duinoWatchRevision &+= 1
                 self.duinoWatchStatus = "Watching \(selected.count) slot(s) on \(info.modelName)."
             }
             var ackEpoch = update.epoch == 0 ? epoch : update.epoch
@@ -258,6 +306,7 @@ public extension AppModel {
                 if !changes.isEmpty {
                     await MainActor.run {
                         for (slot, value) in changes { self.duinoWatchValues[slot] = value }
+                        self.duinoWatchRevision &+= 1
                     }
                 }
             }
@@ -278,11 +327,15 @@ public extension AppModel {
 public extension AppModel {
     /// Finds a Duino-S without the user typing an address.
     ///
-    /// The Duino-S firmware has no mDNS/NetBIOS responder enabled, so Ethernet is discovered by
-    /// probing the local IPv4 subnet's TCP 5020 port and checking GET_INFO's model identity. USB is
-    /// discovered by probing the CDC ports and doing the same identity check.
+    /// Ethernet asks the firmware's mDNS responder (`duinos.local`, with the subnet scan as the
+    /// fallback) and validates each candidate with GET_INFO; USB probes the CDC ports the same way.
     func discoverDuinoDevices() async {
         guard hardwareFamily == .duinoS else { return }
+        if duinoTransport == .emulator {
+            duinoDiscoveredDevices = []
+            duinoDiscoveryStatus = ""
+            return
+        }
         guard !isDiscoveringDuino else { return }
         await MainActor.run {
             self.isDiscoveringDuino = true
@@ -328,11 +381,14 @@ public extension AppModel {
 
     /// Selects one of the devices returned by discovery.
     func selectDuinoDevice(_ device: MaraDiscoveredDevice) {
-        if duinoTransport == .usbCDC {
+        switch duinoTransport {
+        case .usbCDC:
             selectedPortPath = device.endpoint
-        } else {
+        case .ethernet:
             duinoHost = device.endpoint
             if device.port != 0 { duinoTCPPort = Int(device.port) }
+        case .emulator:
+            break
         }
         duinoInfo = device.info
         duinoDiscoveryStatus = "Using \(device.displayName)."

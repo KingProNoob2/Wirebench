@@ -160,6 +160,38 @@ public struct SceneSnapshot: Codable, Sendable {
         /// 0...1 while an upload runs, else -1.
         public var progress: Double
         public var log: [String]
+        /// The targeted family: `duinoS` or the legacy `dirigo`.
+        public var family: String
+        /// Which platform the open project belongs to: `maraflow` or `wirebench`.
+        public var platform: String
+        /// The Duino-S link state, when `family` is `duinoS`.
+        public var duino: Duino
+    }
+
+    /// What the Qt Hardware tab needs to render the Duino-S path: the link fields, discovery
+    /// results, the last GET_INFO, and the live watch table.
+    public struct Duino: Codable, Sendable {
+        public var transport: String
+        public var serialPath: String
+        public var host: String
+        public var port: Int
+        public var discovering: Bool
+        public var discoveryStatus: String
+        public var devices: [[String: String]]
+        public var modelName: String
+        public var vmState: String
+        public var watching: Bool
+        public var watchStatus: String
+        /// Bumped when `watch` changes; the frontend re-reads the table only then.
+        public var watchRevision: Int
+        public var watch: [WatchValue]
+    }
+
+    public struct WatchValue: Codable, Sendable {
+        public var slot: Int
+        public var name: String
+        public var type: String
+        public var value: Double
     }
 
     public var title: String
@@ -393,7 +425,29 @@ public struct SceneSnapshot: Codable, Sendable {
                 connected: model.isHardwareConnected, uploading: model.isUploading, port: model.selectedPortPath,
                 ports: model.availablePorts.map { ["path": $0.path, "name": $0.name] },
                 status: model.uploadStatus, phase: model.uploadPhase, progress: model.uploadProgress ?? -1,
-                log: model.uploadLog.suffix(200).map(\.text)),
+                log: model.uploadLog.suffix(200).map(\.text),
+                family: model.hardwareFamily.rawValue,
+                platform: model.projectPlatform.rawValue,
+                duino: Duino(
+                    transport: model.duinoTransport.rawValue,
+                    serialPath: model.selectedPortPath,
+                    host: model.duinoHost, port: model.duinoTCPPort,
+                    discovering: model.isDiscoveringDuino,
+                    discoveryStatus: model.duinoDiscoveryStatus,
+                    devices: model.duinoDiscoveredDevices.map {
+                        ["endpoint": $0.endpoint, "name": $0.displayName, "transport": $0.isEthernet ? "ethernet" : "usb"]
+                    },
+                    modelName: model.duinoInfo?.modelName ?? "",
+                    vmState: model.duinoInfo.map { String(describing: $0.vmState) } ?? "",
+                    watching: model.isWatchingDuino, watchStatus: model.duinoWatchStatus,
+                    watchRevision: model.duinoWatchRevision,
+                    watch: model.duinoWatchSlotNames.keys.sorted().compactMap { slot in
+                        guard let name = model.duinoWatchSlotNames[slot],
+                              let value = model.duinoWatchValues[slot] else { return nil }
+                        return WatchValue(slot: Int(slot), name: name,
+                                          type: model.duinoWatchSlotTypes[slot].map { ["bool", "int", "long", "float"][$0.rawValue] } ?? "bool",
+                                          value: value)
+                    })),
             settings: Settings(appearance: model.appearance.rawValue, snapToGrid: model.snapToGrid,
                                scrollZooms: model.scrollZooms, optimize: model.optimizeProgram,
                                pinPitch: Double(CardGeometry.pinPitch),

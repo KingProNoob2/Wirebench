@@ -229,6 +229,7 @@ struct Module {
     int64_t total = 0;             /* SinglePulse; PulseLen's active cycles; AdvCounter's value */
     double filterValue = 0;        /* Filter */
     std::deque<int64_t> history;   /* Mean */
+    std::deque<double> maraflowWindow;   /* Maraflow MovingAvg: the running sample window */
     WirebenchValue lastValue{};       /* Trigger; `undefined` until it has run */
     bool processedOnce = false;    /* Trigger; DelayFilter's "armed" */
     bool flagA = false;            /* WaterRegulator's open latch, HystComparator's "greater", StepDriver's commanded */
@@ -298,6 +299,8 @@ struct WirebenchSim {
     std::map<int64_t, std::vector<double>> arrays;
     /// The Maraflow operand namespace: DI/DO/AI/AO/PWM channel registers and named registers.
     std::map<std::string, double> operands;
+    /// Maraflow ArrayRead/ArrayWrite: one 64-element store per distinct array name.
+    std::map<std::string, std::vector<double>> maraflowArrays;
     bool maraflowEStopActive = false;
     int32_t maraflowEStopMask = 0;
     bool maraflowEStopEnabled = false;
@@ -1509,12 +1512,37 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     return;
                 }
                 case MARAFLOW_Main_Timers_Timer: {
+                    // Maraflow's TimerMode: TON (default), TOF (off-delay) and TP (pulse).
                     const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
                     const double preset = std::max(0.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0);
+                    // The property reads "TON (On-Delay)" / "TOF (Off-Delay)" / "TP (Pulse)": match the headword.
+                    const std::string mode = m.strings.count("TimerMode") ? m.strings["TimerMode"] : "TON";
                     double elapsed = m.f[0];
-                    elapsed = input ? std::min(preset, elapsed + sample.deltaMs) : 0.0;
+                    bool qOut = false;
+                    if (mode.rfind("TOF", 0) == 0) {
+                        if (input) {
+                            elapsed = 0.0;
+                        } else if (elapsed < preset) {
+                            elapsed = std::min(preset, elapsed + sample.deltaMs);
+                        }
+                        qOut = input || elapsed < preset;
+                    } else if (mode.rfind("TP", 0) == 0) {
+                        const bool previous = m.flagA;
+                        m.flagA = input;
+                        bool active = m.s[1] >= 0.5;
+                        if (!active && input && !previous) { active = true; elapsed = 0.0; }
+                        if (active) {
+                            elapsed += sample.deltaMs;
+                            if (elapsed >= preset) { active = false; elapsed = preset; }
+                        }
+                        m.s[1] = active ? 1.0 : 0.0;
+                        qOut = active;
+                    } else {
+                        elapsed = input ? std::min(preset, elapsed + sample.deltaMs) : 0.0;
+                        qOut = input && elapsed >= preset;
+                    }
                     m.f[0] = elapsed;
-                    if (!m.outPins.empty()) m.outPins[0] = boolean(input && elapsed >= preset);
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(qOut);
                     if (m.outPins.size() > 1) m.outPins[1] = maraflowNumber(static_cast<double>(static_cast<int64_t>(elapsed)), m.outPins[1]);
                     return;
                 }
@@ -1741,17 +1769,28 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     return;
                 }
                 case MARAFLOW_Main_Conversion_PackBits: {
+                    // BitOrder: MSB lays the first pin on the highest bit of the count, like Maraflow.
+                    const bool msb = m.strings.count("BitOrder")
+                        && m.strings["BitOrder"] == "MSB";
+                    const int count = static_cast<int>(m.inPins.size()) - 1;
                     int64_t packed = 0;
                     for (size_t i = 1; i < m.inPins.size(); ++i) {
-                        if (asBool(m.inPins[i])) packed |= (1LL << (i - 1));
+                        if (asBool(m.inPins[i])) {
+                            const int bitIndex = msb ? (count - static_cast<int>(i)) : (static_cast<int>(i) - 1);
+                            if (bitIndex >= 0 && bitIndex < 63) packed |= (1LL << bitIndex);
+                        }
                     }
                     if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(static_cast<double>(packed), m.outPins[0]);
                     return;
                 }
                 case MARAFLOW_Main_Conversion_UnpackBits: {
+                    const bool msb = m.strings.count("BitOrder")
+                        && m.strings["BitOrder"] == "MSB";
                     const int64_t value = static_cast<int64_t>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
-                    for (size_t i = 0; i < m.outPins.size(); ++i) {
-                        m.outPins[i] = boolean(((value >> i) & 1LL) != 0);
+                    const int count = static_cast<int>(m.outPins.size());
+                    for (int i = 0; i < count; ++i) {
+                        const int bitIndex = msb ? (count - 1 - i) : i;
+                        m.outPins[i] = boolean(((value >> bitIndex) & 1LL) != 0);
                     }
                     return;
                 }
@@ -1809,6 +1848,157 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     if (m.outPins.size() > 1) m.outPins[1] = boolean(m.s[1] >= 0.5);
                     const bool reset = m.inPins.size() > 1 && asBool(m.inPins[1]);
                     if (reset && m.s[1] >= 0.5) m.s[1] = 0.0;
+                    return;
+                }
+                case MARAFLOW_Main_Comparators_InRange: {
+                    const double value = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double a = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const double b = m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 0.0;
+                    const double lo = std::min(a, b), hi = std::max(a, b);
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(value >= lo && value <= hi);
+                    return;
+                }
+                case MARAFLOW_Main_Comparators_Hysteresis: {
+                    const double value = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double lo = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const double hi = m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 0.0;
+                    if (value >= hi) m.flagA = true;
+                    else if (value <= lo) m.flagA = false;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(m.flagA);
+                    return;
+                }
+                case MARAFLOW_Main_Filters_MovingAvg: {
+                    const double input = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const bool reset = m.inPins.size() > 2 && asBool(m.inPins[2]);
+                    int windowSize = 8;
+                    if (m.strings.count("WindowSize")) {
+                        try {
+                            windowSize = std::max(1, std::min(256, std::stoi(m.strings["WindowSize"])));
+                        } catch (...) {}
+                    }
+                    if (reset) m.maraflowWindow.clear();
+                    m.maraflowWindow.push_back(input);
+                    while (static_cast<int>(m.maraflowWindow.size()) > windowSize) m.maraflowWindow.pop_front();
+                    double sum = 0.0;
+                    for (double v : m.maraflowWindow) sum += v;
+                    if (!m.outPins.empty()) {
+                        m.outPins[0] = maraflowNumber(m.maraflowWindow.empty() ? input : sum / m.maraflowWindow.size(), m.outPins[0]);
+                    }
+                    return;
+                }
+                case MARAFLOW_Main_Filters_LowPass: {
+                    const double input = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double alpha = std::clamp(m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0, 0.0, 1.0);
+                    double y;
+                    if (m.s[1] < 0.5) {
+                        y = input;
+                        m.s[1] = 1.0;
+                    } else {
+                        const double previous = m.f[0];
+                        y = previous + alpha * (input - previous);
+                    }
+                    m.f[0] = y;
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(y, m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_Main_Filters_Debounce: {
+                    const bool input = m.inPins.size() > 1 && asBool(m.inPins[1]);
+                    const double timeMs = std::max(0.0, m.inPins.size() > 2 ? static_cast<double>(asFloat(m.inPins[2])) : 0.0);
+                    bool outState = m.s[1] >= 0.5;
+                    double elapsed = m.f[0];
+                    if (input != outState) {
+                        elapsed += sample.deltaMs;
+                        if (elapsed >= timeMs) {
+                            outState = input;
+                            elapsed = 0.0;
+                        }
+                    } else {
+                        elapsed = 0.0;
+                    }
+                    m.f[0] = elapsed;
+                    m.s[1] = outState ? 1.0 : 0.0;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(outState);
+                    return;
+                }
+                case MARAFLOW_Main_Arrays_ArrayRead: {
+                    const std::string name = m.strings.count("ArrayName") ? m.strings["ArrayName"] : "ARR_0";
+                    std::vector<double> &array = sim->maraflowArrays[name];
+                    if (array.empty()) array.resize(64, 0.0);
+                    const int index = static_cast<int>(std::floor(m.inPins.size() > 1 ? static_cast<double>(asFloat(m.inPins[1])) : 0.0));
+                    const bool outOfBounds = index < 0 || index >= static_cast<int>(array.size());
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(outOfBounds ? 0.0 : array[index], m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(outOfBounds);
+                    return;
+                }
+                case MARAFLOW_Main_Arrays_ArrayWrite: {
+                    const std::string name = m.strings.count("ArrayName") ? m.strings["ArrayName"] : "ARR_0";
+                    std::vector<double> &array = sim->maraflowArrays[name];
+                    if (array.empty()) array.resize(64, 0.0);
+                    const int index = static_cast<int>(std::floor(m.inPins.size() > 1 ? static_cast<double>(asFloat(m.inPins[1])) : 0.0));
+                    const double value = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const bool outOfBounds = index < 0 || index >= static_cast<int>(array.size());
+                    if (!outOfBounds) array[index] = value;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(outOfBounds);
+                    return;
+                }
+                case MARAFLOW_Main_Switches_Demux: {
+                    const int address = static_cast<int>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
+                    const double input = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    for (size_t i = 0; i < m.outPins.size(); ++i) {
+                        m.outPins[i] = maraflowNumber(static_cast<int>(i) == address ? input : 0.0, m.outPins[i]);
+                    }
+                    return;
+                }
+                case MARAFLOW_Math_PID: {
+                    const double pv = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
+                    const double sp = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
+                    const double kp = m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 1.0;
+                    const double ki = m.inPins.size() > 4 ? asFloat(m.inPins[4]) : 0.0;
+                    const double kd = m.inPins.size() > 5 ? asFloat(m.inPins[5]) : 0.0;
+                    const bool reset = m.inPins.size() > 6 && asBool(m.inPins[6]);
+                    const double dtSec = std::max(0.001, sample.deltaMs / 1000.0);
+                    const double error = sp - pv;
+                    const double integral = reset ? 0.0 : (m.f[0] + error * dtSec);
+                    const double previousError = reset ? error : m.f[1];
+                    const double derivative = (error - previousError) / dtSec;
+                    m.f[0] = integral;
+                    m.f[1] = previousError == error && reset ? error : error;
+                    if (!m.outPins.empty()) {
+                        m.outPins[0] = maraflowNumber(kp * error + ki * integral + kd * derivative, m.outPins[0]);
+                    }
+                    return;
+                }
+                case MARAFLOW_Main_Timers_EncodeDate: {
+                    const int year = static_cast<int>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 2026);
+                    const int month = std::clamp(static_cast<int>(m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 1), 1, 12);
+                    const int day = std::clamp(static_cast<int>(m.inPins.size() > 3 ? asFloat(m.inPins[3]) : 1), 1, 31);
+                    const int hour = std::clamp(static_cast<int>(m.inPins.size() > 4 ? asFloat(m.inPins[4]) : 0), 0, 23);
+                    const int minute = std::clamp(static_cast<int>(m.inPins.size() > 5 ? asFloat(m.inPins[5]) : 0), 0, 59);
+                    const int second = std::clamp(static_cast<int>(m.inPins.size() > 6 ? asFloat(m.inPins[6]) : 0), 0, 59);
+                    // Days-from-civil (Hinnant), UTC — the same calendar DecodeDate splits with.
+                    int y = year - (month <= 2 ? 1 : 0);
+                    const int era = (y >= 0 ? y : y - 399) / 400;
+                    const unsigned yoe = static_cast<unsigned>(y - era * 400);
+                    const unsigned doy = static_cast<unsigned>((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1);
+                    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+                    const int64_t epoch = (static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468) * 86400
+                        + hour * 3600 + minute * 60 + second;
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(static_cast<double>(epoch), m.outPins[0]);
+                    return;
+                }
+                case MARAFLOW_IO_CH455G: {
+                    // The display is always "active" in the simulator, as Maraflow reports it.
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(true);
+                    return;
+                }
+                case MARAFLOW_Comm_I2C_TMP75: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(25.0, m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(true);
+                    return;
+                }
+                case MARAFLOW_Comm_DS18B20_DS18B20Read: {
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(22.5, m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(true);
                     return;
                 }
                 default:

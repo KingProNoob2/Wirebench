@@ -23,6 +23,10 @@ struct SwiftIDEView: View {
     @State private var outlineRows: [(label: String, line: Int)] = []
     @State private var savingError: String?
     @State private var debounce: Task<Void, Never>?
+    /// The source last written to the open document, by recovery or by an auto-apply: the buffer is
+    /// re-applied to the workspace only when it differs, so recovering or recompiling the same text
+    /// never churns the sheet.
+    @State private var lastAppliedSource: String?
 
     var body: some View {
         HSplitView {
@@ -40,6 +44,11 @@ struct SwiftIDEView: View {
         .onChange(of: model.currentFileURL) { _, _ in
             // Opening another document leaves an empty buffer; recover that document rather than keep the last one.
             if model.swiftSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { recoverFromProject() }
+        }
+        .onChange(of: model.sheetEditRevision) { _, _ in
+            // A block landed, moved, was configured, or an undo ran in the workspace: the source
+            // mirrors it at once.
+            syncFromWorkspace()
         }
         .onChange(of: model.swiftSource) { _, new in
             isEmpty = new.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -114,7 +123,7 @@ struct SwiftIDEView: View {
                 if isMaraflowPage {
                     Text("Maraflow Structured Text page")
                         .font(.headline)
-                    Text("This imported page runs through the native Maraflow ST interpreter. Edit the source and press Apply to Page to write it back and rebuild the simulation.")
+                    Text("This page runs on Maraflow's ST interpreter, which speaks full IEC 61131-3. Edits are written back to the page as you type. The checker below covers Wirebench's ST subset only — what it flags may be fine on the PLC.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -125,10 +134,23 @@ struct SwiftIDEView: View {
 
                 if isEmpty && !isMaraflowPage { emptyState }
 
-                if !isMaraflowPage, !outlineRows.isEmpty { outlineView }
+                if !outlineRows.isEmpty { outlineView }
 
                 if isMaraflowPage {
-                    // The page is interpreted directly; the subset compiler's report does not apply.
+                    if !diagnostics.isEmpty {
+                        Text("Outside the Wirebench subset")
+                            .font(.headline)
+                        Text("The Maraflow interpreter may accept what the subset checker flags:")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        diagnosticList
+                    } else if let failure {
+                        Text(failure)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 } else if let failure {
                     Text(failure)
                         .font(.callout)
@@ -167,7 +189,7 @@ struct SwiftIDEView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Writing a program here and pressing Open in Wirebench replaces the open document; the file on disk is untouched until you save.")
+                Text("Writing a program here updates the open document as you type; the file on disk is untouched until you save.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -234,7 +256,7 @@ struct SwiftIDEView: View {
             Text("Pages: \(compiled.pages.joined(separator: ", "))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text("Open it in Wirebench to look at the sheet, run it, or compile it to a program.")
+            Text("The sheet updates as you type. Run it in the workspace, or compile it to a program from there.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -256,35 +278,14 @@ struct SwiftIDEView: View {
             Button("Recover from Project", systemImage: "arrow.down.doc") { recoverFromProject() }
                 .disabled(model.project == nil)
                 .help("Write the open project's blocks back into source")
-            if isMaraflowPage {
-                Button("Apply to Page", systemImage: "checkmark.circle") {
-                    model.applyMaraflowSTCode(model.swiftSource)
-                }
-                .keyboardShortcut("s", modifiers: .command)
-                .help("Write this source back to the Maraflow ST page and rebuild")
-            } else {
+            if !isMaraflowPage {
                 Button("Compile", systemImage: "hammer") { rebuild() }
                     .keyboardShortcut("r", modifiers: .command)
                     .help("Compile the source (⌘R)")
-                Button("Open in Wirebench", systemImage: "arrow.up.forward.app") { openInWirebench() }
-                    .disabled(compiled == nil)
-                    .help("Replace the open document with the compiled project")
                 Button("Save .wbp…", systemImage: "square.and.arrow.down") { save() }
                     .disabled(compiled == nil)
                     .help("Save the compiled project as a .wbp file")
             }
-        }
-    }
-
-    private func openInWirebench() {
-        guard let compiled else { return }
-        let hadChanges = model.hasSignificantChanges
-        model.requestAdopt(compiled.project)
-        if !hadChanges { model.zoomToFit() }
-        NSApp.activate(ignoringOtherApps: true)
-        // The document lives in the main window; this one keeps the source for the next edit.
-        if let document = NSApp.windows.first(where: { $0.canBecomeMain && $0.title != "Structured Text" }) {
-            document.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -323,6 +324,31 @@ struct SwiftIDEView: View {
         } else {
             model.swiftSource = PCCDecompiler().source(for: project, named: documentName)
         }
+        // What the buffer was recovered to is what the workspace already holds: do not re-apply it.
+        lastAppliedSource = model.swiftSource
+    }
+
+    /// The workspace changed under the buffer: recompile the source the decompiler writes for it,
+    /// so the editor always shows the sheet it is attached to. Maraflow ST pages are source in
+    /// their own right and are never overwritten from a decompile.
+    private func syncFromWorkspace() {
+        guard !isMaraflowPage, let project = model.project else { return }
+        model.swiftSource = PCCDecompiler().source(for: project, named: documentName)
+        lastAppliedSource = model.swiftSource
+    }
+
+    /// Writing the source to the workspace is not a button: once the buffer holds something the
+    /// workspace does not, the compiled sheet (or the Maraflow ST page) takes it over.
+    private func applyAutomatically(_ result: CompiledSource? = nil) {
+        guard model.swiftSource != lastAppliedSource else { return }
+        if isMaraflowPage {
+            model.applyMaraflowSTCode(model.swiftSource)
+        } else if let outcome = result ?? compiled {
+            model.adoptCompiledProject(outcome.project)
+        } else {
+            return
+        }
+        lastAppliedSource = model.swiftSource
     }
 
     /// The open document's name: the file's, or the project's when it has one.
@@ -343,23 +369,32 @@ struct SwiftIDEView: View {
     private func rebuild() {
         spans = SourceHighlighter.spans(in: model.swiftSource)
         if isMaraflowPage {
-            outlineRows = []
+            // The page runs through Maraflow's interpreter, which speaks full IEC 61131-3 (CASE,
+            // FOR, WHILE, …); Wirebench's subset checker only covers part of it. The parse still
+            // gives the declarations outline when the source is inside the subset, and the compile
+            // flags what is not — as advice, not as "Problems".
+            if let program = try? SourceParser.parse(model.swiftSource) {
+                outlineRows = declarationRows(for: program)
+            } else {
+                outlineRows = []
+            }
             compiled = nil
-            diagnostics = []
-            failure = nil
+            do {
+                _ = try SourceCompiler().compile(model.swiftSource, projectName: "Untitled")
+                diagnostics = []
+                failure = nil
+            } catch let error as SourceError {
+                diagnostics = [error]
+                failure = nil
+            } catch {
+                diagnostics = []
+                failure = error.localizedDescription
+            }
+            applyAutomatically()
             return
         }
         if let program = try? SourceParser.parse(model.swiftSource) {
-            var rows: [(String, Int)] = []
-            for unit in program.units {
-                rows.append(("\(unit.kind == .functionBlock ? "FUNCTION_BLOCK" : "PROGRAM") \(unit.name)", unit.line))
-                for pin in unit.pins {
-                    rows.append(("\(pin.name) AT %\(pin.direction == .input ? "I" : "Q")X\(pin.index) : BOOL", pin.line))
-                }
-                for variable in unit.variables { rows.append(("\(variable.name) : BOOL", variable.line)) }
-                for instance in unit.instances { rows.append(("\(instance.name) : \(instance.typeName)", instance.line)) }
-            }
-            outlineRows = rows
+            outlineRows = declarationRows(for: program)
         } else {
             outlineRows = []
         }
@@ -368,6 +403,7 @@ struct SwiftIDEView: View {
             compiled = result
             diagnostics = []
             failure = nil
+            applyAutomatically(result)
         } catch let error as SourceError {
             compiled = nil
             diagnostics = [error]
@@ -377,5 +413,18 @@ struct SwiftIDEView: View {
             diagnostics = []
             failure = error.localizedDescription
         }
+    }
+
+    private func declarationRows(for program: SourceProgram) -> [(label: String, line: Int)] {
+        var rows: [(String, Int)] = []
+        for unit in program.units {
+            rows.append(("\(unit.kind == .functionBlock ? "FUNCTION_BLOCK" : "PROGRAM") \(unit.name)", unit.line))
+            for pin in unit.pins {
+                rows.append(("\(pin.name) AT %\(pin.direction == .input ? "I" : "Q")X\(pin.index) : BOOL", pin.line))
+            }
+            for variable in unit.variables { rows.append(("\(variable.name) : BOOL", variable.line)) }
+            for instance in unit.instances { rows.append(("\(instance.name) : \(instance.typeName)", instance.line)) }
+        }
+        return rows
     }
 }

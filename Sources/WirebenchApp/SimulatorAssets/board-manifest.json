@@ -1,0 +1,112 @@
+{
+  "board": "board.usdc",
+  "shield": "shield.usdc",
+  "leds": {
+    "D4": 8,
+    "D5": 9,
+    "D6": 10,
+    "D7": 11,
+    "D8": 12,
+    "D9": 13,
+    "D10": 2,
+    "D11": 3,
+    "D12": 4,
+    "D13": 5,
+    "D14": 6,
+    "D15": 7,
+    "D16": 27,
+    "D17": 26,
+    "D18": 25,
+    "D19": 18,
+    "D20": 17,
+    "D21": 16,
+    "D22": 22,
+    "D23": 23,
+    "D24": 24,
+    "D25": 21,
+    "D26": 20,
+    "D27": 19
+  },
+  "shieldLeds": {
+    "D1": 10,
+    "D2": 11,
+    "D4": 12
+  },
+  "display": {
+    "node": "LED1",
+    "board": "shield"
+  },
+  "power": {
+    "node": "J7",
+    "board": "board"
+  },
+  "buttons": {
+    "Shield.SW1": {
+      "board": "shield",
+      "node": "SW1",
+      "channel": 10,
+      "activeLow": false
+    },
+    "Shield.SW2": {
+      "board": "shield",
+      "node": "SW2",
+      "channel": 11,
+      "activeLow": false
+    },
+    "Shield.SW4": {
+      "board": "shield",
+      "node": "SW4",
+      "channel": 12,
+      "activeLow": false
+    },
+    "Board.SW3": {
+      "board": "board",
+      "node": "SW3",
+      "channel": 14,
+      "activeLow": true
+    },
+    "Board.SW4": {
+      "board": "board",
+      "node": "SW4",
+      "channel": 15,
+      "activeLow": true
+    }
+  },
+  "analogInputs": {
+    "R16": {
+      "board": "shield",
+      "node": "R16",
+      "kind": "potentiometer",
+      "channel": 0
+    },
+    "R9": {
+      "board": "shield",
+      "node": "R9",
+      "kind": "potentiometer",
+      "channel": 1
+    },
+    "R18": {
+      "board": "shield",
+      "node": "R18",
+      "kind": "potentiometer",
+      "channel": 2
+    },
+    "R22": {
+      "board": "shield",
+      "node": "R22",
+      "kind": "potentiometer",
+      "channel": 3
+    },
+    "R24": {
+      "board": "shield",
+      "node": "R24",
+      "kind": "ldr",
+      "channel": 3
+    }
+  },
+  "analogSelector": {
+    "board": "shield",
+    "node": "SW3",
+    "channel": 3
+  }
+}

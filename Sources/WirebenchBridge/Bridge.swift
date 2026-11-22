@@ -17,6 +17,9 @@ final class BridgeSession {
     var dragOffsets: [Int: CGSize] = [:]
     /// The same for shapes, by their index in the project's graphics.
     var graphicDrag: [Int: CGSize] = [:]
+    /// The last Duino-S image `duinoBuild` produced, handed to `duinoUpload` so an upload
+    /// does not compile twice.
+    var duinoCompiled: DuinoCompiler.Result?
 
     init() {
         // A session of its own must not share what the block picker learned with the app's defaults.
@@ -68,10 +71,18 @@ public func wirebench_tick(_ pointer: UnsafeMutableRawPointer?, _ elapsedMs: Dou
         let before = s.model.simulationVersion
         s.model.hostTick(elapsedMs: elapsedMs)
         if s.model.simulationVersion != before { s.dirty = true }
-        // Upload progress, the log and the port list change on the main actor without touching the version.
+        // Upload progress, the log and the port list change on the main actor without touching the version,
+        // and so does everything Duino-S: discovery, the watch table and the link fields.
+        let duino = s.model
         let hardware = [s.model.uploadStatus, s.model.uploadPhase,
                         String(describing: s.model.uploadProgress), String(s.model.uploadLog.count),
-                        String(s.model.availablePorts.count), String(s.model.isUploading)].joined(separator: "|")
+                        String(s.model.availablePorts.count), String(s.model.isUploading),
+                        s.model.hardwareFamily.rawValue, duino.duinoTransport.rawValue,
+                        duino.duinoHost, String(duino.duinoTCPPort), duino.selectedPortPath,
+                        String(duino.isDiscoveringDuino), duino.duinoDiscoveryStatus,
+                        String(duino.duinoDiscoveredDevices.count), duino.duinoInfo?.modelName ?? "",
+                        String(duino.isWatchingDuino), duino.duinoWatchStatus,
+                        String(duino.duinoWatchRevision)].joined(separator: "|")
         if hardware != s.hardwareFingerprint {
             s.hardwareFingerprint = hardware
             s.dirty = true

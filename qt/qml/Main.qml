@@ -144,7 +144,7 @@ ApplicationWindow {
         if (reply.ok) controller.command({cmd: "selectGraphic", indices: [reply.index]})
     }
 
-    Shortcut { sequences: [StandardKey.New]; onActivated: controller.command({cmd: "new"}) }
+    Shortcut { sequences: [StandardKey.New]; onActivated: controller.command({cmd: "new", platform: "maraflow"}) }
     Shortcut { sequences: [StandardKey.Open]; onActivated: controller.command({cmd: "requestOpen"}) }
     Shortcut { enabled: controller.hasProject; sequences: [StandardKey.ZoomIn, "Ctrl+="]; onActivated: window.zoomAt(1.2, area.width / 2, area.height / 2) }
     Shortcut { enabled: controller.hasProject; sequences: [StandardKey.ZoomOut]; onActivated: window.zoomAt(1 / 1.2, area.width / 2, area.height / 2) }
@@ -623,7 +623,8 @@ ApplicationWindow {
         x: bar.x + 10
         y: bar.y + bar.height + 6
         onActivated: id => {
-            if (id === "new") controller.command({cmd: "new"})
+            if (id === "newMara") controller.command({cmd: "new", platform: "maraflow"})
+            else if (id === "newWirebench") controller.command({cmd: "new", platform: "wirebench"})
             else if (id === "open") controller.command({cmd: "requestOpen"})
             else if (id === "resetWires") controller.command({cmd: "resetWires"})
             else if (id === "save") window.save()
@@ -674,7 +675,7 @@ ApplicationWindow {
         backdrop: blurredSheet
         shown: window.ready && !controller.hasProject
         anchors.centerIn: parent
-        width: Math.min(420, parent.width - 48); height: welcomeColumn.implicitHeight + 64
+        width: Math.min(560, parent.width - 48); height: welcomeColumn.implicitHeight + 64
         radius: 24
         Column {
             id: welcomeColumn
@@ -683,14 +684,17 @@ ApplicationWindow {
             Icon { name: "chip"; size: 44; color: AppTheme.dim; anchors.horizontalCenter: parent.horizontalCenter }
             Item { width: 1; height: 4 }
             Text { text: "No Project Open"; color: AppTheme.text; font.pixelSize: 20; font.weight: Font.Bold; anchors.horizontalCenter: parent.horizontalCenter }
-            Text { text: "Open a .wbp project (or a legacy .pcc), or start a new one."; color: AppTheme.dim; font.pixelSize: 13
+            Text { text: "Open a Wirebench .wbp or a Maraflow .mfl project (or a legacy .pcc), or start a new one."; color: AppTheme.dim; font.pixelSize: 13
                    anchors.horizontalCenter: parent.horizontalCenter; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; width: parent.width - 48 }
             Item { width: 1; height: 8 }
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 10
-                IconButton { label: "New Project"; width: 130; height: 40; onClicked: controller.command({cmd: "new"}) }
-                IconButton { label: "Open…"; accented: true; width: 130; height: 40; onClicked: controller.command({cmd: "requestOpen"}) }
+                IconButton { label: "New Maraflow Project"; accented: true; width: 180; height: 40
+                             onClicked: controller.command({cmd: "new", platform: "maraflow"}) }
+                IconButton { label: "New Wirebench Project"; width: 180; height: 40
+                             onClicked: controller.command({cmd: "new", platform: "wirebench"}) }
+                IconButton { label: "Open…"; width: 110; height: 40; onClicked: controller.command({cmd: "requestOpen"}) }
             }
         }
     }

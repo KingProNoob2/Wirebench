@@ -91,7 +91,7 @@ struct StructuredTextAuditTests {
             lamp := t.result;
         END_PROGRAM
         """))
-        #expect(message.contains("read before it is called"))
+        #expect(message.contains("read but never called"))
     }
 
     @Test("An output written only inside IF, or read before it is assigned, is refused")

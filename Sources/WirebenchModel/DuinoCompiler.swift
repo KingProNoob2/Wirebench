@@ -130,6 +130,9 @@ private struct Compiler {
     let project: PCCProject
     private var nextSlot = [Int](repeating: 0, count: 4)
     private var nextState = 0
+    private var nextMovAvg = 0
+    private var arrayIndices: [String: Int] = [:]
+    private var registerSlots: [String: UInt16] = [:]
     private var initEntries: [(slot: UInt16, bits: UInt64)] = []
     private var slots: [String: UInt16] = [:]
     private var slotNames: [UInt16: String] = [:]
@@ -212,8 +215,15 @@ private struct Compiler {
             for (index, _) in definition.outputs.enumerated() {
                 outputIndices.append(bridge?.outputs[index] ?? index)
             }
-            let inputs = definition.inputs.map { PinSpec(short: $0.abbrev, type: slotType($0.dataType)) }
-            let outputs = definition.outputs.map { PinSpec(short: $0.abbrev, type: slotType($0.dataType)) }
+            var inputs = definition.inputs.map { PinSpec(short: $0.abbrev, type: slotType($0.dataType)) }
+            var outputs = definition.outputs.map { PinSpec(short: $0.abbrev, type: slotType($0.dataType)) }
+            let channel = module.rawAttributes["MARAFLOW_PROP_Channel"]?.uppercased() ?? ""
+            if definition.id == "IO.IREF", channel.hasPrefix("AI"), !outputs.isEmpty {
+                outputs[0].type = .int
+            }
+            if definition.id == "IO.OREF", channel.hasPrefix("AO"), !inputs.isEmpty {
+                inputs[0].type = .int
+            }
             guard !inputs.isEmpty || !outputs.isEmpty else {
                 notes.append("Block '\(module.name)' has no pins; skipped.")
                 continue
@@ -360,6 +370,24 @@ private struct Compiler {
         allocInit(type, value: value, name: name)
     }
 
+    /// One shared slot per named register, so a `ReadReg` sees what a `WriteReg` stored (Maraflow `getOrAllocRegSlot`).
+    private mutating func registerSlot(_ name: String, type: DuinoSlotType) -> UInt16 {
+        let key = name.uppercased()
+        if let slot = registerSlots[key] { return slot }
+        let slot = allocInit(type, value: .undefined, name: "REG.\(key)")
+        registerSlots[key] = slot
+        return slot
+    }
+
+    /// One array index per distinct array name, capped at the VM's eight arrays (Maraflow `arrayNameToIdx`).
+    private mutating func arrayIndex(named name: String) -> Int {
+        let key = name.uppercased()
+        if let index = arrayIndices[key] { return index }
+        let index = min(arrayIndices.count, 7)
+        arrayIndices[key] = index
+        return index
+    }
+
     // MARK: - Inputs
 
     private mutating func inputSlot(_ inputIndex: Int, of block: CompileBlock, into out: inout [UInt8]) throws -> UInt16 {
@@ -480,6 +508,54 @@ private struct Compiler {
             word(0x2D, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
             u16(ins[min(first + 1, ins.count - 1)], into: &out)
             u16(ins[min(first + 2, ins.count - 1)], into: &out)
+        case "Math.Scale":
+            word(0x2E, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(ins[min(first + 2, ins.count - 1)], into: &out)
+            u16(ins[min(first + 3, ins.count - 1)], into: &out)
+            u16(ins[min(first + 4, ins.count - 1)], into: &out)
+        case "Math.Random":
+            word(0x2F, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(ins[min(first + 2, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out); u16(0, into: &out)
+            nextState += 1
+        case "Math.PID":
+            word(0x30, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(ins[min(first + 2, ins.count - 1)], into: &out)
+            u16(ins[min(first + 3, ins.count - 1)], into: &out)
+            u16(ins[min(first + 4, ins.count - 1)], into: &out)
+            u16(ins[min(first + 5, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out)
+            nextState += 1
+        case "Main.Comparators.InRange":
+            word(0x46, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(ins[min(first + 2, ins.count - 1)], into: &out)
+        case "Main.Comparators.Hysteresis":
+            word(0x47, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(ins[min(first + 2, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out); u16(0, into: &out)
+            nextState += 1
+        case "Main.Filters.LowPass":
+            word(0x31, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out)
+            nextState += 1
+        case "Main.Filters.MovingAvg":
+            let window = min(max(Int(block.properties["WindowSize"] ?? "8") ?? 8, 1), 64)
+            let maIndex = nextMovAvg
+            nextMovAvg += 1
+            word(0x32, UInt8(window), en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(UInt16(maIndex), into: &out)
+        case "Main.Filters.Debounce":
+            word(0x33, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out)
+            nextState += 1
         case "Main.Comparators.EQ", "Main.Comparators.NE", "Main.Comparators.GT",
              "Main.Comparators.GE", "Main.Comparators.LT", "Main.Comparators.LE":
             let op: UInt8 = switch def {
@@ -497,6 +573,36 @@ private struct Compiler {
             word(0x48, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
             u16(ins[min(first + 1, ins.count - 1)], into: &out)
             u16(ins[min(first + 2, ins.count - 1)], into: &out)
+        case "Main.Switches.Mux":
+            let dataCount = max(0, ins.count - (first + 1))
+            if dataCount > 0 {
+                let low = constant(.int32(0), type: .int, name: "\(block.module.name).Lo")
+                let high = constant(.int32(Int32(dataCount - 1)), type: .int, name: "\(block.module.name).Hi")
+                let clamped = alloc(.int)
+                word(0x2D, 0, en, clamped, ins[min(first, ins.count - 1)], into: &out)
+                u16(low, into: &out); u16(high, into: &out)
+                for index in 0..<dataCount {
+                    let indexConstant = constant(.int32(Int32(index)), type: .int,
+                                                 name: "\(block.module.name).Sel\(index)")
+                    let condition = alloc(.bool)
+                    word(0x40, 0, en, condition, clamped, into: &out)
+                    u16(indexConstant, into: &out); u16(0, into: &out)
+                    word(0x08, 0, condition, outs.first ?? 0, ins[first + 1 + index], into: &out)
+                }
+            }
+        case "Main.Switches.Demux":
+            let address = ins[min(first, ins.count - 1)]
+            let input = ins[min(first + 1, ins.count - 1)]
+            let zero = constant(.int32(0), type: .int, name: "\(block.module.name).Zero")
+            for (index, outSlot) in outs.enumerated() {
+                let indexConstant = constant(.int32(Int32(index)), type: .int,
+                                             name: "\(block.module.name).Sel\(index)")
+                let condition = alloc(.bool)
+                word(0x40, 0, en, condition, address, into: &out)
+                u16(indexConstant, into: &out); u16(0, into: &out)
+                word(0x08, 0, en, outSlot, zero, into: &out)
+                word(0x08, 0, condition, outSlot, input, into: &out)
+            }
         case "Main.Conversion.PackBits":
             let msb: UInt8 = (block.properties["BitOrder"] ?? "LSB").uppercased() == "MSB" ? 1 : 0
             word(0x0A, msb, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
@@ -510,15 +616,152 @@ private struct Compiler {
         case "Main.Timers.Timer":
             let q = outs.first ?? 0
             let et = outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot)
-            word(0x50, 0, en, q, ins[min(first, ins.count - 1)], into: &out)
+            let mode = (block.properties["TimerMode"] ?? "TON").uppercased()
+            let modeFlag: UInt8 = mode == "TOF" ? 1 : (mode == "TP" ? 2 : 0)
+            word(0x50, modeFlag, en, q, ins[min(first, ins.count - 1)], into: &out)
             u16(ins[min(first + 1, ins.count - 1)], into: &out)
             u16(et, into: &out)
             u16(UInt16(nextState), into: &out); u16(0, into: &out)
+            nextState += 1
+        case "Main.Timers.PulseGen":
+            word(0x51, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out)
+            nextState += 1
+        case "Main.Timers.PulseLen":
+            word(0x52, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(UInt16(nextState), into: &out)
             nextState += 1
         case "Main.Timers.SinglePulse":
             word(0x53, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
             u16(UInt16(nextState), into: &out); u16(0, into: &out)
             nextState += 1
+        case "Main.Timers.Counter":
+            let q = outs.first ?? 0
+            let cv = outs.count > 1 ? outs[1] : 0
+            word(0x54, 0, en, q, ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out)
+            u16(ins[min(first + 2, ins.count - 1)], into: &out)
+            u16(ins[min(first + 3, ins.count - 1)], into: &out)
+            u16(cv, into: &out)
+            u16(UInt16(nextState), into: &out); u16(0, into: &out)
+            nextState += 1
+        case "Main.Timers.DateTime":
+            word(0x60, 0, en, outs.first ?? 0, 0, into: &out)
+        case "Main.Arrays.ArrayRead":
+            let value = outs.first ?? 0
+            let oob = outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot)
+            word(0x38, UInt8(arrayIndex(named: block.properties["ArrayName"] ?? "ARR_0")), en, value,
+                 ins[min(first, ins.count - 1)], into: &out)
+            u16(oob, into: &out); u16(0, into: &out)
+        case "Main.Arrays.ArrayWrite":
+            let oob = outs.first ?? UInt16(DuinoCompiler.alwaysEnabledSlot)
+            word(0x39, UInt8(arrayIndex(named: block.properties["ArrayName"] ?? "ARR_0")), en, oob,
+                 ins[min(first, ins.count - 1)], into: &out)
+            u16(ins[min(first + 1, ins.count - 1)], into: &out); u16(0, into: &out)
+        case "Comm.I2C.TMP75":
+            let address = block.properties["DeviceAddressHex"].flatMap { Int($0.replacingOccurrences(of: "0x", with: ""), radix: 16) } ?? 0x48
+            word(0x75, 1, en, outs.first ?? 0, UInt16(clamping: address), into: &out)
+            u16(outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot), into: &out)
+            u16(0, into: &out)
+        case "Comm.DS18B20.DS18B20Read":
+            let dioPin = min(max(Int(block.properties["OneWirePin"] ?? "13") ?? 13, 0), 255)
+            let resolution = min(max(Int(block.properties["ResolutionBits"] ?? "12") ?? 12, 9), 12)
+            var busIndex = 0
+            var rom: UInt64 = 0
+            if let romText = block.properties["RomAddress"] {
+                if romText.uppercased().hasPrefix("AUTO:") {
+                    busIndex = min(max(Int(romText.dropFirst(5)) ?? 0, 0), 7)
+                } else {
+                    rom = UInt64(romText.replacingOccurrences(of: "0x", with: ""), radix: 16) ?? 0
+                }
+            }
+            word(0x75, 2, en, outs.first ?? 0,
+                 UInt16((dioPin & 0xFF) | ((busIndex & 0xFF) << 8)), into: &out)
+            u16(outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot), into: &out)
+            u16(UInt16(resolution), into: &out)
+            for shift in stride(from: 0, to: 64, by: 8) {
+                out.append(UInt8(truncatingIfNeeded: rom >> shift))
+            }
+        case "IO.CH455G":
+            // COMM_EXEC CH455G: the VM decodes value/decimals/brightness (or raw segments) and the
+            // simulator renders the shield's display from it.
+            let sclPin = min(max(Int(block.properties["SclPin"] ?? "2") ?? 2, 0), 255)
+            let sdaPin = min(max(Int(block.properties["SdaPin"] ?? "3") ?? 3, 0), 255)
+            let raw = (block.properties["DisplayMode"] ?? "").hasPrefix("Raw")
+            func digitMaskBits() -> Int {
+                guard let text = block.properties["DigitMask"] else { return 0x0F }
+                let cleaned = text.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: " ", with: "")
+                if cleaned.hasPrefix("0x"), let value = Int(cleaned.dropFirst(2), radix: 16) { return value & 0x0F }
+                if let value = Int(cleaned, radix: 2) { return value & 0x0F }
+                return 0x0F
+            }
+            func slot(named: String) -> UInt16 {
+                guard let index = block.inputs.firstIndex(where: { $0.short == named }),
+                      ins.indices.contains(index) else { return UInt16(DuinoCompiler.alwaysEnabledSlot) }
+                return ins[index]
+            }
+            let s0 = slot(named: raw ? "D0" : "Val"), s1 = slot(named: raw ? "D1" : "Dec")
+            let s2 = slot(named: raw ? "D2" : "Brt"), s3 = slot(named: raw ? "D3" : "")
+            let s4 = slot(named: raw ? "DpMask" : ""), s5 = slot(named: raw ? "Brt" : "")
+            let modeAndMask = UInt16((raw ? 1 : 0) | ((digitMaskBits() & 0x0F) << 4))
+            word(0x75, 3, en, outs.first ?? 0,
+                 UInt16((sclPin & 0xFF) | ((sdaPin & 0xFF) << 8)), into: &out)
+            u16(modeAndMask, into: &out)
+            u16(s0, into: &out); u16(s1, into: &out); u16(s2, into: &out)
+            u16(s3, into: &out); u16(s4, into: &out); u16(s5, into: &out)
+            u16(0, into: &out)
+        case "Main.Safety.EStop":
+            let trip = outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot)
+            let source = outs.count > 2 ? outs[2] : UInt16(DuinoCompiler.alwaysEnabledSlot)
+            word(0x02, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(trip, into: &out)
+            u16(source, into: &out)
+            u16(UInt16(nextState), into: &out); u16(0, into: &out)
+            nextState += 1
+        case "Main.Execution.Interrupt":
+            let captureMode = (block.properties["CaptureMode"] ?? "PULSE_WIDTH_US").uppercased()
+            let edgeMode = (block.properties["TriggerEdge"] ?? "RISING").uppercased()
+            let latchPolicy = (block.properties["LatchPolicy"] ?? "HOLD_FIRST_UNTIL_RST").uppercased()
+            let interruptSource = (block.properties["InterruptSource"] ?? "TIM_IC1").uppercased()
+            let captureBits = captureMode == "EDGE_COUNT" ? 1 : (captureMode.hasPrefix("GPIO_STATE") ? 2 : 0)
+            let edgeBits = edgeMode == "FALLING" ? 1 : (edgeMode == "BOTH" ? 2 : 0)
+            let latchBit = latchPolicy == "OVERWRITE_LATEST" ? 1 : 0
+            let flags = UInt8((captureBits & 0x03) | ((edgeBits & 0x03) << 2) | ((latchBit & 0x01) << 4))
+            let diChannel = interruptSource.hasPrefix("EXTI_DI") ? UInt16(clamping: ioChannel(interruptSource)) : 0xFFFF
+            let flag = outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot)
+            word(0x3A, flags, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            u16(flag, into: &out)
+            u16(diChannel, into: &out)
+            u16(UInt16(nextState), into: &out); u16(0, into: &out)
+            nextState += 1
+        case "Main.Execution.ReadReg", "Main.Execution.WriteReg":
+            let registerName = (block.properties["RegisterName"] ?? "REG_0").uppercased()
+            let dataType = def == "Main.Execution.ReadReg" ? (block.outputs.first?.type ?? .int)
+                                                           : (block.inputs.count > 1 ? block.inputs[1].type : .int)
+            let register = registerSlot(registerName, type: dataType)
+            let risingTrigger = (block.properties["TriggerMode"] ?? "Continuous (While En=1)").hasPrefix("Rising")
+            var effectiveEn = en
+            if risingTrigger && en != UInt16(DuinoCompiler.alwaysEnabledSlot) {
+                let pulse = alloc(.bool)
+                word(0x53, 0, UInt16(DuinoCompiler.alwaysEnabledSlot), pulse, en, into: &out)
+                u16(UInt16(nextState), into: &out); u16(0, into: &out)
+                nextState += 1
+                effectiveEn = pulse
+            }
+            let retentive = (block.properties["RetentiveEeprom"] ?? "").lowercased() == "true"
+            let parameterID = UInt16(min(max(ioChannel(registerName), 0), 255))
+            if def == "Main.Execution.ReadReg" {
+                if retentive { word(0x36, 0, effectiveEn, register, parameterID, into: &out) }
+                word(0x08, 0, effectiveEn, outs.first ?? 0, register, into: &out)
+            } else {
+                word(0x08, 0, effectiveEn, register, ins[min(first, ins.count - 1)], into: &out)
+                if retentive { word(0x37, 0, effectiveEn, register, parameterID, into: &out) }
+                if let outSlot = outs.first, outSlot != 0 {
+                    word(0x08, 0, UInt16(DuinoCompiler.alwaysEnabledSlot), outSlot, register, into: &out)
+                }
+            }
         case "IO.IREF":
             let ref = block.properties["Channel"] ?? block.module.name
             let analog = ref.uppercased().hasPrefix("AI")
@@ -566,6 +809,9 @@ private struct Compiler {
         }
         guard nextState <= 512 else {
             throw DuinoCompiler.CompileError.slotLimit("\(nextState) state slots, limit 512")
+        }
+        guard nextMovAvg <= 8 else {
+            throw DuinoCompiler.CompileError.slotLimit("\(nextMovAvg) moving-average instances, limit 8")
         }
         let initOffset = DuinoCompiler.headerSize
         let initBytes = initEntries.count * 12

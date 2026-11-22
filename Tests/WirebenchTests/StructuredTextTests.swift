@@ -34,6 +34,55 @@ struct StructuredTextTests {
         do { _ = try SourceCompiler().compile(source); return nil } catch { return "\(error)" }
     }
 
+    @Test("An instance read before its call line is a feedback wire, not an error")
+    func feedbackPulseMachine() throws {
+        // The classic pulse machine: Or fed back through Not. Reading Not_'s output in Or_'s call
+        // precedes Not_'s own call in program order; that is a wire, not an error.
+        let source = """
+        PROGRAM main
+        VAR
+            Or_ : Or2;
+            Not_ : Not2;
+        END_VAR
+            Or_(En := true, X0 := Not_.Inverted_Output, X1 := false);
+            Not_(En := true, X := Or_.Logical_Output);
+        END_PROGRAM
+        """
+        let compiled = try SourceCompiler().compile(source, projectName: "Pulse")
+        #expect(compiled.blockCount >= 2)
+        #expect(compiled.project.inConnections.count >= 2, "the feedback wire is wired")
+    }
+
+    @Test("An instance that is read but never called is still an error")
+    func readWithoutCallFails() {
+        let source = """
+        PROGRAM main
+        VAR
+            Or_ : Or2;
+            Not_ : Not2;
+        END_VAR
+            Or_(En := true, X0 := Not_.Inverted_Output, X1 := false);
+        END_PROGRAM
+        """
+        let error = Self.error(source)
+        #expect(error?.contains("read but never called") ?? false, "got: \(error ?? "no error")")
+    }
+
+    @Test("A block type named like a keyword declares an instance")
+    func keywordTypeName() throws {
+        // `And` lexes as the AND keyword: ST is case-insensitive. A type position still takes it,
+        // and the instance is materialised when called.
+        let compiled = try SourceCompiler().compile("""
+        PROGRAM P
+        VAR lamp AT %QX0 : BOOL; a : And; END_VAR
+        a(X0 := TRUE, X1 := TRUE);
+        lamp := a.Y;
+        END_PROGRAM
+        """)
+        #expect(compiled.project.modules.contains { $0.name == "And" })
+        #expect(compiled.writtenOutputs == [0])
+    }
+
     @Test("A PROGRAM is a page, with each operator as its block")
     func lowersToBlocks() throws {
         let compiled = try SourceCompiler().compile(Self.gate, projectName: "fallback")
@@ -925,6 +974,26 @@ struct StructuredTextTests {
         #expect(SourceCompletion.suggestions(in: source, partial: "su", beforeCaret: "    ").contains("sum"))
         #expect(SourceCompletion.suggestions(in: source, partial: "", beforeCaret: "    sum.").contains("Y"))
         #expect(SourceCompletion.suggestions(in: source, partial: "IA", beforeCaret: "").contains("IAdd"))
+        // The declaration context (`name : `) offers types only: IEC scalars and block types.
+        let types = SourceCompletion.suggestionsWithKinds(in: source, partial: "", beforeCaret: "VAR\n    x : ")
+        #expect(types.contains(SourceCompletion.Suggestion(text: "BOOL", kind: .type)))
+        #expect(types.contains(SourceCompletion.Suggestion(text: "IAdd", kind: .type)))
+        #expect(!types.contains { $0.kind == .keyword }, "keywords do not answer in a declaration")
+        // Kinded results: a keyword completes as a keyword.
+        let general = SourceCompletion.suggestionsWithKinds(in: source, partial: "TH", beforeCaret: "")
+        #expect(general.contains(SourceCompletion.Suggestion(text: "THEN", kind: .keyword)))
+        // Context: `name : ` is the type position; `VAR x` is the name position; code is a statement.
+        #expect(SourceCompletion.context(beforeCaret: "VAR\n    x : B") == .declarationType)
+        #expect(SourceCompletion.context(beforeCaret: "VAR\n    x") == .declarationName)
+        #expect(SourceCompletion.context(beforeCaret: "PROGRAM P\n    x") == .statement)
+        #expect(SourceCompletion.context(beforeCaret: "VAR x : INT; END_VAR\n    y") == .statement)
+        // The name position expands a type into a full declaration, keyword-colliding names
+        // underscored as the decompiler writes them.
+        let names = SourceCompletion.suggestionsWithKinds(in: "", partial: "and", beforeCaret: "VAR ")
+        #expect(names.contains(SourceCompletion.Suggestion(text: "And", kind: .type, insert: "And_ : And;")))
+        #expect(names.allSatisfy { $0.kind == .type }, "no keywords answer in a declaration")
+        // One-line VAR blocks read by construction: the caret's own line decides.
+        #expect(SourceCompletion.context(beforeCaret: "VAR and") == .declarationName)
         #expect(SourceCompletion.suggestions(in: source, partial: "TH", beforeCaret: "").contains("THEN"))
     }
 

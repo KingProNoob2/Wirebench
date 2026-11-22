@@ -22,13 +22,13 @@ struct MaraflowPaletteTests {
         }
     }
 
-    @Test("A native block whose name collides with Dirigo is marked")
+    @Test("A native block whose name collides with Dirigo keeps the clean name; the legacy twin is marked")
     func collidingNames() {
         let nativeAnd = MaraflowCatalog.byId["Bool.And"]!
         let nativeInfo = BlockTypeCatalog.info(forGuid: nativeAnd.guid)!
-        #expect(BlockPaletteSearch.displayBlockName(for: nativeInfo) == "And (Maraflow)")
+        #expect(BlockPaletteSearch.displayBlockName(for: nativeInfo) == "And")
         let dirigoAnd = BlockTypeCatalog.info(forBlockName: "And")!
-        #expect(BlockPaletteSearch.displayBlockName(for: dirigoAnd) == "And")
+        #expect(BlockPaletteSearch.displayBlockName(for: dirigoAnd) == "And (Dirigo)")
         let tcp = BlockTypeCatalog.info(forGuid: MaraflowCatalog.byId["Comm.ModbusTCP.MbTcpRead"]!.guid)!
         #expect(BlockPaletteSearch.displayBlockName(for: tcp) == "MbTcpRead")
         #expect(tcp.category == "Communication")

@@ -17,14 +17,17 @@ struct DuinoCompilerTests {
     }
 
     private func maraflowBlock(id: Int, _ definitionID: String, thread: Int = 1, order: Int = 10,
-                               inputs: [PinValue], outputs: [PinValue]) -> PCCModule {
+                               inputs: [PinValue], outputs: [PinValue],
+                               props: [String: String] = [:]) -> PCCModule {
         let definition = MaraflowCatalog.byId[definitionID]!
+        var attributes: [(String, String)] = [("MARAFLOW_DEF", definitionID)]
+        for (key, value) in props { attributes.append(("MARAFLOW_PROP_\(key)", value)) }
         return PCCModule(id: id, guid: definition.guid, name: "\(definition.typeName)\(id)",
                          x: 0, y: 0, order: order, threadId: thread, page: "Main",
                          inPins: inputs.enumerated().map { Pin(id: $0.offset, value: $0.element) },
                          paramPins: [],
                          outPins: outputs.enumerated().map { Pin(id: $0.offset, value: $0.element) },
-                         rawAttributes: AttributeBag([("MARAFLOW_DEF", definitionID)]))
+                         rawAttributes: AttributeBag(attributes))
     }
 
     private func wire(_ from: Int, _ out: Int, _ to: Int, _ input: Int) -> Connection {
@@ -125,5 +128,184 @@ struct DuinoCompilerTests {
                 == UInt32(image.count))
         let stored = UInt32(image[12]) | (UInt32(image[13]) << 8) | (UInt32(image[14]) << 16) | (UInt32(image[15]) << 24)
         #expect(stored == MaraProtFrame.crc32(image[72...]))
+    }
+
+    private func run(_ result: DuinoCompiler.Result, thread: Int = 1, steps: Int = 1,
+                     dtMicroseconds: UInt32 = 5_000) throws -> MaraVM {
+        let vm = MaraVM()
+        try vm.load(result.image)
+        try vm.reset()
+        try vm.setRunning()
+        for _ in 0..<steps { try vm.step(thread: thread, dtMicroseconds: dtMicroseconds) }
+        return vm
+    }
+
+    @Test("A counter counts up and down on edges and resets")
+    func counterRuns() throws {
+        let counter = maraflowBlock(id: 1, "Main.Timers.Counter",
+                                    inputs: [.bool(true), .bool(false), .bool(false), .bool(false), .int32(2)],
+                                    outputs: [.bool(false), .int32(0)])
+        let result = try DuinoCompiler.compile(project: project([counter]))
+        let vm = try run(result)
+        let cu = try #require(result.slots["Counter1.CU"])
+        let cd = try #require(result.slots["Counter1.CD"])
+        let r = try #require(result.slots["Counter1.R"])
+        let q = try #require(result.slots["Counter1.Q"])
+        let cv = try #require(result.slots["Counter1.CV"])
+        func pulse(_ slot: UInt16) throws {
+            vm.writeBool(slot, true)
+            try vm.step(thread: 1)
+            vm.writeBool(slot, false)
+            try vm.step(thread: 1)
+        }
+        try pulse(cu)
+        #expect(vm.readInt(cv) == 1)
+        #expect(!vm.readBool(q))
+        try pulse(cu)
+        #expect(vm.readInt(cv) == 2)
+        #expect(vm.readBool(q))
+        try pulse(cd)
+        #expect(vm.readInt(cv) == 1)
+        vm.writeBool(r, true)
+        try vm.step(thread: 1)
+        #expect(vm.readInt(cv) == 0)
+        #expect(!vm.readBool(q))
+    }
+
+    @Test("A pulse generator alternates its output with the configured periods")
+    func pulseGenRuns() throws {
+        let pulse = maraflowBlock(id: 1, "Main.Timers.PulseGen",
+                                  inputs: [.bool(true), .int32(10), .int32(10)],
+                                  outputs: [.bool(false)])
+        let result = try DuinoCompiler.compile(project: project([pulse]))
+        let vm = try run(result)
+        let q = try #require(result.slots["PulseGen1.Q"])
+        // 5 ms steps against a 10 ms high / 10 ms low cycle.
+        #expect(vm.readBool(q))                    // t = 5 ms, high phase
+        try vm.step(thread: 1)
+        #expect(!vm.readBool(q))                   // t = 10 ms, low phase
+        try vm.step(thread: 1)
+        #expect(!vm.readBool(q))                   // t = 15 ms, low phase
+        try vm.step(thread: 1)
+        #expect(vm.readBool(q))                    // t = 0 ms, high phase again
+    }
+
+    @Test("A timer in TOF mode holds its output while the delay runs out")
+    func timerTOFRuns() throws {
+        let timer = maraflowBlock(id: 1, "Main.Timers.Timer",
+                                  inputs: [.bool(true), .bool(true), .int32(10)],
+                                  outputs: [.bool(false), .int32(0)],
+                                  props: ["TimerMode": "TOF"])
+        let result = try DuinoCompiler.compile(project: project([timer]))
+        let vm = try run(result)
+        let input = try #require(result.slots["Timer1.In"])
+        let q = try #require(result.slots["Timer1.Q"])
+        #expect(vm.readBool(q))                    // input still high: output follows
+        vm.writeBool(input, false)
+        try vm.step(thread: 1)                     // t = 5 ms of the 10 ms off-delay
+        #expect(vm.readBool(q))
+        try vm.step(thread: 1)                     // t = 10 ms: delay elapsed
+        #expect(!vm.readBool(q))
+    }
+
+    @Test("A scale block maps an input float across the output range")
+    func scaleRuns() throws {
+        let scale = maraflowBlock(id: 1, "Math.Scale",
+                                  inputs: [.bool(true), .float(50), .float(0), .float(100), .float(0), .float(10)],
+                                  outputs: [.float(0)])
+        let result = try DuinoCompiler.compile(project: project([scale]))
+        let vm = try run(result)
+        #expect(vm.readFloat(try #require(result.slots["Scale1.Y"])) == 5)
+    }
+
+    @Test("An in-range comparator normalises swapped bounds")
+    func inRangeRuns() throws {
+        let inRange = maraflowBlock(id: 1, "Main.Comparators.InRange",
+                                    inputs: [.bool(true), .int32(5), .int32(10), .int32(0)],
+                                    outputs: [.bool(false)])
+        let result = try DuinoCompiler.compile(project: project([inRange]))
+        let vm = try run(result)
+        #expect(vm.readBool(try #require(result.slots["InRange1.Y"])))
+    }
+
+    @Test("A hysteresis comparator latches between its thresholds")
+    func hysteresisRuns() throws {
+        let hysteresis = maraflowBlock(id: 1, "Main.Comparators.Hysteresis",
+                                       inputs: [.bool(true), .float(0), .float(10), .float(20)],
+                                       outputs: [.bool(false)])
+        let result = try DuinoCompiler.compile(project: project([hysteresis]))
+        let vm = try run(result)
+        let input = try #require(result.slots["Hysteresis1.In"])
+        let y = try #require(result.slots["Hysteresis1.Y"])
+        #expect(!vm.readBool(y))
+        vm.writeFloat(input, 25)
+        try vm.step(thread: 1)
+        #expect(vm.readBool(y))
+        vm.writeFloat(input, 15)
+        try vm.step(thread: 1)
+        #expect(vm.readBool(y))                    // inside the band: keeps the latched state
+        vm.writeFloat(input, 5)
+        try vm.step(thread: 1)
+        #expect(!vm.readBool(y))
+    }
+
+    @Test("An array write is visible to a read on the same array, with out-of-bounds flagged")
+    func arraysRun() throws {
+        let write = maraflowBlock(id: 1, "Main.Arrays.ArrayWrite", order: 10,
+                                  inputs: [.bool(true), .int32(3), .int32(42)],
+                                  outputs: [.bool(false)])
+        let read = maraflowBlock(id: 2, "Main.Arrays.ArrayRead", order: 20,
+                                 inputs: [.bool(true), .int32(3)],
+                                 outputs: [.int32(0), .bool(false)])
+        let result = try DuinoCompiler.compile(project: project([write, read]))
+        let vm = try run(result)
+        let val = try #require(result.slots["ArrayRead2.Val"])
+        let oob = try #require(result.slots["ArrayRead2.Oob"])
+        #expect(vm.readInt(val) == 42)
+        #expect(!vm.readBool(oob))
+        vm.writeInt(try #require(result.slots["ArrayRead2.Idx"]), 99)
+        try vm.step(thread: 1)
+        #expect(vm.readInt(val) == 0)
+        #expect(vm.readBool(oob))
+    }
+
+    @Test("A register written by one block is read back by another")
+    func registersRun() throws {
+        let write = maraflowBlock(id: 1, "Main.Execution.WriteReg", order: 10,
+                                  inputs: [.bool(true), .int32(77)],
+                                  outputs: [.int32(0)])
+        let read = maraflowBlock(id: 2, "Main.Execution.ReadReg", order: 20,
+                                 inputs: [.bool(true)],
+                                 outputs: [.int32(0)])
+        let result = try DuinoCompiler.compile(project: project([write, read]))
+        let vm = try run(result)
+        #expect(vm.readInt(try #require(result.slots["ReadReg2.Out"])) == 77)
+    }
+
+    @Test("A mux selects its input by address, a demux routes one input to the addressed output")
+    func muxDemuxRun() throws {
+        let mux = maraflowBlock(id: 1, "Main.Switches.Mux", order: 10,
+                                inputs: [.bool(true), .int32(1), .int32(10), .int32(20)],
+                                outputs: [.int32(0)])
+        let demux = maraflowBlock(id: 2, "Main.Switches.Demux", order: 20,
+                                  inputs: [.bool(true), .int32(1), .int32(7)],
+                                  outputs: [.int32(0), .int32(0)])
+        let result = try DuinoCompiler.compile(project: project([mux, demux]))
+        let vm = try run(result)
+        #expect(vm.readInt(try #require(result.slots["Mux1.Y"])) == 20)
+        #expect(vm.readInt(try #require(result.slots["Demux2.Y0"])) == 0)
+        #expect(vm.readInt(try #require(result.slots["Demux2.Y1"])) == 7)
+    }
+
+    @Test("An e-stop check reports the machine as safe when nothing tripped")
+    func eStopRuns() throws {
+        let eStop = maraflowBlock(id: 1, "Main.Safety.EStop",
+                                  inputs: [.bool(true), .bool(false)],
+                                  outputs: [.bool(false), .bool(false), .int32(0)])
+        let result = try DuinoCompiler.compile(project: project([eStop]))
+        let vm = try run(result)
+        #expect(vm.readBool(try #require(result.slots["EStop1.Safe"])))
+        #expect(!vm.readBool(try #require(result.slots["EStop1.Trip"])))
+        #expect(vm.readInt(try #require(result.slots["EStop1.Src"])) == 0)
     }
 }

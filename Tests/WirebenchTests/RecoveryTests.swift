@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import WirebenchCore
 import WirebenchLibrary
+@testable import WirebenchModel
 @testable import WirebenchSource
 
 /// Recovery: a project back to Structured Text, and the recovered text compiled again.
@@ -40,6 +41,96 @@ struct RecoveryTests {
         #expect(again.pages == compiled.project.pages.map(\.caption))
         #expect(again.usedInputs == [0, 1])
         #expect(again.writtenOutputs == [2])
+    }
+
+    /// The timed pulse machine: Timer.Q feeds back into And, so And's call reads an instance that
+    /// is called later in the scan. That is a wire, not an ordering error, and the whole sheet
+    /// must round-trip through the source.
+    @Test("A feedback wire decompiles to a forward reference and compiles back")
+    func feedbackRoundTrip() throws {
+        func mf(_ id: String, _ name: String, moduleId: Int, order: Int) -> PCCModule {
+            BlockFactory.makeModule(guid: MaraflowCatalog.byId[id]!.guid, id: moduleId, name: name,
+                                    x: 0, y: 0, order: order, threadId: 1, page: "Page")
+        }
+        var project = Self.project([mf("Bool.Not", "Not", moduleId: 1, order: 30),
+                                    mf("Bool.And", "And", moduleId: 2, order: 10),
+                                    mf("Main.Timers.Timer", "Timer", moduleId: 3, order: 20)])
+        project.inConnections = [
+            Connection(inModuleId: 2, inPinId: 1, outModuleId: 3, outPinId: 0), // Timer.Q -> And.X0
+            Connection(inModuleId: 2, inPinId: 2, outModuleId: 1, outPinId: 0), // Not.Y -> And.X1
+            Connection(inModuleId: 3, inPinId: 1, outModuleId: 2, outPinId: 0), // And.Y -> Timer.In
+        ]
+        let source = PCCDecompiler().source(for: project)
+        #expect(source.contains("X0 := Timer_"), "the feedback reads the later-called instance")
+        #expect(!source.contains("Not recovered"), "nothing on this sheet is unrecoverable")
+        let again = try SourceCompiler().compile(source)
+        #expect(again.project.modules.count >= 3, "the recovered source compiles back to the sheet")
+        #expect(again.project.inConnections.count == 3, "the feedback wire survives the round trip")
+    }
+
+    @Test("An input wired from a numeric output names its producer instead of vanishing")
+    func numericWireIsExplained() throws {
+        func mf(_ id: String, _ name: String, moduleId: Int, order: Int) -> PCCModule {
+            BlockFactory.makeModule(guid: MaraflowCatalog.byId[id]!.guid, id: moduleId, name: name,
+                                    x: 0, y: 0, order: order, threadId: 1, page: "Page")
+        }
+        var project = Self.project([mf("Bool.And", "And", moduleId: 2, order: 10),
+                                    mf("Main.Timers.Timer", "Timer", moduleId: 3, order: 20)])
+        project.inConnections = [
+            Connection(inModuleId: 2, inPinId: 1, outModuleId: 3, outPinId: 1), // Timer.ET -> And.X0
+        ]
+        let source = PCCDecompiler().source(for: project)
+        #expect(source.contains("wired from Timer"), "the note names the producer it could not express")
+    }
+
+    /// The guard for "not recovered" never being a mystery again: a wired input the subset cannot
+    /// express must name what it is wired from, whatever numeric kind of producer it is.
+    @Test("An unrecovered wired input names its producer for every numeric producer kind")
+    func unrecoveredInputsNameProducers() throws {
+        func mf(_ id: String, _ name: String, moduleId: Int) -> PCCModule {
+            BlockFactory.makeModule(guid: MaraflowCatalog.byId[id]!.guid, id: moduleId, name: name,
+                                    x: 0, y: 0, order: moduleId * 10, threadId: 1, page: "Page")
+        }
+        func note(wiring outPin: Int, from definition: String, _ producer: String) -> String {
+            var project = Self.project([mf("Bool.And", "And", moduleId: 2),
+                                        mf(definition, producer, moduleId: 3)])
+            project.inConnections = [
+                Connection(inModuleId: 2, inPinId: 1, outModuleId: 3, outPinId: outPin),
+            ]
+            return PCCDecompiler().source(for: project)
+        }
+        let timerET = note(wiring: 1, from: "Main.Timers.Timer", "Timer")
+        #expect(timerET.contains("input X0 (wired from Timer;"))
+        // The catalogue has no FloatVar definition; Scale's Y is the FLOAT-typed output instead.
+        let floatOut = note(wiring: 0, from: "Math.Scale", "Scale")
+        #expect(floatOut.contains("input X0 (wired from Scale;"))
+        let longVar = note(wiring: 0, from: "Visual.Vars.LongVar", "LongVar")
+        #expect(longVar.contains("input X0 (wired from LongVar;"))
+    }
+
+    /// The live ST sync decompiles the sheet on every edit, so a decompile that no longer compiles
+    /// would put a broken buffer in front of the user. Every corpus project must therefore recover
+    /// to source that compiles again, with the "Not recovered" notes staying comments rather than
+    /// syntax errors.
+    @Test("Every corpus project recovers to source that compiles again")
+    func corpusRecoveredSourceCompiles() throws {
+        var seen: Set<String> = []
+        var files: [URL] = []
+        for directory in TestCorpus.directories where FileManager.default.fileExists(atPath: directory.path) {
+            let items = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+            for name in items where name.hasSuffix(".pcc") || name.hasSuffix(".mfl") {
+                let url = directory.appendingPathComponent(name)
+                if seen.insert(url.lastPathComponent).inserted { files.append(url) }
+            }
+        }
+        #expect(files.count >= 20, "the corpus sweep is meaningless without the corpus (found \(files.count))")
+        for url in files {
+            guard let loaded = try? ProjectFile.read(at: url) else { continue }
+            let source = PCCDecompiler().source(for: loaded.project)
+            #expect(throws: Never.self, "recovered source of \(url.lastPathComponent) must compile") {
+                _ = try SourceCompiler().compile(source)
+            }
+        }
     }
 
     @Test("An if/else of Set writes comes back as IF/ELSE")

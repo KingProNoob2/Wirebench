@@ -50,8 +50,7 @@ public enum BlockRole {
     /// A `BoolVar`'s mode, as the registry builds it: `SimulMode`, or a push button by default.
     public static func boolVarMode(of module: PCCModule) -> BoolVarBlock.Mode? {
         guard module.guid == BoolVarBlock.guid else { return nil }
-        let raw = module.simulMode ?? (module.rawAttributes["SimulMode"].flatMap { Int($0) } ?? 2)
-        return BoolVarBlock.Mode(simulMode: raw)
+        return BoolVarBlock.Mode(simulMode: module.boolVarSimulMode)
     }
 
     /// The largest value an `IntVar`'s slider reaches. Dirigo itself writes a slider as `SimulMode="3" HighValue="…"`, which is read
@@ -102,8 +101,17 @@ public final class AppModel: @unchecked Sendable {
             history.record(UndoSnapshot(project: previous,
                                         selectedModuleId: selectedModuleId,
                                         selectedPage: selectedPage))
+            // Ordinary sheet edits (this path excludes adoption and loading, which restore around
+            // the set): the ST editor mirrors them into source as they happen.
+            sheetEditRevision &+= 1
         }
     }
+
+    /// Bumped on every ordinary document edit (block added, moved, configured, undone): observers
+    /// such as the Structured Text editor regenerate their buffer from the sheet. Adoption and
+    /// loading restore around the set and do not bump it, so the ST editor never mirrors its own
+    /// writes back into the buffer.
+    public internal(set) var sheetEditRevision = 0
 
     /// Undo/redo for document edits.
     public private(set) var history = UndoHistory()
@@ -138,6 +146,8 @@ public final class AppModel: @unchecked Sendable {
         // Text objects are selected by index, and the restored array may hold different ones there.
         clearAnnotationSelection()
         isRestoringUndo = false
+        // An undo is a sheet edit like any other: the ST editor mirrors it.
+        sheetEditRevision &+= 1
         engine = installEngine(project: snapshot.project)
         refreshSnapshots()
         isDocumentEdited = hasSignificantChanges
@@ -221,11 +231,14 @@ public final class AppModel: @unchecked Sendable {
     /// mirrored into `isHardwareConnected` for the UI.
     private let serialPort = SerialPort()
 
-    /// Which PLC family the upload and build actions target.
-    public var hardwareFamily: HardwareFamily = .dirigo
+    /// Which PLC family the upload and build actions target. The Duino-S is the center of the app;
+    /// Dirigo/Duino-P is the half-maintained legacy path.
+    public var hardwareFamily: HardwareFamily = .duinoS
 
-    /// How a Duino-S is reached: USB CDC or its Ethernet TCP server (port 5020).
+    /// How a Duino-S is reached: USB CDC, Ethernet TCP, or the in-process emulator.
     public var duinoTransport: DuinoTransport = .usbCDC
+    public internal(set) var duinoSimSession: DuinoSimSession?
+    public internal(set) var duinoSimError = ""
     public var duinoHost: String = "192.168.1.50"
     public var duinoTCPPort: Int = 5020
 
@@ -244,6 +257,8 @@ public final class AppModel: @unchecked Sendable {
     public var duinoWatchSlotNames: [UInt16: String] = [:]
     public var duinoWatchSlotTypes: [UInt16: DuinoSlotType] = [:]
     public var duinoWatchValues: [UInt16: Double] = [:]
+    /// Bumped whenever `duinoWatchValues` changes, so observers (the Qt bridge tick) can tell an update from a no-op.
+    public internal(set) var duinoWatchRevision = 0
     var duinoWatchTask: Task<Void, Never>?
 
     /// Whether the serial link to the PLC is open: only while an upload is running, which opens the port itself and closes it again.
@@ -595,7 +610,7 @@ public final class AppModel: @unchecked Sendable {
 
     /// What the app is about to do that would replace the open project, while it asks whether to save first.
     public enum UnsavedIntent: Equatable, Sendable {
-        case newProject
+        case newProject(ProjectPlatform)
         case open
         case openURL(URL)
         /// Replace the document with a compiled project (the editor's Open in Wirebench).
@@ -651,26 +666,47 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
-    /// *New Project*. Asks about unsaved work first, then builds the empty project.
+    /// *New Project*. Asks about unsaved work first, then builds the empty project. Maraflow is the
+    /// default platform; the picker in the File menu offers the legacy Wirebench mode too.
     @MainActor
-    public func createNewProject() {
-        requestProjectReplacement(.newProject)
+    public func createNewProject(platform: ProjectPlatform = .maraflow) {
+        requestProjectReplacement(.newProject(platform))
     }
 
-    /// The hardware a new project is for: the Duino-E this editor is used with. The PLC Configuration menu changes it.
+    /// Which platform the open project belongs to: Maraflow imports and new Maraflow projects
+    /// against everything else (legacy `.pcc`/`.wbp`).
+    public var projectPlatform: ProjectPlatform { project?.maraflow != nil ? .maraflow : .wirebench }
+
+    /// The hardware a new Wirebench project is for: the Duino-E this editor is used with. The PLC Configuration menu changes it.
     private static let newProjectProfile = "Sybas Duino-E"
 
-    private func performNewProject() {
+    private func performNewProject(platform: ProjectPlatform) {
         pause()
         swiftSource = ""
         maraflowSTPageIndex = nil
 
-        let newProj = PCCProject(
+        var newProj = PCCProject(
             name: "Untitled",
-            profile: Self.newProjectProfile,
+            profile: platform == .maraflow ? "" : Self.newProjectProfile,
             pages: [ProjectPage(caption: "main")],
             modules: []
         )
+        if platform == .maraflow {
+            // The minimal Maraflow envelope, the same keys `MaraflowExporter` writes for a native
+            // project, so saving and exporting .mfl behave from the first save.
+            newProj.maraflow = MaraflowExtras(formatVersion: "1.0.0", properties: [
+                "maraflow.version": "1.0.0",
+                "project.targetPlatform": "STM32F407-Maraflow-Std",
+                "project.defaultThreadId": "2",
+                "project.primaryLanguage": "FBD",
+                "project.name": "Untitled",
+                "project.pageCount": "1",
+                "page.0.name": "main",
+                "page.0.language": "FBD",
+                "page.0.blockCount": "0",
+                "page.0.wireCount": "0",
+            ])
+        }
         isRestoringUndo = true
         self.project = newProj
         isRestoringUndo = false
@@ -684,6 +720,8 @@ public final class AppModel: @unchecked Sendable {
         clearAnnotationSelection()
         clearedPinValues = [:]
         self.engine = installEngine(project: newProj)
+        hardwareFamily = platform.family
+        duinoTransport = .usbCDC
         self.tickCount = 0
         self.simulationVersion = 0
         self.isDocumentEdited = false
@@ -910,7 +948,7 @@ public final class AppModel: @unchecked Sendable {
     @MainActor
     private func continueAfter(_ intent: UnsavedIntent) {
         switch intent {
-        case .newProject: performNewProject()
+        case .newProject(let platform): performNewProject(platform: platform)
         case .open: pendingFilePanel = .open
         case .openURL(let url): loadProject(url: url)
         case .adopt:

@@ -113,6 +113,7 @@ struct BuildExportTests {
     func reportOwnsThePanelsWhileUp() throws {
         let model = AppModel()
         model.loadProject(url: Self.root.appendingPathComponent("had+1block.pcc"))
+        model.hardwareFamily = .dirigo   // these panels are the legacy Duino-P export flow
 
         for panel in [AppModel.FilePanel.exportProgramBinary, .exportSymbolTable, .exportProgramVariables] {
             model.isShowingBuildReport = false
@@ -135,6 +136,7 @@ struct BuildExportTests {
     func messagesGoToTheReportWhileUp() throws {
         let model = AppModel()
         model.loadProject(url: Self.root.appendingPathComponent("had+1block.pcc"))
+        model.hardwareFamily = .dirigo   // the report-under-test is the legacy Duino-P build report
 
         model.presentMessage(title: "Elsewhere", message: "no report", kind: .info)
         #expect(model.pendingAlert?.title == "Elsewhere" && model.buildReportNotice == nil)

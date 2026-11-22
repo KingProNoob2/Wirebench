@@ -728,3 +728,18 @@ extension PCCProject {
         (inConnections + paramConnections).filter { $0.outModuleId == outModuleId && $0.outPinId == outPinId }
     }
 }
+
+public extension PCCModule {
+    /// The interactive variable's effective mode tag (1 = toggle / latch, 2 = push / momentary),
+    /// however the source expresses it: Dirigo's `SimulMode` attribute, or Maraflow's `SwitchMode`
+    /// property on a Visual.Vars block. An explicit `SimulMode` wins; the default is a push button,
+    /// as Dirigo treats an interactive variable without the attribute.
+    var boolVarSimulMode: Int {
+        if let raw = simulMode ?? rawAttributes["SimulMode"].flatMap({ Int($0) }) { return raw }
+        switch rawAttributes["MARAFLOW_PROP_SwitchMode"]?.lowercased() {
+        case "toggle": return 1
+        case "momentary": return 2
+        default: return 2
+        }
+    }
+}

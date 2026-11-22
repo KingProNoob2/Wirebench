@@ -12,12 +12,33 @@ public enum BlockPaletteSearch {
         info.guid != MacroInterface.callGUID && info.guid != MacroInterface.interfaceGUID && info.guid != SystemCmdBlock.guid
     }
 
+    /// Whether a type is offered in a project of `platform`: the modes are separate, so a Maraflow
+    /// project lists Maraflow's blocks (and macros and the ST/LD page types), and a Wirebench
+    /// project lists the legacy Dirigo catalogue — neither side shows the other's blocks.
+    public nonisolated static func isOffered(_ info: BlockTypeInfo, in platform: ProjectPlatform) -> Bool {
+        guard isOffered(info) else { return false }
+        let maraflowPage = info.guid == MaraflowStPage.guid || info.guid == MaraflowLdPage.guid
+        switch platform {
+        case .maraflow:
+            return isMaraflowNative(info) || info.guid == MacroBlock.guid || maraflowPage
+        case .wirebench:
+            return !isMaraflowNative(info) && !maraflowPage
+        }
+    }
+
+    /// Whether a catalogue entry is a Maraflow-native block. The Duino-S path is the center of the
+    /// app, so the palette treats these as the primary blocks and marks a colliding Dirigo twin as
+    /// the legacy one instead of the other way around.
+    public nonisolated static func isMaraflowNative(_ info: BlockTypeInfo) -> Bool {
+        MaraflowCatalog.definition(forGuid: info.guid) != nil
+    }
+
     /// A block's name in the picker. Maraflow brings native blocks whose type names collide with Dirigo's (`And`,
-    /// `Not`, `Timer`); the native one is suffixed so two rows cannot look identical.
+    /// `Not`, `Timer`); the legacy one is suffixed so two rows cannot look identical.
     public nonisolated static func displayBlockName(for info: BlockTypeInfo) -> String {
-        guard MaraflowCatalog.definition(forGuid: info.guid) != nil else { return info.blockName }
-        if let existing = BlockTypeCatalog.info(forBlockName: info.blockName), existing.guid != info.guid {
-            return info.blockName + " (Maraflow)"
+        if isMaraflowNative(info) { return info.blockName }
+        if MaraflowCatalog.all.contains(where: { $0.typeName == info.blockName }) {
+            return info.blockName + " (Dirigo)"
         }
         return info.blockName
     }
@@ -41,10 +62,12 @@ public enum BlockPaletteSearch {
         return taken ? "Main " + short : short
     }
 
-    /// Alphabetical, always: the catalog's own order is the order blocks were implemented in, which
-    /// means nothing to someone looking one up.
+    /// Alphabetical, with Maraflow-native blocks first on a tie: the Duino-S path is the app's center.
     public nonisolated static func ordered(_ items: [BlockTypeInfo]) -> [BlockTypeInfo] {
-        items.sorted { $0.blockName.localizedCaseInsensitiveCompare($1.blockName) == .orderedAscending }
+        items.sorted {
+            if isMaraflowNative($0) != isMaraflowNative($1) { return isMaraflowNative($0) }
+            return $0.blockName.localizedCaseInsensitiveCompare($1.blockName) == .orderedAscending
+        }
     }
 
     /// How well a block answers the query. Lower is better; `nil` means it does not match at all.
@@ -83,6 +106,7 @@ public enum BlockPaletteSearch {
             guard byChanceWithoutQuery, chances != nil else { return ordered(items) }
             return items.sorted { a, b in
                 if let first = likelier(a, b) { return first }
+                if isMaraflowNative(a) != isMaraflowNative(b) { return isMaraflowNative(a) }
                 return a.blockName.localizedCaseInsensitiveCompare(b.blockName) == .orderedAscending
             }
         }
@@ -91,6 +115,7 @@ public enum BlockPaletteSearch {
             .sorted { a, b in
                 if a.0 != b.0 { return a.0 < b.0 }
                 if let first = likelier(a.1, b.1) { return first }
+                if isMaraflowNative(a.1) != isMaraflowNative(b.1) { return isMaraflowNative(a.1) }
                 if a.1.blockName.count != b.1.blockName.count { return a.1.blockName.count < b.1.blockName.count }
                 return a.1.blockName.localizedCaseInsensitiveCompare(b.1.blockName) == .orderedAscending
             }

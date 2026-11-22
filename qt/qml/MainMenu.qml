@@ -16,7 +16,8 @@ Popup {
 
     property var entries: [
         {section: "File"},
-        {id: "new", icon: "open", label: "New Project", hint: "Ctrl+N"},
+        {id: "newMara", icon: "open", label: "New Maraflow Project", hint: "Ctrl+N"},
+        {id: "newWirebench", icon: "open", label: "New Wirebench Project (legacy)", hint: ""},
         {id: "open", icon: "open", label: "Open…", hint: "Ctrl+O"},
         {id: "save", icon: "save", label: "Save", hint: "Ctrl+S"},
         {id: "saveAs", icon: "save", label: "Save As…", hint: "Ctrl+Shift+S"},
@@ -30,7 +31,7 @@ Popup {
         {id: "resetWires", icon: "reset", label: "Reset Wire Routing", hint: "Ctrl+Shift+R"},
         {section: "Project"},
         {id: "build", icon: "chip", label: "Build…", hint: "Ctrl+B"},
-        {id: "plc", icon: "upload", label: "PLC…", hint: "Ctrl+Shift+U"},
+        {id: "plc", icon: "upload", label: "Hardware…", hint: "Ctrl+Shift+U"},
         {id: "plcConfig", icon: "chip", label: "PLC Configuration…", hint: "Ctrl+Alt+K"},
         {id: "agent", icon: "sparkle", label: "Agent Panel", hint: "Ctrl+Shift+A"},
         {id: "help", icon: "help", label: "Block Reference", hint: "F1"},

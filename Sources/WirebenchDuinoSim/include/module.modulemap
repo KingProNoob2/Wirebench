@@ -1,0 +1,4 @@
+module WirebenchDuinoSim {
+    header "WirebenchDuinoSim.h"
+    export *
+}

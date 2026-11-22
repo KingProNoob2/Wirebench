@@ -275,12 +275,10 @@ public final class BlockRegistry: @unchecked Sendable {
 
         // BoolVar (Interactive variable / button)
         register(guid: BoolVarBlock.guid) { mod in
-            let modeRaw = mod.simulMode ?? (mod.rawAttributes["SimulMode"].flatMap { Int($0) } ?? 2)
-            return BoolVarBlock(mode: BoolVarBlock.Mode(simulMode: modeRaw))
+            return BoolVarBlock(mode: BoolVarBlock.Mode(simulMode: mod.boolVarSimulMode))
         }
         register(typeName: "boolvar") { mod in
-            let modeRaw = mod.simulMode ?? (mod.rawAttributes["SimulMode"].flatMap { Int($0) } ?? 2)
-            return BoolVarBlock(mode: BoolVarBlock.Mode(simulMode: modeRaw))
+            return BoolVarBlock(mode: BoolVarBlock.Mode(simulMode: mod.boolVarSimulMode))
         }
         register(typeName: "roztoctruletu") { _ in
             BoolVarBlock(mode: .pushButton)
