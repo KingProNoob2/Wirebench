@@ -270,11 +270,15 @@ public final class MaraProtClient: @unchecked Sendable {
         var changed: [UInt16: [UInt8]] = [:]
         var position = 6
         for _ in 0..<count {
-            guard position + 2 <= reply.count else { break }
+            guard position + 2 <= reply.count else {
+                throw ClientError.malformedResponse("WATCH_POLL ended inside a slot header")
+            }
             let slot = readLE16(reply, position)
             position += 2
             let size = Self.slotSize(slot)
-            guard size > 0, position + size <= reply.count else { break }
+            guard size > 0, position + size <= reply.count else {
+                throw ClientError.malformedResponse("WATCH_POLL ended inside slot 0x\(String(format: "%04X", slot))")
+            }
             changed[slot] = Array(reply[position..<(position + size)])
             position += size
         }
@@ -302,13 +306,23 @@ public final class MaraProtClient: @unchecked Sendable {
             let emitted = Int(readLE16(reply, 0))
             var position = 2
             for _ in 0..<emitted {
-                guard position + 2 <= reply.count else { break }
+                guard position + 2 <= reply.count else {
+                    throw ClientError.malformedResponse("SLOT_READ_BATCH ended inside a slot header")
+                }
                 let slot = readLE16(reply, position)
                 position += 2
                 let size = Self.slotSize(slot)
-                guard size > 0, position + size <= reply.count else { break }
+                guard size > 0, position + size <= reply.count else {
+                    throw ClientError.malformedResponse("SLOT_READ_BATCH ended inside slot 0x\(String(format: "%04X", slot))")
+                }
                 result[slot] = Array(reply[position..<(position + size)])
                 position += size
+            }
+            for index in 0..<count {
+                let requested = slotIds[offset + index]
+                guard result[requested] != nil else {
+                    throw ClientError.malformedResponse("SLOT_READ_BATCH omitted slot 0x\(String(format: "%04X", requested))")
+                }
             }
             offset += count
         }
@@ -318,6 +332,9 @@ public final class MaraProtClient: @unchecked Sendable {
     /// Writes a set of slots, for a Watch/Force control.
     @discardableResult
     public func writeSlots(_ values: [UInt16: [UInt8]]) throws -> Int {
+        for (slot, raw) in values where raw.count != Self.slotSize(slot) {
+            throw ClientError.uploadRejected("slot 0x\(String(format: "%04X", slot)) needs \(Self.slotSize(slot)) bytes, got \(raw.count)")
+        }
         let entries = values.sorted { $0.key < $1.key }
         var offset = 0
         var applied = 0
@@ -325,7 +342,7 @@ public final class MaraProtClient: @unchecked Sendable {
             var count = 0
             var bytes = 2
             while offset + count < entries.count {
-                let (slot, raw) = entries[offset + count]
+                let (_, raw) = entries[offset + count]
                 if count > 0 && bytes + 2 + raw.count > 500 { break }
                 bytes += 2 + raw.count
                 count += 1
@@ -338,7 +355,11 @@ public final class MaraProtClient: @unchecked Sendable {
             }
             let reply = try transceive(.slotWriteBatch, request, timeout: timeout)
             guard reply.count >= 2 else { throw ClientError.malformedResponse("SLOT_WRITE_BATCH returned \(reply.count) bytes") }
-            applied += Int(readLE16(reply, 0))
+            let batchApplied = Int(readLE16(reply, 0))
+            guard batchApplied == count else {
+                throw ClientError.uploadRejected("device applied \(batchApplied) of \(count) slots in a batch")
+            }
+            applied += batchApplied
             offset += count
         }
         return applied

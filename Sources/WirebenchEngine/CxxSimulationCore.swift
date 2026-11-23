@@ -166,7 +166,7 @@ public final class CxxSimulationCore {
                 return Int64(digits.prefix(while: { $0.isNumber })) ?? 0
             }
             switch definition.id {
-            case "IO.DI", "IO.DO", "IO.AI", "IO.AO", "IO.PWM", "IO.IREF", "IO.OREF":
+            case "IO.PWM", "IO.IREF", "IO.OREF":
                 return (Int32(index), [channel()])
             case "Visual.Vars.BoolVar", "Visual.Vars.IntVar", "Visual.Vars.LongVar":
                 let raw = mod.rawAttributes["MARAFLOW_PROP_CurrentValue"] ?? "0"
@@ -258,6 +258,9 @@ public final class CxxSimulationCore {
             if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
                 block = UnresolvedBlock(resolvedName: definition.typeName, inCount: mod.inPins.count,
                                         outCount: mod.outPins.count)
+                for (idx, pin) in mod.outPins.enumerated() where idx < block.outPins.count {
+                    block.outPins[idx] = pin.value
+                }
             } else {
                 block = BlockRegistry.shared.create(for: mod)
             }
@@ -268,9 +271,10 @@ public final class CxxSimulationCore {
             for (idx, pin) in mod.paramPins.enumerated() where idx < block.paramPins.count {
                 block.paramPins[idx] = pin.value
             }
-            // A stored out-pin value is not a starting state here: Dirigo writes last-run values, and the recordings
-            // this engine is checked against were made without applying them. A variable's configured value comes
-            // from `INIT_VALUE` (IntVar/LongVar/FloatVar) or its block default.
+            // A stored Dirigo out-pin value is not a starting state here: Dirigo writes last-run values, and the
+            // recordings this engine is checked against were made without applying them. Native Maraflow outputs
+            // were copied above because their pin values also carry the imported datatype. A variable's configured
+            // value comes from `INIT_VALUE` (IntVar/LongVar/FloatVar) or its block default.
             (block as? SystemCmdBlock)?.applyDefinition()
             // A block class may leave an output undefined until it first runs; give it the type's zero so the sheet
             // shows a value before the simulation starts and after Reset rebuilds the core.
@@ -424,10 +428,8 @@ public final class CxxSimulationCore {
                     }
                 }
             }
-            for key in ["RegisterName", "TriggerMode", "InterruptSource", "TriggerEdge",
-                        "CaptureMode", "LatchPolicy", "SimPulseValue",
-                        "TimerMode", "WindowSize", "BitOrder", "ArrayName"] {
-                guard let value = mod.rawAttributes["MARAFLOW_PROP_\(key)"] else { continue }
+            for (attribute, value) in mod.rawAttributes where attribute.hasPrefix("MARAFLOW_PROP_") {
+                let key = String(attribute.dropFirst("MARAFLOW_PROP_".count))
                 key.withCString { keyCString in
                     value.withCString { valueCString in
                         wirebench_sim_set_string(created, Int32(position), keyCString, valueCString)
@@ -511,6 +513,14 @@ public final class CxxSimulationCore {
 
     /// The shared operand namespace (registers, DI/DO/AI/AO/PWM, ST and ladder writes). Useful for tests and the
     /// inspector to observe values no module pin exposes.
+    public func fireInterrupt(source: String? = nil) {
+        if let source {
+            source.withCString { wirebench_sim_fire_interrupt(sim, $0) }
+        } else {
+            wirebench_sim_fire_interrupt(sim, nil)
+        }
+    }
+
     public func operandValue(_ name: String) -> Double {
         name.withCString { wirebench_sim_get_operand(sim, $0) }
     }

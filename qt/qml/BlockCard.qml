@@ -257,25 +257,26 @@ Item {
             }
         }
 
-        // IntVar / LongVar: a thumb on a track from 0 to the block's maximum, the variable following the thumb.
+        // IntVar / LongVar: a thumb on a track over the block's configured range, the variable following the thumb.
         Item {
             id: slider
             visible: card.model.interaction === "slider"
             anchors.fill: parent
-            readonly property real maximum: Math.max(1, card.model.sliderMax)
-            readonly property real current: Math.min(Math.max(card.driven.value, 0), maximum)
+            readonly property real minimum: card.model.sliderMin || 0
+            readonly property real maximum: Math.max(minimum + 1, card.model.sliderMax)
+            readonly property real current: Math.min(Math.max(card.driven.value, minimum), maximum)
             // SmoothRect, not Rectangle: Qt's own rounded rectangles are polygons, and a small circle made of a few straight edges looks rough.
             SmoothRect { x: 7; width: parent.width - 14; height: 4; radius: 2; anchors.verticalCenter: parent.verticalCenter; color: AppTheme.field }
-            SmoothRect { x: 7; width: (parent.width - 14) * slider.current / slider.maximum; height: 4; radius: 2; anchors.verticalCenter: parent.verticalCenter; color: card.tint }
+            SmoothRect { x: 7; width: (parent.width - 14) * (slider.current - slider.minimum) / (slider.maximum - slider.minimum); height: 4; radius: 2; anchors.verticalCenter: parent.verticalCenter; color: card.tint }
             SmoothRect {
-                x: 7 + (parent.width - 14) * slider.current / slider.maximum - width / 2
+                x: 7 + (parent.width - 14) * (slider.current - slider.minimum) / (slider.maximum - slider.minimum) - width / 2
                 width: 16; height: 16; radius: 8; anchors.verticalCenter: parent.verticalCenter
                 color: AppTheme.card; borderWidth: 2; borderColor: card.tint
             }
             MouseArea {
                 anchors.fill: parent
                 function setFrom(mouse) {
-                    const next = Math.round(Math.min(Math.max((mouse.x - 7) / (width - 14), 0), 1) * slider.maximum)
+                    const next = Math.round(slider.minimum + Math.min(Math.max((mouse.x - 7) / (width - 14), 0), 1) * (slider.maximum - slider.minimum))
                     if (next !== slider.current) controller.command({cmd: "setVariable", module: card.model.id, value: next})
                 }
                 onPressed: mouse => { card.pressed(card.model.id, false); setFrom(mouse) }

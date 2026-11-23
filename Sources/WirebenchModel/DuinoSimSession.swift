@@ -27,6 +27,7 @@ public final class DuinoSimSession {
     public private(set) var vmState: MaraProt.VMRunState = .stopped
 
     private nonisolated(unsafe) var pollTask: Task<Void, Never>?
+    private nonisolated(unsafe) var pulseTasks: [Int: Task<Void, Never>] = [:]
 
     /// - Parameter port: 0 = the Duino-S default (5020).
     public init(port requested: UInt16 = 0) throws {
@@ -40,31 +41,37 @@ public final class DuinoSimSession {
         digitalInputs[15] = true
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self else { return }
-                let powered = sim.isPowered
-                let stopped = sim.vmEStopActive
-                let state = sim.vmState
-                let inputs = (0..<28).map { sim.digitalInput($0) }
-                let outputs = (0..<28).map { sim.digitalOutput($0) }
-                let analogIn = (0..<4).map { sim.analogInput($0) }
-                let analogOut = (0..<2).map { sim.analogOutput($0) }
-                let pwm = (0..<8).map { sim.pwmDuty($0) }
-                let newDisplay = sim.display
-                if isPowered != powered { isPowered = powered }
-                if eStopActive != stopped { eStopActive = stopped }
-                if vmState != state { vmState = state }
-                if digitalInputs != inputs { digitalInputs = inputs }
-                if digitalOutputs != outputs { digitalOutputs = outputs }
-                if analogInputs != analogIn { analogInputs = analogIn }
-                if analogOutputs != analogOut { analogOutputs = analogOut }
-                if pwmDuties != pwm { pwmDuties = pwm }
-                if display != newDisplay { display = newDisplay }
+                if let self {
+                    let powered = sim.isPowered
+                    let stopped = sim.vmEStopActive
+                    let state = sim.vmState
+                    let inputs = (0..<28).map { sim.digitalInput($0) }
+                    let outputs = (0..<28).map { sim.digitalOutput($0) }
+                    let analogIn = (0..<4).map { sim.analogInput($0) }
+                    let analogOut = (0..<2).map { sim.analogOutput($0) }
+                    let pwm = (0..<8).map { sim.pwmDuty($0) }
+                    let newDisplay = sim.display
+                    if isPowered != powered { isPowered = powered }
+                    if eStopActive != stopped { eStopActive = stopped }
+                    if vmState != state { vmState = state }
+                    if digitalInputs != inputs { digitalInputs = inputs }
+                    if digitalOutputs != outputs { digitalOutputs = outputs }
+                    if analogInputs != analogIn { analogInputs = analogIn }
+                    if analogOutputs != analogOut { analogOutputs = analogOut }
+                    if pwmDuties != pwm { pwmDuties = pwm }
+                    if display != newDisplay { display = newDisplay }
+                } else {
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
     }
 
-    deinit { pollTask?.cancel() }
+    deinit {
+        pollTask?.cancel()
+        for task in pulseTasks.values { task.cancel() }
+    }
 
     public func controlVM(_ action: UInt8) {
         sim.controlVM(action)
@@ -80,9 +87,12 @@ public final class DuinoSimSession {
     public func pulseButton(channel: Int, activeLow: Bool = false) {
         let released = activeLow
         setDigitalInput(channel, !released)
-        Task { [weak self] in
+        pulseTasks[channel]?.cancel()
+        pulseTasks[channel] = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
             self?.setDigitalInput(channel, released)
+            self?.pulseTasks.removeValue(forKey: channel)
         }
     }
 

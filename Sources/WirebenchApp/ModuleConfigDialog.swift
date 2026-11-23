@@ -64,6 +64,10 @@ public struct ModuleConfigDialog: View {
     // Dynamic Pin Counts (ISwitch, Int2Bits, Logic, Demux)
     @State private var inputCount: Int = 2
     @State private var outputCount: Int = 8
+    @State private var maraflowDataType = "INT"
+    @State private var maraflowModuloOut = false
+    @State private var maraflowOperand = "AO0"
+    @State private var maraflowPropertyValues: [String: String] = [:]
 
     // 8xDI configuration (PIN_MASK and PIN_ALL_VISIBLE)
     @State private var diMaskBits: [Bool] = Array(repeating: true, count: 16)
@@ -268,9 +272,11 @@ public struct ModuleConfigDialog: View {
                 TextField("Initial Value", value: $floatVarValue, format: .number)
             }
         case .div:
-            Section("Division Options") {
-                Toggle("Show Modulo Output Pin (Mod = A % B)", isOn: $divModuloVisible)
-                hint("When checked, activates the optional 'Mod' remainder output pin on the module.")
+            if MaraflowCatalog.definition(forGuid: mod.guid) == nil {
+                Section("Division Options") {
+                    Toggle("Show Modulo Output Pin (Mod = A % B)", isOn: $divModuloVisible)
+                    hint("When checked, activates the optional 'Mod' remainder output pin on the module.")
+                }
             }
         case .rs:
             Section("Simultaneous Input Priority") {
@@ -471,6 +477,78 @@ public struct ModuleConfigDialog: View {
                 }
             }
         }
+        if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
+            Section("Maraflow Configuration") {
+                if definition.variableInputCount {
+                    Stepper("Input Pin Count: \(inputCount)", value: $inputCount, in: 2...16)
+                }
+                if definition.configurableDataType {
+                    Picker("Data Type:", selection: $maraflowDataType) {
+                        ForEach(["BOOL", "INT", "LONG", "FLOAT"], id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                if definition.id == "Math.Div" {
+                    Toggle("Enable Mod output pin", isOn: $maraflowModuloOut)
+                }
+                if MaraflowConfiguration.coilDefinitionIDs.contains(definition.id) {
+                    TextField("Destination Operand:", text: $maraflowOperand)
+                    switch definition.id {
+                    case "Ladder.Coil.ANALOG": hint("For example AO0 or AO1")
+                    case "Ladder.Coil.WRITE_REG": hint("For example REG_0 or AO0")
+                    default: hint("For example DO0 or DO1")
+                    }
+                }
+                ForEach(BlockConfig.maraflowPropertyFields(for: mod), id: \.key) { field in
+                    maraflowPropertyField(field)
+                }
+            }
+        }
+    }
+
+    private func propertyBinding(_ key: String) -> Binding<String> {
+        Binding(get: { maraflowPropertyValues[key] ?? "" },
+                set: { maraflowPropertyValues[key] = $0 })
+    }
+
+    @ViewBuilder
+    private func maraflowPropertyField(_ field: BlockConfig.Field) -> some View {
+        Group {
+            switch field.kind {
+        case "choice":
+            Picker(field.label + ":", selection: propertyBinding(field.key)) {
+                ForEach(field.options ?? [], id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+        case "int":
+            let range = (field.min ?? 0)...(field.max ?? 100)
+            Stepper("\(field.label): \(maraflowPropertyValues[field.key] ?? "0")",
+                    value: Binding(get: { Int(maraflowPropertyValues[field.key] ?? "") ?? range.lowerBound },
+                                   set: { maraflowPropertyValues[field.key] = "\($0)" }), in: range)
+        case "bool":
+            Toggle(field.label, isOn: Binding(get: { maraflowPropertyValues[field.key] == "1" },
+                                              set: { maraflowPropertyValues[field.key] = $0 ? "1" : "0" }))
+        case "bits":
+            HStack {
+                ForEach(0..<(field.bitCount ?? 4), id: \.self) { index in
+                    Toggle("D\(index)", isOn: Binding(get: {
+                        let text = maraflowPropertyValues[field.key] ?? ""
+                        return text.count > index && text[text.index(text.startIndex, offsetBy: index)] == "1"
+                    }, set: { selected in
+                        var characters = Array((maraflowPropertyValues[field.key] ?? "").padding(toLength: field.bitCount ?? 4,
+                                                                                                   withPad: "0", startingAt: 0))
+                        if characters.indices.contains(index) {
+                            characters[index] = selected ? "1" : "0"
+                            maraflowPropertyValues[field.key] = String(characters)
+                        }
+                    }))
+                }
+            }
+            default:
+                TextField(field.label + ":", text: propertyBinding(field.key))
+            }
+        }
+        .disabled(field.disabled ?? false)
     }
 
     /// A grid of one checkbox per channel (`DI0`, `DO3`, …).
@@ -637,6 +715,17 @@ public struct ModuleConfigDialog: View {
             self.doVisibleBits[bit] = (doHiddenMask & (1 << bit)) == 0
         }
 
+        if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
+            self.inputCount = MaraflowConfiguration.inputCount(of: mod) ?? inputCount
+            self.maraflowDataType = MaraflowConfiguration.dataType(of: mod)
+            self.maraflowModuloOut = mod.rawAttributes["MARAFLOW_PROP_ModuloOut"]?.lowercased() == "true"
+                || (definition.id == "Math.Div" && mod.outPins.count > 2)
+            self.maraflowOperand = mod.rawAttributes["MARAFLOW_PROP_Operand"]
+                ?? MaraflowConfiguration.defaultOperand(for: definition.id)
+            self.maraflowPropertyValues = Dictionary(uniqueKeysWithValues:
+                BlockConfig.maraflowPropertyFields(for: mod).map { ($0.key, $0.value) })
+        }
+
         // Generic params map
         for (i, p) in mod.paramPins.enumerated() {
             genericParamValues[i] = p.value.description
@@ -712,7 +801,9 @@ public struct ModuleConfigDialog: View {
                 model.setFloatVariableValue(moduleId: moduleId, value: Float(floatVarValue))
             }
         case .div:
-            model.updateDivModuloVisible(id: moduleId, isVisible: divModuloVisible)
+            if MaraflowCatalog.definition(forGuid: mod.guid) == nil {
+                model.updateDivModuloVisible(id: moduleId, isVisible: divModuloVisible)
+            }
         case .rs:
             model.updateRSPriority(id: moduleId, higherPriorityS: rsPriorityIsS)
         case .dateTime:
@@ -747,6 +838,21 @@ public struct ModuleConfigDialog: View {
             for (index, text) in genericParamValues {
                 model.updateModuleParam(id: moduleId, paramIndex: index, value: PinValue.parse(text))
             }
+        }
+        if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
+            if definition.variableInputCount {
+                model.updateMaraflowInputCount(id: moduleId, count: inputCount)
+            }
+            if definition.configurableDataType {
+                model.updateMaraflowDataType(id: moduleId, dataType: maraflowDataType)
+            }
+            if definition.id == "Math.Div" {
+                model.updateMaraflowDivModuloOut(id: moduleId, isVisible: maraflowModuloOut)
+            }
+            if MaraflowConfiguration.coilDefinitionIDs.contains(definition.id) {
+                model.updateMaraflowOperand(id: moduleId, operand: maraflowOperand)
+            }
+            BlockConfig.apply(maraflowPropertyValues, to: moduleId, in: model)
         }
     }
 }

@@ -49,14 +49,31 @@ public enum BlockRole {
 
     /// A `BoolVar`'s mode, as the registry builds it: `SimulMode`, or a push button by default.
     public static func boolVarMode(of module: PCCModule) -> BoolVarBlock.Mode? {
-        guard module.guid == BoolVarBlock.guid else { return nil }
+        guard module.guid == BoolVarBlock.guid
+                || MaraflowCatalog.definition(forGuid: module.guid)?.id == "Visual.Vars.BoolVar" else { return nil }
         return BoolVarBlock.Mode(simulMode: module.boolVarSimulMode)
     }
 
     /// The largest value an `IntVar`'s slider reaches. Dirigo itself writes a slider as `SimulMode="3" HighValue="…"`, which is read
     /// here; this app's own `X_SliderMax` (see `ExtraPropertyCatalog`) wins when both are there, and is only written when the block
     /// has no `HighValue` and the value is not the default.
+    public static func sliderMin(of module: PCCModule) -> Int {
+        guard MaraflowCatalog.definition(forGuid: module.guid)?.id.hasPrefix("Visual.Vars.") == true else { return 0 }
+        let raw = module.rawAttributes["MARAFLOW_PROP_ValA"] ?? "0"
+        let value = Double(raw) ?? 0
+        let bounded = min(max(value.rounded(), Double(Int32.min)), Double(Int32.max))
+        return value.isFinite ? Int(bounded) : 0
+    }
+
     public static func sliderMax(of module: PCCModule) -> Int {
+        if MaraflowCatalog.definition(forGuid: module.guid)?.id.hasPrefix("Visual.Vars.") == true {
+            let raw = module.rawAttributes["MARAFLOW_PROP_ValB"] ?? "100"
+            let value = Double(raw) ?? 100
+            let bounded = min(max(value.rounded(), Double(Int32.min)), Double(Int32.max))
+            let configured = value.isFinite ? Int(bounded) : 100
+            let minimum = sliderMin(of: module)
+            return configured > minimum ? configured : minimum + 100
+        }
         let stored = module.extraProperty("SliderMax")?.intValue.map(Int.init)
             ?? module.rawAttributes["HighValue"].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
         return max(1, stored ?? BlockInteraction.defaultSliderMax)
@@ -68,10 +85,16 @@ public enum BlockRole {
     }
 
     public static func isIntVariable(_ module: PCCModule) -> Bool {
-        ["TMIntVar", "TMLongVar"].contains(delphiClass(of: module) ?? "")
+        if let id = MaraflowCatalog.definition(forGuid: module.guid)?.id {
+            return id == "Visual.Vars.IntVar" || id == "Visual.Vars.LongVar"
+        }
+        return ["TMIntVar", "TMLongVar"].contains(delphiClass(of: module) ?? "")
     }
 
-    public static func isFloatVariable(_ module: PCCModule) -> Bool { delphiClass(of: module) == "TMFloatVar" }
+    public static func isFloatVariable(_ module: PCCModule) -> Bool {
+        if MaraflowCatalog.definition(forGuid: module.guid)?.id == "Visual.Vars.FloatVar" { return true }
+        return delphiClass(of: module) == "TMFloatVar"
+    }
 
     /// Blocks whose *outputs* a person drives by clicking: the macro `Inputs` interface and `8xDI`.
     public static func hasClickableOutputs(_ module: PCCModule) -> Bool {
@@ -680,7 +703,21 @@ public final class AppModel: @unchecked Sendable {
     /// The hardware a new Wirebench project is for: the Duino-E this editor is used with. The PLC Configuration menu changes it.
     private static let newProjectProfile = "Sybas Duino-E"
 
+    @MainActor
+    private func resetTransientDocumentUI() {
+        stopDuinoWatch()
+        duinoBuildResult = nil
+        duinoBuildError = nil
+        buildReport = nil
+        buildReportNotice = nil
+        isShowingBuildReport = false
+        isShowingPLCConfiguration = false
+        pendingAlert = nil
+    }
+
+    @MainActor
     private func performNewProject(platform: ProjectPlatform) {
+        resetTransientDocumentUI()
         pause()
         swiftSource = ""
         maraflowSTPageIndex = nil
@@ -734,7 +771,8 @@ public final class AppModel: @unchecked Sendable {
     /// The same setup as a project loaded from disk, except that there is no URL and nothing to compare against for the
     /// edited flag — the project is new.
     @MainActor
-    public func adoptCompiledProject(_ compiled: PCCProject) {
+    public func adoptCompiledProject(_ compiled: PCCProject, resettingTransientUI: Bool = false) {
+        if resettingTransientUI { resetTransientDocumentUI() }
         pause()
         isRestoringUndo = true
         self.project = compiled
@@ -801,6 +839,7 @@ public final class AppModel: @unchecked Sendable {
             let loaded = try ProjectFile.read(at: url)
             // A `SystemCmd` block that is only configuration becomes an entry of the PLC configuration; one in the circuit stays a block.
             let proj = PLCConfiguration.extracting(loaded.project)
+            resetTransientDocumentUI()
             var notes: [String] = []
             if !proj.profile.isEmpty, ProfileRegistry.builtIn.profile(named: proj.profile) == nil {
                 notes.append("This project asks for the profile '\(proj.profile)', which this build does not know. "
@@ -821,8 +860,9 @@ public final class AppModel: @unchecked Sendable {
                                kind: loaded.format == .wirebench && notes.count == 1 ? .warning : .info)
             }
             isLegacyDocument = loaded.format != .wirebench
-            // `.mfl` projects are authored for the Maraflow Duino-S family; Dirigo projects keep the D3Net path.
-            if loaded.format == .maraflow { hardwareFamily = .duinoS }
+            // Each document selects its own PLC family; a legacy file must not inherit the previous
+            // document's Duino-S transport and compiler.
+            hardwareFamily = loaded.format == .maraflow ? .duinoS : .dirigo
             isRestoringUndo = true
             self.project = proj
             // A new document means new meanings for the same module ids, and `ModulePinCatalog`
@@ -881,7 +921,7 @@ public final class AppModel: @unchecked Sendable {
     public func shouldTerminateNow() -> Bool {
         if isTerminationApproved { return true }
         guard hasSignificantChanges else { return true }
-        pendingUnsavedIntent = .quit
+        presentUnsavedQuestion(.quit)
         return false
     }
 
@@ -934,11 +974,18 @@ public final class AppModel: @unchecked Sendable {
         requestProjectReplacement(.adopt)
     }
 
+    private func presentUnsavedQuestion(_ intent: UnsavedIntent) {
+        isShowingPLCConfiguration = false
+        configuringModuleId = nil
+        isShowingBuildReport = false
+        pendingUnsavedIntent = intent
+    }
+
     /// Asks first when there is something to lose.
     @MainActor
     private func requestProjectReplacement(_ intent: UnsavedIntent) {
         if hasSignificantChanges {
-            pendingUnsavedIntent = intent
+            presentUnsavedQuestion(intent)
         } else {
             continueAfter(intent)
         }
@@ -954,7 +1001,7 @@ public final class AppModel: @unchecked Sendable {
         case .adopt:
             if let project = pendingAdoptProject {
                 pendingAdoptProject = nil
-                adoptCompiledProject(project)
+                adoptCompiledProject(project, resettingTransientUI: true)
             }
         case .quit: finishQuit(intent, terminate: true)
         }
@@ -1763,7 +1810,7 @@ public final class AppModel: @unchecked Sendable {
 
     /// Rebuilds the core after a block changed shape (an input or output count), carrying every pin value
     /// the document gives across — the same as any other structural edit.
-    private func rebuildAfterShapeChange() {
+    func rebuildAfterShapeChange() {
         if let project { engine = installEngine(project: project) }
         simulationDidChange()
     }
@@ -1880,6 +1927,11 @@ public final class AppModel: @unchecked Sendable {
     /// Writing an output clears any pulse still running on it, as `BoolVarBlock.setOutput` does.
     public func setModuleOutput(moduleId: Int, pinIndex: Int, value: PinValue) {
         guard pinIndex >= 0, let node = getNode(id: moduleId), pinIndex < node.block.outPins.count else { return }
+        if pinIndex == 0, MaraflowCatalog.definition(forGuid: node.module.guid)?.id.hasPrefix("Visual.Vars.") == true,
+           let index = project?.modules.firstIndex(where: { $0.id == moduleId }) {
+            project?.modules[index].rawAttributes["MARAFLOW_PROP_CurrentValue"] = value.description
+            isDocumentEdited = true
+        }
         engine?.setOut(moduleId: moduleId, pin: pinIndex, value: value)
         refreshAfterPinEdit()
     }
@@ -1890,6 +1942,10 @@ public final class AppModel: @unchecked Sendable {
         guard let idx = project?.modules.firstIndex(where: { $0.id == id }),
               BlockRole.isIntVariable(project!.modules[idx]) else { return }
         let value = min(Swift.max(1, newMax), Int(Int32.max))
+        if MaraflowCatalog.definition(forGuid: project!.modules[idx].guid)?.id.hasPrefix("Visual.Vars.") == true {
+            updateMaraflowProperty(id: id, name: "ValB", value: "\(value)")
+            return
+        }
         if project!.modules[idx].rawAttributes["HighValue"] != nil {
             // A block from Dirigo keeps its range where Dirigo put it, so the original sees the change too.
             project?.modules[idx].rawAttributes["HighValue"] = "\(value)"
@@ -1901,10 +1957,28 @@ public final class AppModel: @unchecked Sendable {
         isDocumentEdited = true
     }
 
+    public func fireInterrupt(source: String? = nil) {
+        engine?.fireInterrupt(source: source)
+        engine?.evaluateNow(now: Date())
+        simulationDidChange()
+    }
+
     /// Sets a variable block's value by hand (`IntVar`). The value is the block's state, so the core writes
     /// it into the variable itself, not only onto the output pin the variable would overwrite on its next pass.
     public func setVariableValue(moduleId: Int, value: Int) {
-        guard let module = module(id: moduleId), BlockRole.isIntVariable(module) else { return }
+        guard let module = module(id: moduleId) else { return }
+        if MaraflowCatalog.definition(forGuid: module.guid)?.id.hasPrefix("Visual.Vars.") == true {
+            let prototype = getNode(id: moduleId)?.block.outPins.first ?? module.outPins.first?.value ?? .int32(0)
+            let output: PinValue = switch prototype {
+            case .bool: .bool(value != 0)
+            case .int64: .int64(Int64(value))
+            case .float: .float(Float(value))
+            default: .int32(Int32(clamping: value))
+            }
+            setModuleOutput(moduleId: moduleId, pinIndex: 0, value: output)
+            return
+        }
+        guard BlockRole.isIntVariable(module) else { return }
         engine?.setOut(moduleId: moduleId, pin: 0, value: .int32(Int32(clamping: value)))
         refreshAfterPinEdit()
     }
@@ -1912,6 +1986,10 @@ public final class AppModel: @unchecked Sendable {
     /// The same for a `FloatVar`.
     public func setFloatVariableValue(moduleId: Int, value: Float) {
         guard let module = module(id: moduleId), BlockRole.isFloatVariable(module) else { return }
+        if MaraflowCatalog.definition(forGuid: module.guid)?.id == "Visual.Vars.FloatVar" {
+            setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .float(value))
+            return
+        }
         engine?.setOut(moduleId: moduleId, pin: 0, value: .float(value))
         refreshAfterPinEdit()
     }
@@ -2587,8 +2665,18 @@ public final class AppModel: @unchecked Sendable {
             if mode == .pushButton {
                 engine?.pulseOut(moduleId: moduleId, pin: 0, cycles: 2)
             } else {
-                engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(!(node.block.outPins.first?.asBool ?? false)))
+                setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(!(node.block.outPins.first?.asBool ?? false)))
             }
+        } else if MaraflowCatalog.definition(forGuid: node.module.guid)?.id.hasPrefix("Visual.Vars.") == true,
+                  pinIndex == 0, let current = node.block.outPins.first {
+            let document = module(id: moduleId) ?? node.module
+            let valA = document.rawAttributes["MARAFLOW_PROP_ValA"] ?? "0"
+            let valB = document.rawAttributes["MARAFLOW_PROP_ValB"] ?? "1"
+            let stored = document.rawAttributes["MARAFLOW_PROP_CurrentValue"] ?? valA
+            let next = stored == valA ? valB : valA
+            let value = MaraflowConfiguration.value(PinValue.parse(next),
+                as: MaraflowConfiguration.typeName(of: current))
+            setModuleOutput(moduleId: moduleId, pinIndex: 0, value: value)
         } else if BlockRole.hasClickableOutputs(node.module) {
             // The macro `Inputs` interface and `8xDI` are driven on their outputs.
             guard pinIndex < node.block.outPins.count else { return }
@@ -2605,7 +2693,10 @@ public final class AppModel: @unchecked Sendable {
         } else if pinIndex < node.block.outPins.count {
             engine?.setOut(moduleId: moduleId, pin: pinIndex, value: .bool(!node.block.outPins[pinIndex].asBool))
         }
-        refreshAfterPinEdit()
+        if MaraflowCatalog.definition(forGuid: node.module.guid)?.id.hasPrefix("Visual.Vars.") != true
+            || BlockRole.boolVarMode(of: node.module) == .pushButton {
+            refreshAfterPinEdit()
+        }
     }
 
     /// Reports a momentary control being held down or let go.
@@ -2620,13 +2711,13 @@ public final class AppModel: @unchecked Sendable {
             if mode == .pushButton {
                 if isPressed {
                     heldButtons.insert(moduleId)
-                    engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(true))
+                    setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(true))
                 } else {
                     guard heldButtons.remove(moduleId) != nil else { return }
-                    engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(false))
+                    setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(false))
                 }
             } else if isPressed {
-                engine?.setOut(moduleId: moduleId, pin: 0, value: .bool(!(node.block.outPins.first?.asBool ?? false)))
+                setModuleOutput(moduleId: moduleId, pinIndex: 0, value: .bool(!(node.block.outPins.first?.asBool ?? false)))
             } else {
                 return
             }
@@ -2637,7 +2728,9 @@ public final class AppModel: @unchecked Sendable {
         } else {
             return
         }
-        refreshAfterPinEdit()
+        if MaraflowCatalog.definition(forGuid: node.module.guid)?.id.hasPrefix("Visual.Vars.") != true {
+            refreshAfterPinEdit()
+        }
     }
 
     private func connectHardware() {

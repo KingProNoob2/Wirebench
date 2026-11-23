@@ -95,13 +95,14 @@ struct MaraflowImportTests {
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("X", "Input", "BOOL", "0")],
                          outputs: [("Y", "Inverted Output", "BOOL", "0")])
-        entries += Self.block("page.0.block.2.", id: "c", definition: "IO.8xDO", type: "8x DO", name: "8xDO1",
+        entries += Self.block("page.0.block.2.", id: "c", definition: "Main.Switches.Mux", type: "Mux", name: "Mux1",
                          gridX: 16, gridY: 3, order: 30,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
-                                  ("DO0", "Digital Output 0", "BOOL", "0"),
-                                  ("DO1", "Digital Output 1", "BOOL", "0"),
-                                  ("DO2", "Digital Output 2", "BOOL", "0")],
-                         outputs: [("Ok", "Port Write Status", "BOOL", "1")])
+                                  ("Adr", "Input Address Index (0..N-1)", "INT", "0"),
+                                  ("X0", "Channel 0", "INT", "0"),
+                                  ("X1", "Channel 1", "INT", "0"),
+                                  ("X2", "Channel 2", "INT", "0")],
+                         outputs: [("Y", "Multiplexed Output", "INT", "0")])
         entries += Self.block("page.0.block.3.", id: "d", definition: "Math.PID", type: "PID", name: "PID1",
                          gridX: 24, gridY: 3, order: 40,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
@@ -154,9 +155,9 @@ struct MaraflowImportTests {
         let andToNot = try #require(project.connection(inModuleId: not.id, inPinId: 1))
         #expect(andToNot.outModuleId == and.id && andToNot.outPinId == 0)
 
-        let output = try #require(project.modules.first { $0.name == "8xDO1" })
-        #expect(output.guid == MaraflowCatalog.byId["IO.8xDO"]?.guid)
-        #expect(output.inPins.count == 9)
+        let output = try #require(project.modules.first { $0.name == "Mux1" })
+        #expect(output.guid == MaraflowCatalog.byId["Main.Switches.Mux"]?.guid)
+        #expect(output.inPins.count == 4)
         #expect(project.connection(inModuleId: output.id, inPinId: 1)?.outModuleId == not.id)
         #expect(project.connection(inModuleId: output.id, inPinId: 2)?.outModuleId != nil)
 
@@ -285,45 +286,40 @@ struct MaraflowImportTests {
 
     @Test("Every static Maraflow definition is a native block")
     func everyDefinitionIsNative() {
-        #expect(MaraflowCatalog.all.count == 97)
+        #expect(MaraflowCatalog.all.count == 91)
         #expect(MaraflowCatalog.ported.count == MaraflowCatalog.all.count)
         #expect(MaraflowCatalog.all.allSatisfy { BlockTypeCatalog.info(forGuid: $0.guid) != nil })
     }
 
-    @Test("Native I/O channels share the operand map and visual variables show their value")
+    @Test("Analog I/O references share the operand map and visual variables show their value")
     func nativeIOAndVariables() throws {
         var entries: [(String, String)] = [
-            ("project.name", "IO"),
-            ("project.pageCount", "1"),
-            ("page.0.name", "Main"),
-            ("page.0.language", "FBD"),
-            ("page.0.blockCount", "3"),
-            ("page.0.wireCount", "0"),
+            ("project.name", "IO"), ("project.pageCount", "1"), ("page.0.name", "Main"),
+            ("page.0.language", "FBD"), ("page.0.blockCount", "4"), ("page.0.wireCount", "1"),
+            ("page.0.wire.0.srcBlock", "ai"), ("page.0.wire.0.srcPin", "0"),
+            ("page.0.wire.0.dstBlock", "ao"), ("page.0.wire.0.dstPin", "0"),
         ]
-        entries += Self.block("page.0.block.0.", id: "do", definition: "IO.DO", type: "DO", name: "DO1",
-                              gridX: 2, gridY: 2, order: 10,
-                              inputs: [("En", "Enable", "BOOL", "1"), ("X", "Drive", "BOOL", "1")],
-                              outputs: [("Y", "Confirmed", "BOOL", "0")],
-                              properties: [("Channel", "DO2")])
-        entries += Self.block("page.0.block.1.", id: "di", definition: "IO.DI", type: "DI", name: "DI1",
-                              gridX: 10, gridY: 2, order: 20,
-                              inputs: [("En", "Enable", "BOOL", "1")],
-                              outputs: [("Y", "State", "BOOL", "0")],
-                              properties: [("Channel", "DI2")])
-        entries += Self.block("page.0.block.2.", id: "var", definition: "Visual.Vars.IntVar", type: "IntVar", name: "IntVar1",
-                              gridX: 18, gridY: 2, order: 30, inputs: [],
-                              outputs: [("Y", "Value", "INT", "0")],
-                              properties: [("CurrentValue", "7")])
+        entries += Self.block("page.0.block.0.", id: "drive", definition: "Main.Execution.WriteReg", type: "WriteReg", name: "DriveAI",
+                              gridX: 2, gridY: 2, order: -10,
+                              inputs: [("En", "Enable", "BOOL", "1"), ("In", "Value", "INT", "37")],
+                              outputs: [("Out", "Stored", "INT", "0")], properties: [("RegisterName", "AI2")])
+        entries += Self.block("page.0.block.1.", id: "ai", definition: "IO.IREF", type: "IREF", name: "AIRef",
+                              gridX: 10, gridY: 2, order: 10, inputs: [],
+                              outputs: [("Y", "Input Reference", "INT", "0")], properties: [("Channel", "AI2")])
+        entries += Self.block("page.0.block.2.", id: "ao", definition: "IO.OREF", type: "OREF", name: "AORef",
+                              gridX: 18, gridY: 2, order: 20,
+                              inputs: [("X", "Output Reference", "INT", "0")], outputs: [], properties: [("Channel", "AO3")])
+        entries += Self.block("page.0.block.3.", id: "var", definition: "Visual.Vars.IntVar", type: "IntVar", name: "IntVar1",
+                              gridX: 26, gridY: 2, order: 30, inputs: [],
+                              outputs: [("Y", "Value", "INT", "0")], properties: [("CurrentValue", "7")])
         let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "io")
-        let output = try #require(outcome.project.modules.first { $0.name == "DO1" })
-        let input = try #require(outcome.project.modules.first { $0.name == "DI1" })
+        let input = try #require(outcome.project.modules.first { $0.name == "AIRef" })
         let variable = try #require(outcome.project.modules.first { $0.name == "IntVar1" })
         let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
         core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
-        #expect(core.outPins(moduleId: output.id)[0].asBool, "DO confirms its driven state")
+        #expect(core.outPins(moduleId: input.id)[0].asInt == 37)
+        #expect(core.operandValue("AO3") == 37)
         #expect(core.outPins(moduleId: variable.id)[0].asInt == 7)
-        // The engine's UI toggle is the channel source in a real simulation; here DO writes DO2, so DI2 stays low.
-        #expect(core.outPins(moduleId: input.id)[0].asBool == false)
     }
 
     @Test("Legacy IREF and OREF are single-channel digital references")
@@ -460,10 +456,18 @@ struct MaraflowImportTests {
             pulseHigh = pulseHigh || core.outPins(moduleId: pulse.id)[0].asBool
         }
         #expect(pulseHigh, "PulseGen produces a high phase within its period")
-        #expect(core.outPins(moduleId: single.id)[0].asBool == false || core.outPins(moduleId: single.id)[0].asBool,
-                "SinglePulse ran")
+        #expect(!core.outPins(moduleId: single.id)[0].asBool, "SinglePulse pulses only on the rising edge")
         #expect(core.outPins(moduleId: timer.id)[0].asBool, "Timer Q after its two-cycle preset")
         #expect(core.outPins(moduleId: timer.id)[1].asInt >= 2)
+
+        core.setIn(moduleId: single.id, pin: 0, value: .bool(false))
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(!core.outPins(moduleId: single.id)[0].asBool)
+        core.setIn(moduleId: single.id, pin: 0, value: .bool(true))
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: single.id)[0].asBool, "disabling rearms SinglePulse's edge detector")
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(!core.outPins(moduleId: single.id)[0].asBool)
     }
 
     @Test("DecodeDate and EncodeDate keep their date fields")
@@ -482,14 +486,16 @@ struct MaraflowImportTests {
                                   ("Ts", "Unix Timestamp (s)", "LONG", "0")],
                          outputs: [("Yr", "Year", "INT", "1970"), ("Mon", "Month", "INT", "1"),
                                    ("Day", "Day", "INT", "1"), ("Hr", "Hour", "INT", "0"),
-                                   ("Min", "Minute", "INT", "0"), ("Sec", "Second", "INT", "0")])
+                                   ("Min", "Minute", "INT", "0"), ("Sec", "Second", "INT", "0")],
+                         properties: [("TimeZone", "Europe/Prague")])
         entries += Self.block("page.0.block.1.", id: "e", definition: "Main.Timers.EncodeDate", type: "EncodeDate", name: "EncodeDate1",
                          gridX: 10, gridY: 2, order: 20,
                          inputs: [("En", "Enable Execution", "BOOL", "1"),
                                   ("Yr", "Year", "INT", "2026"), ("Mon", "Month", "INT", "1"),
                                   ("Day", "Day", "INT", "1"), ("Hr", "Hour", "INT", "0"),
                                   ("Min", "Minute", "INT", "0"), ("Sec", "Second", "INT", "0")],
-                         outputs: [("Ts", "Unix Timestamp", "LONG", "0")])
+                         outputs: [("Ts", "Unix Timestamp", "LONG", "0")],
+                         properties: [("TimeZone", "Europe/Prague")])
         let outcome = try MaraflowImporter.importProject(data: Self.propertiesXML(entries), filename: "dates")
         let decode = try #require(outcome.project.modules.first { $0.name == "DecodeDate1" })
         let encode = try #require(outcome.project.modules.first { $0.name == "EncodeDate1" })
@@ -498,6 +504,16 @@ struct MaraflowImportTests {
         #expect(encode.guid == MaraflowCatalog.byId["Main.Timers.EncodeDate"]?.guid)
         #expect(encode.inPins[1].name == "Yr", "Year is the second native input")
         #expect(encode.inPins[1].value.asInt == 2026)
+
+        let core = CxxSimulationCore(project: outcome.project, profileScheduling: false)
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: decode.id).map(\.asInt) == [1970, 1, 1, 1, 0, 0])
+        #expect(core.outPins(moduleId: encode.id)[0].asInt == 1_767_222_000)
+
+        core.setIn(moduleId: decode.id, pin: 1, value: .int64(1_719_792_000))
+        core.step(deltaMs: 10, now: Date(timeIntervalSince1970: 0))
+        #expect(core.outPins(moduleId: decode.id).map(\.asInt) == [2024, 7, 1, 2, 0, 0],
+                "Europe/Prague applies its summer DST offset")
     }
 
     static func macroProject() -> Data {
@@ -726,6 +742,13 @@ struct MaraflowImportTests {
                 #expect(value("TOF") == 0, "TOF drops after the delay")
             }
         }
+        let display = try #require(outcome.project.modules.first { $0.name == "CH455G" })
+        core.setIn(moduleId: display.id, pin: 0, value: .bool(false))
+        core.step(deltaMs: 5, now: epoch)
+        #expect(value("CH455G") == 0, "En=0 deactivates the display")
+        core.setIn(moduleId: display.id, pin: 0, value: .bool(true))
+        core.step(deltaMs: 5, now: epoch)
+        #expect(value("CH455G") == 1, "re-enabling reactivates the display")
     }
 
     /// A Maraflow `SwitchMode=Toggle` BoolVar must latch, not pulse: before this fix the importer

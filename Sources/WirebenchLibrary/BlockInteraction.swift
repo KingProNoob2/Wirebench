@@ -10,7 +10,7 @@ import WirebenchCore
 public enum BlockInteraction: Sendable, Equatable {
     /// Display only.
     case none
-    /// A single control: `BoolVar`, whether it is a momentary pulse button or a latch.
+    /// A single control for a Visual.Vars switch: a BoolVar pulse/latch or a numeric ValA/ValB toggle.
     case control
     /// A variable set by a slider on its card: `IntVar` and `LongVar`.
     case slider
@@ -26,6 +26,11 @@ public enum BlockInteraction: Sendable, Equatable {
         guard let info = BlockTypeCatalog.info(forGuid: module.guid) else {
             // An unrecognised type runs as an inert `UnresolvedBlock`; it has no controls.
             return .none
+        }
+        if let definition = MaraflowCatalog.definition(forGuid: module.guid), definition.id.hasPrefix("Visual.Vars.") {
+            let fallback = definition.id == "Visual.Vars.BoolVar" ? "Switch" : "Slider"
+            let inputType = module.rawAttributes["MARAFLOW_PROP_InputType"] ?? fallback
+            return inputType.caseInsensitiveCompare("Switch") == .orderedSame ? .control : .slider
         }
         switch info.blockName {
         case "BoolVar":

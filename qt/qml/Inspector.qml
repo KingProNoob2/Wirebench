@@ -122,6 +122,11 @@ Panel {
                     IconButton { label: "Configure…"; onClicked: configDialog.openFor(panel.info.id) }
                     IconButton { icon: "help"; label: "Help"; onClicked: helpWindow.showBlock(panel.info.id) }
                     IconButton { icon: "reset"; label: "Reset"; onClicked: controller.command({cmd: "resetState", module: panel.info.id}) }
+                    IconButton {
+                        visible: panel.info.interruptSource !== undefined && panel.info.interruptSource !== null
+                        label: "Fire Interrupt Pulse"
+                        onClicked: controller.command({cmd: "fireInterrupt", source: panel.info.interruptSource})
+                    }
                 }
                 RowLayout {
                     spacing: 6

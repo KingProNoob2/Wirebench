@@ -1070,12 +1070,6 @@ public struct MaraflowImporter {
         add("Main.Switches.Sel", Mapping(target: "ISwitch", inputs: [0: 0, 1: 1, 2: 2, 3: 3]))
         add("Main.Switches.Demux", Mapping(target: "IDemux", inputs: [0: 0, 1: 1, 2: 2]))
 
-        add("IO.8xDI", .identity("8xDI"))
-        add("IO.8xDO", .identity("8xDO"))
-        add("IO.DI", Mapping(target: "8xDI", outputs: [0: 0]))
-        add("IO.DO", Mapping(target: "8xDO", inputs: [0: 0, 1: 1], outputs: [0: 0]))
-        add("IO.AI", Mapping(target: "8xAI", outputs: [0: 0]))
-
         add("Main.Timers.Timer", Mapping(target: "Timer", inputs: [0: 0, 1: 1], params: [2: 0],
                                          outputs: [0: 0, 1: 1],
                                          note: "Timer PT mapped to Dly; Q/ET to the timer outputs"))
@@ -1093,8 +1087,6 @@ public struct MaraflowImporter {
         add("Main.Timers.EncodeDate", Mapping(target: "EncodeDate", inputs: [0: 0, 1: 3, 2: 2, 3: 1],
                                               outputs: [0: 0],
                                               note: "EncodeDate keeps date fields; time fields are dropped"))
-        add("IO.AO", Mapping(target: "2xAO", inputs: [0: 0, 1: 1], outputs: [0: 0],
-                             note: "AO drives channel 0 of 2xAO; its Ok output is dropped"))
         add("IO.Encoder", Mapping(target: "IRC", inputs: [0: 0, 1: 1], outputs: [0: 0, 1: 1],
                                   note: "Encoder mapped to IRC; Vel lands on Null"))
         add("Visual.Segment", .identity("Segment"))

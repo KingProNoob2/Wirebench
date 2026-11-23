@@ -25,6 +25,7 @@ public init(_ mod: PCCModule) {
         if MacroCalls.target(of: mod) != nil { self = .macroCall; return }
         if mod.guid == SystemCmdBlock.guid { self = .systemCmd; return }
         if ConstructContainers.isContainer(mod) && mod.guid == ConstructContainers.switchGuid { self = .switchCases; return }
+        if MaraflowCatalog.definition(forGuid: mod.guid) != nil { self = .none; return }
         let n = mod.typeKey
         func has(_ words: String...) -> Bool { words.contains { n.contains($0) } }
         if has("boolvar", "tlacitko", "prepinac", "roztoct") || mod.guid == BoolVarBlock.guid { self = .boolVar }
@@ -73,6 +74,7 @@ public struct BlockConfig: Codable, Sendable {
         public var max: Int?
         public var options: [Option]?
         public var hint: String?
+        public var disabled: Bool? = nil
         /// For `bits`: how many channels, the name each carries (`DI` → DI0, DI1…), and the key of a number field that
         /// shortens the row.
         public var bitCount: Int? = nil
@@ -98,6 +100,94 @@ public struct BlockConfig: Codable, Sendable {
               options: options.map { Option(value: $0.0, label: $0.1) }, hint: hint)
     }
 
+    public static func maraflowPropertyFields(for mod: PCCModule) -> [Field] {
+        guard let definition = MaraflowCatalog.definition(forGuid: mod.guid) else { return [] }
+        let defaults = MaraflowCatalog.defaultProperties(for: definition)
+        var values = Dictionary(uniqueKeysWithValues: defaults)
+        for (key, value) in mod.rawAttributes where key.hasPrefix("MARAFLOW_PROP_") {
+            values[String(key.dropFirst("MARAFLOW_PROP_".count))] = value
+        }
+        if let name = values["TimeZone"], name != "Custom", let preset = MaraflowConfiguration.timeZonePresets[name] {
+            values.merge(preset) { _, new in new }
+        }
+        let skipped: Set<String> = ["InputCount", "DataType", "ModuloOut", "Operand"]
+        var keys = defaults.map(\.0).filter { !skipped.contains($0) }
+        let known = Set(defaults.map(\.0))
+        keys += values.keys.filter { !known.contains($0) && !skipped.contains($0) }.sorted()
+        let dio = ["DIO2", "DIO3", "DIO4", "DIO5", "DIO6", "DIO7", "DIO9", "DIO10", "DIO11", "DIO12",
+                   "DIO13", "DIO14", "DIO15", "DIO16", "DIO17", "DIO18", "DIO19", "DIO20", "DIO21",
+                   "DIO22", "DIO23", "DIO24", "DIO25", "DIO26", "DIO27"]
+        let digital = dio.map { $0.replacingOccurrences(of: "DIO", with: "DI") }
+        let analog = ["AI0", "AI1", "AI2", "AI3"]
+        let timeZones = ["UTC", "Europe/Prague", "Europe/London", "Europe/Athens", "Europe/Moscow",
+                         "America/New_York", "America/Chicago", "America/Denver", "America/Phoenix",
+                         "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "America/St_Johns",
+                         "America/Sao_Paulo", "America/Santiago", "Asia/Dubai", "Asia/Kolkata", "Asia/Kathmandu",
+                         "Asia/Shanghai", "Asia/Tokyo", "Australia/Adelaide", "Australia/Sydney",
+                         "Australia/Lord_Howe", "Pacific/Auckland", "Pacific/Chatham", "Pacific/Kiritimati", "Custom"]
+
+        func field(_ key: String, _ label: String, _ kind: String, options: [String]? = nil,
+                   range: ClosedRange<Int>? = nil, bitCount: Int? = nil) -> Field {
+            Field(key: "property.\(key)", label: label, kind: kind, value: values[key] ?? "",
+                  min: range?.lowerBound, max: range?.upperBound,
+                  options: options?.map { Option(value: $0, label: $0) }, hint: nil,
+                  disabled: key != "TimeZone" && key.hasPrefix("Tz") && values["TimeZone"] != "Custom",
+                  bitCount: bitCount, prefix: bitCount == nil ? nil : "D")
+        }
+        func label(_ key: String) -> String {
+            key.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
+        }
+        return keys.map { key in
+            switch key {
+            case "InputType": return field(key, "Input mode", "choice", options: ["Switch", "Slider"])
+            case "SwitchMode": return field(key, "Switch mode", "choice", options: ["Toggle", "Momentary"])
+            case "TimerMode":
+                return field(key, "Timer mode", "choice", options: ["TON (On-Delay)", "TOF (Off-Delay)", "TP (Pulse)"])
+            case "RetentiveEeprom": return field(key, "Retentive (EEPROM)", "choice", options: ["false", "true"])
+            case "RegisterName": return field(key, "Register / tag", "text")
+            case "TriggerMode":
+                return field(key, "Trigger mode", "choice", options: ["Continuous (While En=1)", "Rising Edge (0 -> 1)"])
+            case "InterruptSource":
+                return field(key, "Interrupt source", "choice", options: ["TIM_IC1", "TIM_IC2"]
+                             + (0...7).map { "EXTI_DI\($0)" } + ["UART_RX_IDLE", "ADC_WATCHDOG"])
+            case "TriggerEdge": return field(key, "Trigger edge", "choice", options: ["RISING", "FALLING", "BOTH"])
+            case "CaptureMode":
+                return field(key, "Capture mode", "choice",
+                             options: ["GPIO_STATE (0/1)", "PULSE_WIDTH_US", "PERIOD_US", "EDGE_COUNT"])
+            case "LatchPolicy":
+                return field(key, "Latch policy", "choice", options: ["HOLD_FIRST_UNTIL_RST", "OVERWRITE_LATEST"])
+            case "Channel":
+                let options = definition.id == "IO.IREF" ? digital + analog
+                    : definition.id == "IO.OREF" ? digital.map { $0.replacingOccurrences(of: "DI", with: "DO") } + ["AO0", "AO1"]
+                    : (0...7).map { "PWM\($0)" }
+                return field(key, "I/O channel", "choice", options: options)
+            case "DeviceAddressHex" where definition.id == "Comm.I2C.TMP75":
+                return field(key, "TMP75 I2C address", "choice", options: (0...7).map { String(format: "0x%02X", 0x48 + $0) })
+            case "OneWirePin": return field(key, "1-Wire DIO pin", "choice", options: dio)
+            case "SclPin": return field(key, "SCL DIO pin", "choice", options: dio)
+            case "SdaPin": return field(key, "SDA DIO pin", "choice", options: dio)
+            case "ResolutionBits": return field(key, "Resolution (bits)", "choice", options: ["9", "10", "11", "12"])
+            case "DisplayMode":
+                return field(key, "Display mode", "choice", options: ["Number (Float / Int)", "Raw Digits / Segments"])
+            case "DigitMask": return field(key, "Active digits", "bits", bitCount: 4)
+            case "BitOrder": return field(key, "Bit order", "choice", options: ["LSB", "MSB"])
+            case "TimeZone": return field(key, "Time zone", "choice", options: timeZones)
+            case "TzStdOffsetMin": return field(key, "Std offset (min)", "int", range: -720...840)
+            case "TzDstOffsetMin": return field(key, "DST delta (min)", "int", range: -120...120)
+            case "TzDstStartMonth": return field(key, "DST start month (0=off)", "int", range: 0...12)
+            case "TzDstStartWeek": return field(key, "DST start week (-1=last)", "int", range: -1...4)
+            case "TzDstStartDow": return field(key, "DST start DoW/day", "int", range: 0...31)
+            case "TzDstStartHour": return field(key, "DST start hour", "int", range: 0...24)
+            case "TzDstEndMonth": return field(key, "DST end month", "int", range: 0...12)
+            case "TzDstEndWeek": return field(key, "DST end week (-1=last)", "int", range: -1...4)
+            case "TzDstEndDow": return field(key, "DST end DoW/day", "int", range: 0...31)
+            case "TzDstEndHour": return field(key, "DST end hour", "int", range: 0...24)
+            case "WindowSize": return field(key, "Window size", "int", range: 1...64)
+            default: return field(key, label(key), "text")
+            }
+        }
+    }
+
     /// The configuration of a block, or nil when its kind has nothing to configure here.
     @MainActor
     public static func make(of model: AppModel, moduleId: Int) -> BlockConfig? {
@@ -108,6 +198,10 @@ public struct BlockConfig: Codable, Sendable {
         func flag(_ keys: String...) -> Bool { keys.contains { mod.rawAttributes[$0]?.lowercased() == "true" } }
 
         var fields: [Field] = []
+        func put(_ field: Field) {
+            if let index = fields.firstIndex(where: { $0.key == field.key }) { fields[index] = field }
+            else { fields.append(field) }
+        }
         switch BlockConfigKind(mod) {
         case .boolVar:
             let mode = BlockRole.boolVarMode(of: mod) ?? .pushButton
@@ -148,8 +242,10 @@ public struct BlockConfig: Codable, Sendable {
             fields = [Field(key: "value", label: "Initial value", kind: "text",
                             value: "\(Double(live?.outPins.first?.asFloat ?? 0))", min: nil, max: nil, options: nil, hint: nil)]
         case .div:
-            fields = [bool("modulo", "Show modulo output pin (Mod = A % B)",
-                           flag("MODULO_VISIBLE", "SHOW_MODULO") || mod.outPins.count > 1)]
+            if MaraflowCatalog.definition(forGuid: mod.guid) == nil {
+                fields = [bool("modulo", "Show modulo output pin (Mod = A % B)",
+                               flag("MODULO_VISIBLE", "SHOW_MODULO") || mod.outPins.count > 1)]
+            }
         case .rs:
             let setFirst = ["PRIORITY", "RS_PRIORITY"].contains { mod.rawAttributes[$0]?.uppercased() == "S" }
             fields = [choice("priority", "When both S and R are 1", setFirst ? "S" : "R", [
@@ -236,8 +332,31 @@ public struct BlockConfig: Codable, Sendable {
                       value: mod.paramPins[i].value.description, min: nil, max: nil, options: nil, hint: nil)
             }
         default:
-            return nil
+            break
         }
+        if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
+            if definition.variableInputCount, let count = MaraflowConfiguration.inputCount(of: mod) {
+                put(int("inputs", "Input pin count", count, 2...16))
+            }
+            if definition.configurableDataType {
+                let current = MaraflowConfiguration.dataType(of: mod)
+                put(choice("dataType", "Data type", current,
+                           ["BOOL", "INT", "LONG", "FLOAT"].map { ($0, $0) }))
+            }
+            if definition.id == "Math.Div" {
+                let visible = mod.rawAttributes["MARAFLOW_PROP_ModuloOut"]?.lowercased() == "true"
+                    || mod.outPins.count > 2
+                put(bool("moduloOut", "Enable Mod output pin", visible))
+            }
+            if MaraflowConfiguration.coilDefinitionIDs.contains(definition.id) {
+                let operand = mod.rawAttributes["MARAFLOW_PROP_Operand"]
+                    ?? MaraflowConfiguration.defaultOperand(for: definition.id)
+                fields.append(Field(key: "operand", label: "Destination operand", kind: "text", value: operand,
+                                    min: nil, max: nil, options: nil,
+                                    hint: definition.id == "Ladder.Coil.ANALOG" ? "For example AO0 or AO1" : "For example REG_0 or AO0"))
+            }
+        }
+        fields += maraflowPropertyFields(for: mod)
         return fields.isEmpty ? nil : BlockConfig(title: mod.name, fields: fields)
     }
 
@@ -288,7 +407,11 @@ public struct BlockConfig: Codable, Sendable {
                 model.setFloatVariableValue(moduleId: moduleId, value: Float(v))
             }
         case .div:
-            if let modulo = boolOpt("modulo") { model.updateDivModuloVisible(id: moduleId, isVisible: modulo) }
+            if MaraflowCatalog.definition(forGuid: mod.guid) != nil {
+                if let visible = boolOpt("moduloOut") { model.updateMaraflowDivModuloOut(id: moduleId, isVisible: visible) }
+            } else if let modulo = boolOpt("modulo") {
+                model.updateDivModuloVisible(id: moduleId, isVisible: modulo)
+            }
         case .rs:
             if let priority = values["priority"] { model.updateRSPriority(id: moduleId, higherPriorityS: priority == "S") }
         case .dateTime:
@@ -361,6 +484,19 @@ public struct BlockConfig: Codable, Sendable {
                 }
             }
         default: break
+        }
+        if let definition = MaraflowCatalog.definition(forGuid: mod.guid) {
+            if let count = number("inputs") { model.updateMaraflowInputCount(id: moduleId, count: count) }
+            if let dataType = values["dataType"] { model.updateMaraflowDataType(id: moduleId, dataType: dataType) }
+            if definition.id == "Math.Div", let visible = boolOpt("moduloOut") {
+                model.updateMaraflowDivModuloOut(id: moduleId, isVisible: visible)
+            }
+            if MaraflowConfiguration.coilDefinitionIDs.contains(definition.id), let operand = values["operand"] {
+                model.updateMaraflowOperand(id: moduleId, operand: operand)
+            }
+            for (key, value) in values where key.hasPrefix("property.") {
+                model.updateMaraflowProperty(id: moduleId, name: String(key.dropFirst("property.".count)), value: value)
+            }
         }
     }
 }

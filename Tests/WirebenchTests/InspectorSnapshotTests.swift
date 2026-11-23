@@ -8,6 +8,8 @@ import AppKit
 @testable import WirebenchApp
 #endif
 @testable import WirebenchModel
+@testable import WirebenchCore
+@testable import WirebenchLibrary
 
 /// Renders the inspector offscreen so a visual change can be looked at without launching the app.
 ///
@@ -38,6 +40,25 @@ struct InspectorSnapshotTests {
 
 @Suite("Inspector rows belong to their block")
 struct InspectorRowIdentityTests {
+    @Test("A block on another page is not inspected or edited through a stale selection")
+    @MainActor func selectionIsScopedToTheVisiblePage() {
+        let model = AppModel()
+        var project = PCCProject(name: "Pages")
+        project.pages = [ProjectPage(caption: "main"), ProjectPage(caption: "other")]
+        project.modules = [
+            PCCModule(id: 1, guid: AndBlock.guid, name: "And1", x: 0, y: 0, order: 10, threadId: 1, page: "main"),
+            PCCModule(id: 2, guid: AndBlock.guid, name: "And2", x: 0, y: 0, order: 20, threadId: 1, page: "other"),
+        ]
+        model.project = project
+        model.selectedModuleId = 1
+        #expect(InspectorSnapshot.make(of: model, moduleId: 1) != nil)
+        model.selectedPage = "other"
+        #expect(InspectorSnapshot.make(of: model, moduleId: 1) == nil)
+        #expect(model.selectedModuleId == 1, "switching back preserves the selection itself")
+        model.selectedPage = "main"
+        #expect(InspectorSnapshot.make(of: model, moduleId: 1) != nil)
+    }
+
     @Test("The same-looking row on another block, or another pin, is not the same row")
     @MainActor func rowsAreNotEqualAcrossOwners() {
         let first = SignalRow(name: "X (Value)", value: "0", isHigh: false, isInput: true, owner: 1, pin: 0)

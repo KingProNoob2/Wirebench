@@ -341,6 +341,8 @@ const char *wirebench_sim_maraflow_st_error(WirebenchSim *sim, int32_t index);
 /// manual reset, the dedicated page name, and rules encoded as "channel|activeLow|enabled;...".
 void wirebench_sim_set_estop_config(WirebenchSim *sim, int32_t enabled, int32_t mode, int32_t manualReset,
                                     const char *dedicatedPage, const char *rules);
+/// Fires a simulated interrupt to every listener, or only to blocks using `source` when it is non-empty.
+void wirebench_sim_fire_interrupt(WirebenchSim *sim, const char *source);
 /// Read the shared operand namespace (registers, DI/DO/AI/AO/PWM, ST/ladder writes).
 double wirebench_sim_get_operand(WirebenchSim *sim, const char *name);
 

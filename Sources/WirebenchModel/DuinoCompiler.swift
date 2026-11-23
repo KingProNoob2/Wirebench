@@ -182,6 +182,60 @@ private struct Compiler {
         var page: String
     }
 
+    private struct TimeZoneRule {
+        var stdOffset = 0
+        var dstOffset = 0
+        var startMonth = 0
+        var startWeek = 0
+        var startDow = 0
+        var startHour = 0
+        var endMonth = 0
+        var endWeek = 0
+        var endDow = 0
+        var endHour = 0
+
+        static func from(_ properties: [String: String]) -> TimeZoneRule {
+            let presets: [String: TimeZoneRule] = [
+                "UTC": TimeZoneRule(),
+                "Europe/Prague": TimeZoneRule(stdOffset: 60, dstOffset: 60, startMonth: 3, startWeek: -1, startDow: 0, startHour: 2, endMonth: 10, endWeek: -1, endDow: 0, endHour: 3),
+                "Europe/London": TimeZoneRule(stdOffset: 0, dstOffset: 60, startMonth: 3, startWeek: -1, startDow: 0, startHour: 1, endMonth: 10, endWeek: -1, endDow: 0, endHour: 2),
+                "Europe/Athens": TimeZoneRule(stdOffset: 120, dstOffset: 60, startMonth: 3, startWeek: -1, startDow: 0, startHour: 3, endMonth: 10, endWeek: -1, endDow: 0, endHour: 4),
+                "Europe/Moscow": TimeZoneRule(stdOffset: 180),
+                "America/New_York": TimeZoneRule(stdOffset: -300, dstOffset: 60, startMonth: 3, startWeek: 2, startDow: 0, startHour: 2, endMonth: 11, endWeek: 1, endDow: 0, endHour: 2),
+                "America/Chicago": TimeZoneRule(stdOffset: -360, dstOffset: 60, startMonth: 3, startWeek: 2, startDow: 0, startHour: 2, endMonth: 11, endWeek: 1, endDow: 0, endHour: 2),
+                "America/Denver": TimeZoneRule(stdOffset: -420, dstOffset: 60, startMonth: 3, startWeek: 2, startDow: 0, startHour: 2, endMonth: 11, endWeek: 1, endDow: 0, endHour: 2),
+                "America/Phoenix": TimeZoneRule(stdOffset: -420),
+                "America/Los_Angeles": TimeZoneRule(stdOffset: -480, dstOffset: 60, startMonth: 3, startWeek: 2, startDow: 0, startHour: 2, endMonth: 11, endWeek: 1, endDow: 0, endHour: 2),
+                "America/Anchorage": TimeZoneRule(stdOffset: -540, dstOffset: 60, startMonth: 3, startWeek: 2, startDow: 0, startHour: 2, endMonth: 11, endWeek: 1, endDow: 0, endHour: 2),
+                "Pacific/Honolulu": TimeZoneRule(stdOffset: -600),
+                "America/St_Johns": TimeZoneRule(stdOffset: -210, dstOffset: 60, startMonth: 3, startWeek: 2, startDow: 0, startHour: 2, endMonth: 11, endWeek: 1, endDow: 0, endHour: 2),
+                "America/Sao_Paulo": TimeZoneRule(stdOffset: -180),
+                "America/Santiago": TimeZoneRule(stdOffset: -240, dstOffset: 60, startMonth: 9, startWeek: 1, startDow: 6, startHour: 24, endMonth: 4, endWeek: 1, endDow: 6, endHour: 24),
+                "Asia/Dubai": TimeZoneRule(stdOffset: 240),
+                "Asia/Kolkata": TimeZoneRule(stdOffset: 330),
+                "Asia/Kathmandu": TimeZoneRule(stdOffset: 345),
+                "Asia/Shanghai": TimeZoneRule(stdOffset: 480),
+                "Asia/Tokyo": TimeZoneRule(stdOffset: 540),
+                "Australia/Adelaide": TimeZoneRule(stdOffset: 570, dstOffset: 60, startMonth: 10, startWeek: 1, startDow: 0, startHour: 2, endMonth: 4, endWeek: 1, endDow: 0, endHour: 3),
+                "Australia/Sydney": TimeZoneRule(stdOffset: 600, dstOffset: 60, startMonth: 10, startWeek: 1, startDow: 0, startHour: 2, endMonth: 4, endWeek: 1, endDow: 0, endHour: 3),
+                "Australia/Lord_Howe": TimeZoneRule(stdOffset: 630, dstOffset: 30, startMonth: 10, startWeek: 1, startDow: 0, startHour: 2, endMonth: 4, endWeek: 1, endDow: 0, endHour: 2),
+                "Pacific/Auckland": TimeZoneRule(stdOffset: 720, dstOffset: 60, startMonth: 9, startWeek: -1, startDow: 0, startHour: 2, endMonth: 4, endWeek: 1, endDow: 0, endHour: 3),
+                "Pacific/Chatham": TimeZoneRule(stdOffset: 765, dstOffset: 60, startMonth: 9, startWeek: -1, startDow: 0, startHour: 2, endMonth: 4, endWeek: 1, endDow: 0, endHour: 3),
+                "Pacific/Kiritimati": TimeZoneRule(stdOffset: 840),
+            ]
+            let name = properties["TimeZone"] ?? "UTC"
+            if name != "Custom", let preset = presets[name] { return preset }
+            func number(_ key: String, _ fallback: Int = 0) -> Int {
+                properties[key].flatMap(Int.init) ?? fallback
+            }
+            return TimeZoneRule(stdOffset: number("TzStdOffsetMin"), dstOffset: number("TzDstOffsetMin"),
+                                startMonth: number("TzDstStartMonth"), startWeek: number("TzDstStartWeek"),
+                                startDow: number("TzDstStartDow"), startHour: number("TzDstStartHour", 2),
+                                endMonth: number("TzDstEndMonth"), endWeek: number("TzDstEndWeek"),
+                                endDow: number("TzDstEndDow"), endHour: number("TzDstEndHour", 3))
+        }
+    }
+
     private struct WireKey: Hashable {
         var module: Int
         var pin: Int
@@ -205,18 +259,41 @@ private struct Compiler {
             }
             if module.guid == MacroBlock.guid { continue } // resolved below, after every block is known
             let (definition, bridge) = try definitionFor(module)
+            let inputCount = bridge == nil && definition.variableInputCount
+                ? module.inPins.count : definition.inputs.count
             var inputIndices: [Int] = []
             var outputIndices: [Int] = []
-            for (index, spec) in definition.inputs.enumerated() {
+            for index in 0..<inputCount {
                 let source = bridge?.inputs[index] ?? index
                 inputIndices.append(source)
-                _ = spec
             }
-            for (index, _) in definition.outputs.enumerated() {
+            let outputCount = definition.id == "Math.Div" ? module.outPins.count : definition.outputs.count
+            for index in 0..<outputCount {
                 outputIndices.append(bridge?.outputs[index] ?? index)
             }
-            var inputs = definition.inputs.map { PinSpec(short: $0.abbrev, type: slotType($0.dataType)) }
-            var outputs = definition.outputs.map { PinSpec(short: $0.abbrev, type: slotType($0.dataType)) }
+            func shortName(_ specs: [MaraflowPinSpec], _ index: Int, _ pins: [Pin], _ source: Int) -> String {
+                if pins.indices.contains(source), let name = pins[source].name, !name.isEmpty { return name }
+                if specs.indices.contains(index) { return specs[index].abbrev }
+                if let last = specs.last?.abbrev, let number = Int(last.dropFirst()) {
+                    return "\(last.prefix(1))\(number + index - specs.count + 1)"
+                }
+                return "X\(index)"
+            }
+            var inputs = inputIndices.enumerated().map { index, source -> PinSpec in
+                let spec = definition.inputs.indices.contains(index) ? definition.inputs[index] : definition.inputs.last!
+                let value = module.inPins.indices.contains(source) ? module.inPins[source].value : .undefined
+                let type = definition.configurableDataType ? slotType(value, fallback: spec.dataType) : slotType(spec.dataType)
+                return PinSpec(short: shortName(definition.inputs, index, module.inPins, source), type: type)
+            }
+            var outputs = outputIndices.enumerated().map { index, source -> PinSpec in
+                let value = module.outPins.indices.contains(source) ? module.outPins[source].value : .undefined
+                if !definition.outputs.indices.contains(index) {
+                    return PinSpec(short: "Mod", type: slotType(value, fallback: "Int"))
+                }
+                let spec = definition.outputs[index]
+                let type = definition.configurableDataType ? slotType(value, fallback: spec.dataType) : slotType(spec.dataType)
+                return PinSpec(short: shortName(definition.outputs, index, module.outPins, source), type: type)
+            }
             let channel = module.rawAttributes["MARAFLOW_PROP_Channel"]?.uppercased() ?? ""
             if definition.id == "IO.IREF", channel.hasPrefix("AI"), !outputs.isEmpty {
                 outputs[0].type = .int
@@ -228,15 +305,11 @@ private struct Compiler {
                 notes.append("Block '\(module.name)' has no pins; skipped.")
                 continue
             }
-            var inputConstants: [PinValue] = []
-            for (index, _) in definition.inputs.enumerated() {
-                let source = inputIndices[index]
-                inputConstants.append(module.inPins.indices.contains(source) ? module.inPins[source].value : .undefined)
+            let inputConstants = inputIndices.map { source in
+                module.inPins.indices.contains(source) ? module.inPins[source].value : .undefined
             }
-            var outputValues: [PinValue] = []
-            for (index, _) in definition.outputs.enumerated() {
-                let source = outputIndices[index]
-                outputValues.append(module.outPins.indices.contains(source) ? module.outPins[source].value : .undefined)
+            let outputValues = outputIndices.map { source in
+                module.outPins.indices.contains(source) ? module.outPins[source].value : .undefined
             }
             var props: [String: String] = [:]
             for (key, value) in module.rawAttributes where key.hasPrefix("MARAFLOW_PROP_") {
@@ -302,6 +375,16 @@ private struct Compiler {
         case "LONG", "INT64": return .long
         case "FLOAT", "REAL": return .float
         default: return .int
+        }
+    }
+
+    private func slotType(_ value: PinValue, fallback: String) -> DuinoSlotType {
+        switch value {
+        case .bool: return .bool
+        case .int16, .int32: return .int
+        case .int64: return .long
+        case .float: return .float
+        case .undefined: return slotType(fallback)
         }
     }
 
@@ -425,7 +508,15 @@ private struct Compiler {
         var allocated: [UInt16] = []
         for (index, pin) in block.outputs.enumerated() {
             let name = "\(block.module.name).\(pin.short)"
-            let value = block.outputValues.indices.contains(index) ? block.outputValues[index] : .undefined
+            var value = block.outputValues.indices.contains(index) ? block.outputValues[index] : .undefined
+            let dirigo = block.outputIndices.indices.contains(index) ? block.outputIndices[index] : index
+            if block.definitionID.hasPrefix("Visual.Vars."), let configured = block.properties["CurrentValue"] {
+                value = PinValue.parse(configured)
+            }
+            if block.definitionID.hasPrefix("Visual.Vars."), pin.type == .bool,
+               block.module.outPins.indices.contains(dirigo), block.module.outPins[dirigo].inverted {
+                value = .bool(!value.asBool)
+            }
             allocated.append(allocInit(pin.type, value: value, name: name))
         }
         outputSlots[block.module.id] = allocated
@@ -485,16 +576,25 @@ private struct Compiler {
             case "Math.Min": 0x26
             default: 0x27
             }
-            let a = ins[min(first, ins.count - 1)]
-            let b = ins[min(first + 1, ins.count - 1)]
-            word(op, 0, en, outs.first ?? 0, a, into: &out)
-            u16(b, into: &out); u16(0, into: &out)
+            let argc = max(2, ins.count - first)
+            var accumulator = ins[min(first, ins.count - 1)]
+            for index in 1..<argc {
+                let target = index == argc - 1 ? (outs.first ?? 0) : alloc(block.outputs.first?.type ?? .int)
+                word(op, 0, en, target, accumulator, into: &out)
+                u16(ins[first + index], into: &out); u16(0, into: &out)
+                accumulator = target
+            }
         case "Math.Div", "Math.Mod":
             let a = ins[min(first, ins.count - 1)]
             let b = ins[min(first + 1, ins.count - 1)]
             word(def == "Math.Div" ? 0x23 : 0x24, 0, en, outs.first ?? 0, a, into: &out)
             u16(b, into: &out)
             u16(outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot), into: &out)
+            if def == "Math.Div", outs.count > 2 {
+                word(0x24, 0, en, outs[2], a, into: &out)
+                u16(b, into: &out)
+                u16(UInt16(DuinoCompiler.alwaysEnabledSlot), into: &out)
+            }
         case "Math.Abs", "Math.Neg", "Math.Sqrt", "Math.Sin", "Math.Cos":
             let op: UInt8 = switch def {
             case "Math.Abs": 0x28
@@ -587,7 +687,10 @@ private struct Compiler {
                     let condition = alloc(.bool)
                     word(0x40, 0, en, condition, clamped, into: &out)
                     u16(indexConstant, into: &out); u16(0, into: &out)
-                    word(0x08, 0, condition, outs.first ?? 0, ins[first + 1 + index], into: &out)
+                    let enabledCondition = alloc(.bool)
+                    word(0x10, 2, UInt16(DuinoCompiler.alwaysEnabledSlot), enabledCondition, condition, into: &out)
+                    u16(en, into: &out); u16(0, into: &out)
+                    word(0x08, 0, enabledCondition, outs.first ?? 0, ins[first + 1 + index], into: &out)
                 }
             }
         case "Main.Switches.Demux":
@@ -600,8 +703,11 @@ private struct Compiler {
                 let condition = alloc(.bool)
                 word(0x40, 0, en, condition, address, into: &out)
                 u16(indexConstant, into: &out); u16(0, into: &out)
+                let enabledCondition = alloc(.bool)
+                word(0x10, 2, UInt16(DuinoCompiler.alwaysEnabledSlot), enabledCondition, condition, into: &out)
+                u16(en, into: &out); u16(0, into: &out)
                 word(0x08, 0, en, outSlot, zero, into: &out)
-                word(0x08, 0, condition, outSlot, input, into: &out)
+                word(0x08, 0, enabledCondition, outSlot, input, into: &out)
             }
         case "Main.Conversion.PackBits":
             let msb: UInt8 = (block.properties["BitOrder"] ?? "LSB").uppercased() == "MSB" ? 1 : 0
@@ -617,7 +723,7 @@ private struct Compiler {
             let q = outs.first ?? 0
             let et = outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot)
             let mode = (block.properties["TimerMode"] ?? "TON").uppercased()
-            let modeFlag: UInt8 = mode == "TOF" ? 1 : (mode == "TP" ? 2 : 0)
+            let modeFlag: UInt8 = mode.hasPrefix("TOF") ? 1 : (mode.hasPrefix("TP") ? 2 : 0)
             word(0x50, modeFlag, en, q, ins[min(first, ins.count - 1)], into: &out)
             u16(ins[min(first + 1, ins.count - 1)], into: &out)
             u16(et, into: &out)
@@ -649,6 +755,14 @@ private struct Compiler {
             nextState += 1
         case "Main.Timers.DateTime":
             word(0x60, 0, en, outs.first ?? 0, 0, into: &out)
+        case "Main.Timers.DecodeDate", "Main.Timers.EncodeDate":
+            let decoding = def == "Main.Timers.DecodeDate"
+            word(decoding ? 0x61 : 0x62, 0, en, outs.first ?? 0, ins[min(first, ins.count - 1)], into: &out)
+            for index in 1...5 {
+                u16(decoding ? (outs.indices.contains(index) ? outs[index] : 0)
+                             : ins[min(first + index, ins.count - 1)], into: &out)
+            }
+            emitTimeZone(.from(block.properties), into: &out)
         case "Main.Arrays.ArrayRead":
             let value = outs.first ?? 0
             let oob = outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot)
@@ -666,7 +780,7 @@ private struct Compiler {
             u16(outs.count > 1 ? outs[1] : UInt16(DuinoCompiler.alwaysEnabledSlot), into: &out)
             u16(0, into: &out)
         case "Comm.DS18B20.DS18B20Read":
-            let dioPin = min(max(Int(block.properties["OneWirePin"] ?? "13") ?? 13, 0), 255)
+            let dioPin = min(max(ioChannel(block.properties["OneWirePin"] ?? "DIO13"), 0), 255)
             let resolution = min(max(Int(block.properties["ResolutionBits"] ?? "12") ?? 12, 9), 12)
             var busIndex = 0
             var rom: UInt64 = 0
@@ -687,8 +801,8 @@ private struct Compiler {
         case "IO.CH455G":
             // COMM_EXEC CH455G: the VM decodes value/decimals/brightness (or raw segments) and the
             // simulator renders the shield's display from it.
-            let sclPin = min(max(Int(block.properties["SclPin"] ?? "2") ?? 2, 0), 255)
-            let sdaPin = min(max(Int(block.properties["SdaPin"] ?? "3") ?? 3, 0), 255)
+            let sclPin = min(max(ioChannel(block.properties["SclPin"] ?? "DIO2"), 0), 255)
+            let sdaPin = min(max(ioChannel(block.properties["SdaPin"] ?? "DIO3"), 0), 255)
             let raw = (block.properties["DisplayMode"] ?? "").hasPrefix("Raw")
             func digitMaskBits() -> Int {
                 guard let text = block.properties["DigitMask"] else { return 0x0F }
@@ -778,6 +892,37 @@ private struct Compiler {
             word(0x72, 0, en, outs.first ?? 0, UInt16(ioChannel(ref)), into: &out)
             u16(ins[min(first, ins.count - 1)], into: &out)
             u16(ins[min(first + 1, ins.count - 1)], into: &out)
+        case "Ladder.Coil.NORMAL", "Ladder.Coil.NEGATED", "Ladder.Coil.SET", "Ladder.Coil.RESET",
+             "Ladder.Coil.POS", "Ladder.Coil.NEG":
+            let flags: UInt8 = switch def {
+            case "Ladder.Coil.NEGATED": 1
+            case "Ladder.Coil.SET": 2
+            case "Ladder.Coil.RESET": 3
+            case "Ladder.Coil.POS": 4
+            case "Ladder.Coil.NEG": 5
+            default: 0
+            }
+            let operand = block.properties["Operand"] ?? "DO0"
+            let destination = registerSlot(operand, type: .bool)
+            let edge = def == "Ladder.Coil.POS" || def == "Ladder.Coil.NEG"
+            word(0x1B, flags, en, destination, 0, into: &out)
+            u16(UInt16(edge ? nextState : 0), into: &out); u16(0, into: &out)
+            if edge { nextState += 1 }
+            if operand.uppercased().hasPrefix("DO") {
+                word(0x71, 1, UInt16(DuinoCompiler.alwaysEnabledSlot), UInt16(ioChannel(operand)), destination, into: &out)
+            }
+            slots[operand] = destination
+        case "Ladder.Coil.ANALOG", "Ladder.Coil.WRITE_REG":
+            let operand = block.properties["Operand"] ?? (def == "Ladder.Coil.ANALOG" ? "AO0" : "REG_0")
+            let source = ins[min(first, ins.count - 1)]
+            if operand.uppercased().hasPrefix("AO") {
+                word(0x71, 3, en, UInt16(ioChannel(operand)), source, into: &out)
+            } else {
+                let type = block.inputs.count > 1 ? block.inputs[1].type : .int
+                let register = registerSlot(operand, type: type)
+                word(0x08, 0, en, register, source, into: &out)
+            }
+            if !operand.isEmpty { slots[operand] = source }
         case "Visual.Segment":
             break // a display reads pins; it has no VM instruction
 
@@ -790,13 +935,18 @@ private struct Compiler {
     }
 
     private mutating func emitOutputInversions(_ block: CompileBlock, outs: [UInt16], en: UInt16, into out: inout [UInt8]) {
-        // The VM writes the slot directly; an inverted source pin is the only case this compiler emits.
+        guard !block.definitionID.hasPrefix("Visual.Vars.") else { return }
+        let alwaysEnabled = ["Main.Timers.Timer", "Main.Timers.PulseGen", "Main.Timers.PulseLen",
+                             "Main.Timers.SinglePulse", "IO.PWM"].contains(block.definitionID)
+            || block.definitionID.hasPrefix("Macro.User.")
+        let inversionEnable = alwaysEnabled ? UInt16(DuinoCompiler.alwaysEnabledSlot) : en
         for (index, pin) in block.outputs.enumerated() where pin.type == .bool {
+            if ["Bool.RS", "Bool.SR"].contains(block.definitionID), index == 0 { continue }
             let dirigo = block.outputIndices.indices.contains(index) ? block.outputIndices[index] : index
             guard block.module.outPins.indices.contains(dirigo), block.module.outPins[dirigo].inverted,
                   outs.indices.contains(index) else { continue }
             let source = outs[index]
-            word(0x16, 0, UInt16(DuinoCompiler.alwaysEnabledSlot), source, source, into: &out)
+            word(0x16, 0, inversionEnable, source, source, into: &out)
         }
     }
 
@@ -881,6 +1031,16 @@ private struct Compiler {
     private func u16(_ value: UInt16, into out: inout [UInt8]) {
         out.append(UInt8(truncatingIfNeeded: value))
         out.append(UInt8(truncatingIfNeeded: value >> 8))
+    }
+
+    private func emitTimeZone(_ rule: TimeZoneRule, into out: inout [UInt8]) {
+        u16(UInt16(truncatingIfNeeded: rule.stdOffset), into: &out)
+        u16(UInt16(truncatingIfNeeded: rule.dstOffset), into: &out)
+        for value in [rule.startMonth, rule.startWeek, rule.startDow, rule.startHour,
+                      rule.endMonth, rule.endWeek, rule.endDow, rule.endHour] {
+            out.append(UInt8(truncatingIfNeeded: value))
+        }
+        u16(0, into: &out)
     }
 
     private func writeLE16(_ image: inout [UInt8], _ offset: Int, _ value: UInt16) {

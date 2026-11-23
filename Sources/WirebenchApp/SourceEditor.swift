@@ -202,7 +202,9 @@ struct SourceEditor: NSViewRepresentable {
             if resignObserver == nil {
                 resignObserver = NotificationCenter.default.addObserver(
                     forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-                    self?.closeCompletion()
+                    Task { @MainActor [weak self] in
+                        self?.closeCompletion()
+                    }
                 }
             }
         }
@@ -214,9 +216,13 @@ struct SourceEditor: NSViewRepresentable {
                 closeCompletion()
                 return
             }
+            guard let window = textView.window else {
+                closeCompletion()
+                return
+            }
             let caret = textView.firstRect(forCharacterRange: NSRange(location: state.range.location, length: 0),
                                            actualRange: nil)
-            panel.show(suggestions: state.suggestions, partial: state.partial, near: caret, in: textView.window!)
+            panel.show(suggestions: state.suggestions, partial: state.partial, near: caret, in: window)
         }
 
         private func accept(_ suggestion: String, range: NSRange, in textView: NSTextView) {
@@ -454,7 +460,7 @@ final class CompletionPanel: NSPanel, NSTableViewDataSource, NSTableViewDelegate
         table.headerView = nil
         table.rowHeight = 22
         table.intercellSpacing = NSSize(width: 0, height: 0)
-        table.selectionHighlightStyle = .sourceList
+        table.style = .sourceList
         table.focusRingType = .none
         table.backgroundColor = .clear
         table.dataSource = self

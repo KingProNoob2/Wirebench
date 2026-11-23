@@ -41,6 +41,8 @@ public struct SceneSnapshot: Codable, Sendable {
         public var boolMode: String
         /// The top of an IntVar's slider.
         public var sliderMax: Int
+        /// The bottom of an IntVar's slider.
+        public var sliderMin: Int = 0
         /// The sheet a macro call opens, `*name`; empty for anything else.
         public var macroTarget: String
     }
@@ -406,6 +408,7 @@ public struct SceneSnapshot: Codable, Sendable {
                 interaction: Self.interactionName(BlockInteraction.classify(module)),
                 boolMode: BlockRole.boolVarMode(of: module).map { $0 == .pushButton ? "pushButton" : "toggleSwitch" } ?? "",
                 sliderMax: BlockRole.sliderMax(of: module),
+                sliderMin: BlockRole.sliderMin(of: module),
                 macroTarget: MacroCalls.target(of: module).map { "*" + $0 } ?? "")
         }
 

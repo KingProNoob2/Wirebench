@@ -244,7 +244,7 @@ Popup {
                                                                     + reply.report.slots + " slot(s)"
                                      else dialog.message = reply.error || "The project could not be compiled for the Duino-S."
                                  } }
-                    IconButton { label: "Build && upload"; icon: "upload"; accented: true
+                    IconButton { label: "Build & upload"; icon: "upload"; accented: true
                                  enabled: parent.linked && !dialog.hw.uploading
                                  onClicked: {
                                      const reply = controller.command({cmd: "duinoBuild"})

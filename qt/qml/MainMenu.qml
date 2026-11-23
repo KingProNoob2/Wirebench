@@ -22,6 +22,7 @@ Popup {
         {id: "save", icon: "save", label: "Save", hint: "Ctrl+S"},
         {id: "saveAs", icon: "save", label: "Save As…", hint: "Ctrl+Shift+S"},
         {id: "exportPcc", icon: "upload", label: "Export Legacy .PCC…", hint: "Ctrl+Shift+E"},
+        {id: "exportMfl", icon: "upload", label: "Export Maraflow .MFL…", hint: ""},
         {section: "Insert"},
         {id: "rect", icon: "rect", label: "Rectangle", hint: "Meta+Ctrl+R"},
         {id: "ellipse", icon: "ellipse", label: "Ellipse", hint: "Meta+Ctrl+C"},

@@ -438,18 +438,18 @@ public struct ModuleCardView: View, Equatable {
         }
     }
 
-    /// An `IntVar`'s slider: a thumb on a track from 0 to the block's maximum (set in its configuration), with the
+    /// An `IntVar`'s slider: a thumb on a track over the block's configured range, with the
     /// variable following the thumb. A value past either end — typed into the inspector, say — sits at that end.
     private func sliderControl(value: Int) -> some View {
-        let maximum = BlockRole.sliderMax(of: module)
-        return Slider(value: Binding(get: { Double(min(max(value, 0), maximum)) },
+        let minimum = BlockRole.sliderMin(of: module), maximum = BlockRole.sliderMax(of: module)
+        return Slider(value: Binding(get: { Double(min(max(value, minimum), maximum)) },
                                      set: { position in
                                          let next = Int(position.rounded())
                                          // Only a step to another value is a change; the same one is not.
                                          guard next != value else { return }
                                          onSetValue(next)
                                      }),
-                      in: 0...Double(maximum), step: 1)
+                      in: Double(minimum)...Double(maximum), step: 1)
             .controlSize(.mini)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 6 * s)

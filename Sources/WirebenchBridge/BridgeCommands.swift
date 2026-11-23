@@ -13,7 +13,7 @@ import WirebenchModel
 /// - `addBlock {guid, x?, y?}` → `{id}`
 /// - `connect {outModule, outPin, inModule, inPin, inParam?}`, `disconnect {inModule, inPin, inParam?}`: `inParam` names a parameter pin, not an input
 /// - `setPage {page}`, `setInput {module, pin, value}`
-/// - `inspect {id}` → `{inspector}`, `toggleInput`/`setInputInt`/`setVariable`/`setParam`/`setThread`/`setOrder`/`rename`/`resetState`
+/// - `inspect {id}` → `{inspector}`, `toggleInput`/`setInputInt`/`setVariable`/`setParam`/`setThread`/`setOrder`/`rename`/`resetState`/`fireInterrupt`
 /// - `interfacePin {module, op: add|rename|remove, pin?, name?}`: a macro's Inputs/Outputs pins
 /// - `config {id}` → `{config}`, `applyConfig {id, values}`: a block's configuration fields and writing them back
 /// - `setSetting {key: appearance|snapToGrid|scrollZooms|optimize|pinPitch|cardWidth|macroCallerSpace, value}`
@@ -275,6 +275,8 @@ enum BridgeCommands {
         case "resetState":
             guard let m = int(arguments, "module") else { return ["ok": false] }
             model.resetModuleState(id: m)
+        case "fireInterrupt":
+            model.fireInterrupt(source: arguments["source"] as? String)
         case "setSetting":
             // `appearance` is system|light|dark; the others are booleans (1/0).
             let on = (arguments["value"] as? NSNumber)?.boolValue ?? false

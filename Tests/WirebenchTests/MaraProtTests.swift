@@ -50,6 +50,38 @@ struct MaraProtTests {
         }
     }
 
+    @Test("Truncated watch and slot replies are rejected instead of becoming partial state")
+    func truncatedSlotReplies() throws {
+        let watch = MaraProtClient(transport: PayloadTransport(payload: [1, 0, 0, 0, 1, 0, 0, 0]))
+        #expect(throws: MaraProtClient.ClientError.self) {
+            _ = try watch.watchPoll(ackEpoch: 0)
+        }
+        let read = MaraProtClient(transport: PayloadTransport(payload: [1, 0, 0, 0]))
+        #expect(throws: MaraProtClient.ClientError.self) {
+            _ = try read.readSlots([0])
+        }
+    }
+
+    @Test("A slot snapshot cannot omit a requested slot")
+    func missingSlotSnapshot() throws {
+        let client = MaraProtClient(transport: PayloadTransport(payload: [0, 0]))
+        #expect(throws: MaraProtClient.ClientError.self) {
+            _ = try client.readSlots([0x4001])
+        }
+    }
+
+    @Test("Slot writes reject wrong-width values and partially applied batches")
+    func invalidSlotWrites() throws {
+        let wrongWidth = MaraProtClient(transport: PayloadTransport(payload: [0, 0]))
+        #expect(throws: MaraProtClient.ClientError.self) {
+            _ = try wrongWidth.writeSlots([0x4001: [1, 0]])
+        }
+        let partial = MaraProtClient(transport: PayloadTransport(payload: [0, 0]))
+        #expect(throws: MaraProtClient.ClientError.self) {
+            _ = try partial.writeSlots([0: [1], 0x4001: [42, 0, 0, 0]])
+        }
+    }
+
     @Test("The Ethernet transport carries a frame over TCP and back")
     func ethernetTransport() throws {
         let server = try FakeTCPServer()
@@ -323,6 +355,18 @@ private final class FakeSerialDuino: @unchecked Sendable {
                 }
             }
         }
+    }
+}
+
+private final class PayloadTransport: MaraProtTransport {
+    let payload: [UInt8]
+    init(payload: [UInt8]) { self.payload = payload }
+    func open() throws {}
+    func close() {}
+    func exchange(_ frame: [UInt8], timeout: TimeInterval) throws -> [UInt8] {
+        let request = try MaraProtFrame.decode(frame)
+        return try MaraProtFrame(sequence: request.sequence, stationId: request.stationId,
+                                 opcode: request.opcode, payload: payload, isResponse: true).encoded()
     }
 }
 

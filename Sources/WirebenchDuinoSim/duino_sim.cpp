@@ -90,6 +90,9 @@ struct DuinoSimState {
     bool resumeAfterPowerCycle = false;
     mutable std::mutex connectionsMutex;
     std::vector<int> connectionFds;
+    /// Joined on destroy. Accept-loop threads are detached only after being recorded here, so the
+    /// state cannot be deleted while a client is still using it.
+    std::vector<std::thread> connectionThreads;
 };
 
 
@@ -674,7 +677,11 @@ void acceptLoop(DuinoSimState *sim) {
         const int fd = accept(sim->listenFd, nullptr, nullptr);
         if (fd < 0) break;
         if (!sim->powered.load()) { close(fd); continue; }
-        std::thread(serveConnection, sim, fd).detach();
+        std::thread client(serveConnection, sim, fd);
+        {
+            std::lock_guard<std::mutex> lock(sim->connectionsMutex);
+            sim->connectionThreads.push_back(std::move(client));
+        }
     }
 }
 
@@ -765,15 +772,22 @@ void wirebench_duinosim_destroy(WirebenchDuinoSim *handle) {
         if (liveInstanceSlot() == state) liveInstanceSlot() = nullptr;
     }
     state->stop.store(true);
-    {
-        std::lock_guard<std::mutex> lock(state->connectionsMutex);
-        for (int fd : state->connectionFds) shutdown(fd, SHUT_RDWR);
-    }
     if (state->listenFd >= 0) {
         shutdown(state->listenFd, SHUT_RDWR);
         close(state->listenFd);
     }
+    // Stop accepting first, then close the clients. Joining the accept thread before taking the
+    // connection list catches a connection accepted just before `stop` was set.
     if (state->acceptThread.joinable()) state->acceptThread.join();
+    std::vector<std::thread> clients;
+    {
+        std::lock_guard<std::mutex> lock(state->connectionsMutex);
+        for (int fd : state->connectionFds) shutdown(fd, SHUT_RDWR);
+        clients.swap(state->connectionThreads);
+    }
+    for (auto &client : clients) {
+        if (client.joinable()) client.join();
+    }
     if (state->scanThread.joinable()) state->scanThread.join();
     delete state->vm;
     delete state;

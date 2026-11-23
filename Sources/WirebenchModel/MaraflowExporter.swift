@@ -55,8 +55,6 @@ public enum MaraflowExporter {
         case "FMul": return Bridge(definitionId: "Math.Mul")
         case "ISwitch": return Bridge(definitionId: "Main.Switches.Sel")
         case "IDemux": return Bridge(definitionId: "Main.Switches.Demux")
-        case "8xDI": return Bridge(definitionId: "IO.8xDI")
-        case "8xDO": return Bridge(definitionId: "IO.8xDO")
         case "Segment": return Bridge(definitionId: "Visual.Segment")
         case "Value": return Bridge(definitionId: "Visual.Value")
         case "BoolVar": return Bridge(definitionId: "Visual.Vars.BoolVar")

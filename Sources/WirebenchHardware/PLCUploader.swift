@@ -60,14 +60,20 @@ public final class PLCUploader {
         onStage?("Stop the PLC")
         try session.requestStopSerial(destination: destination, source: source)
         step(2)
-        onStage?("Read the run/stop register")
-        try session.readRunStopSerial(destination: destination, source: source)
-        step(3)
+        do {
+            onStage?("Read the run/stop register")
+            try session.readRunStopSerial(destination: destination, source: source)
+            step(3)
 
-        for (index, payload) in frames.enumerated() {
-            onStage?("Table frame \(index + 1) of \(frames.count)")
-            try session.writeMatrixSerial(destination: destination, source: source, payload: payload)
-            step(4 + index)
+            for (index, payload) in frames.enumerated() {
+                onStage?("Table frame \(index + 1) of \(frames.count)")
+                try session.writeMatrixSerial(destination: destination, source: source, payload: payload)
+                step(4 + index)
+            }
+        } catch {
+            onStage?("Restart the PLC after the failed upload")
+            _ = try? session.requestStartSerial(destination: destination, source: source)
+            throw error
         }
 
         onStage?("Start the PLC")

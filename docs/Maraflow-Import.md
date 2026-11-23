@@ -34,28 +34,11 @@ object is a native `.wbp`. The extension only guides the file panels.
 
 ## What is mapped
 
-Blocks are identified by their Maraflow definition id (`Bool.And`, `Math.Add`, `IO.8xDO`, …). The importer uses a
-table for the definitions with a close Wirebench counterpart:
-
-- **Bool:** `And`, `Or`, `Xor`, `Not`, `RS`; `Nand`/`Nor`/`Xnor` map to their base block with the consumer pin
-  inverted; `SR` maps to `RS` with a note.
-- **Math:** `Add`→`IAdd`, `Sub`→`ISub`, `Mul`→`IMul`, `Div`→`Div` (the error output is dropped), `Abs`→`IAbs`,
-  `Neg`→`INeg`, `Sqrt`/`Sin`/`Cos`→`FSqrt`/`FSin`/`FCos`.
-- **Comparators:** `EQ`/`NE`/`GT`/`GE`/`LT`/`LE` all become Dirigo's single `Comparator`; the right output
-  (`AGtB`, `AEqB`, `ALtB`) is picked and inverted where needed. `InRange` becomes `InRange` with Min/Max on its
-  Low/High parameters.
-- **Conversion:** `PackBits`→`Bits2Int`, `UnpackBits`→`Int2Bits` (the latter drops `En`).
-- **Timers:** `Timer`→`Timer` (PT to Dly, Q/ET to its outputs), `SinglePulse`→`SinglePulse`, `PulseGen`→`PulseGen`
-  (Act held true); `DecodeDate`/`EncodeDate` map their date fields (time fields are dropped).
-- **Filters:** `Debounce`→`DelayFilter` (Tms counts cycles).
-- **Switches:** `Sel`→`ISwitch`, `Demux`→`IDemux`.
-- **I/O:** `IO.8xDI`/`IO.8xDO` map directly; single-channel `IO.DI`/`IO.DO`/`IO.AI` map to channel 0 of the
-  corresponding 8-channel block; `IO.AO` goes to `2xAO` channel 0 and `IO.Encoder` to `IRC`.
-- **Visual:** `Segment`, `Value`, `BoolVar`, `IntVar`, `LongVar` map directly.
-
-Everything else — PID, filters, timers and counters (their pin sets differ), communication, virtual registers,
-safety, ladder contacts/coils, macro boundaries — becomes an inert **Unresolved** block with the original pins and
-values. The topology is preserved, the block does not simulate, and the import report names each type.
+All 91 statically registered Maraflow definitions are native `MaraflowBlock` entries with exact pin names, order,
+defaults, datatypes and configurable/variadic behavior. This includes the legacy `IO.IREF`/`IO.OREF` references,
+whose `Channel` property addresses digital or analog channels such as `DI3`, `DO2`, `AI2` and `AO3` in the shared
+operand map. `Macro.User.*` is dynamic and becomes a macro call. Unknown definitions become inert **Unresolved**
+blocks so their topology and original pins remain available for inspection and export.
 
 Wires are rebuilt from the source/target block ids and pin indices through the same mapping; their route points and
 buses are not imported (Wirebench routes its own elbows). Hidden wires become normal wires with a note.
@@ -71,7 +54,7 @@ buses are not imported (Wirebench routes its own elbows). Hidden wires become no
   macro calls and macro interfaces become `Macro.User.*`/`Macro.MacroIn`/`Macro.MacroOut`; ST pages keep their source.
 - Ladder pages re-use the preserved rung table (block/wire overlays do not apply to an LD page).
 - Dirigo blocks with a direct counterpart are translated back through a bridge: And/Or/Xor/Not/RS, common integer
-  and float math, ISwitch/IDemux, 8xDI/8xDO, Segment/Value and the visual variables. Their pins are re-ordered onto the
+  and float math, ISwitch/IDemux, Segment/Value and the visual variables. Their pins are re-ordered onto the
   Maraflow definition's own pin table. Other Dirigo-only blocks are skipped with a report note; graphics remain the
   preserved base rather than being regenerated.
 - Native `.mfl` → `.wbp` → `.mfl` round trips are covered by `MaraflowExportTests`. A project that was not imported
@@ -121,9 +104,8 @@ Open one with **File ▸ Open**, `wirebench-cli info project.mfl`, or any other 
 
 ## Definition reference
 
-All statically registered Maraflow definitions are native `MaraflowBlock` entries in the C++ core with exact pins.
-That is the 93 definitions the current source registers plus the two legacy single-bit I/O references older projects
-still contain (`IO.IREF`/`IO.OREF`, the one-channel form of 8xDI/8xDO). `Macro.User.*` is dynamic and becomes a macro
+All 91 statically registered Maraflow definitions are native `MaraflowBlock` entries in the C++ core with exact pins,
+including the legacy digital/analog I/O references `IO.IREF`/`IO.OREF`. `Macro.User.*` is dynamic and becomes a macro
 call. Definitions with no evaluator in Maraflow's own `SimulationEngine` are native no-ops, matching it.
 
 | Maraflow definition | Type | Status |
@@ -154,12 +136,6 @@ call. Definitions with no evaluator in Maraflow's own `SimulationEngine` are nat
 | `Math.Random` | Random | native |
 | `Math.Scale` | Scale | native |
 | `Math.PID` | PID | native |
-| `IO.DI` | DI | native |
-| `IO.DO` | DO | native |
-| `IO.8xDI` | 8x DI | native |
-| `IO.8xDO` | 8x DO | native |
-| `IO.AI` | AI | native |
-| `IO.AO` | AO | native |
 | `IO.PWM` | PWM | native |
 | `IO.Encoder` | Encoder | native |
 | `Comm.ModbusRTU.MbRtuRead` | MbRtuRead | native |

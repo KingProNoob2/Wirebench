@@ -66,7 +66,7 @@ Open, save and save-as through the platform's file dialogs (or drop a `.wbp`, le
 selection box), move, wire (drag from an output pin to an input pin), delete, undo and redo; the block library with search;
 rectangles, ellipses and text; play, pause, step and reset with live values on pins and wires and a lit `Segment` display; an
 inspector with live signals and editable values; a configuration dialog for most block kinds (shared with the SwiftUI dialog through
-`BlockConfig`); a build report with `.pbd`, `.csv`, `.dbf` and legacy `.pcc` exports; the PLC link (serial ports; *Build & upload* opens the port
+`BlockConfig`); a build report with `.pbd`, `.csv`, `.dbf`, legacy `.pcc` and Maraflow `.mfl` exports; the PLC link (serial ports; *Build & upload* opens the port
 itself and closes it after, with phases and a log); settings.
 
 **Top bar and menu:** the bar holds the menu, the library toggle, undo and redo, the project name, play/pause/step/reset, the page tabs and the

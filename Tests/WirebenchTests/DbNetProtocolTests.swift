@@ -842,6 +842,34 @@ struct UploadLogTests {
         })
     }
 
+    private enum InjectedFailure: Error { case matrixWrite }
+
+    private final class FailingMatrixTransport: DbNetTransport {
+        private(set) var sent: [[UInt8]] = []
+        func exchange(_ frame: [UInt8], timeout: TimeInterval) throws -> [UInt8] {
+            sent.append(frame)
+            guard case .success(let request) = DbNetFrame.parseSerial(frame) else { return [] }
+            if request.function == 0x45 && request.data.count > 12 { throw InjectedFailure.matrixWrite }
+            return DbNetFrame.encodeSerial(destination: request.source, source: request.destination, function: 0x00)
+        }
+    }
+
+    @Test("A failed table write still attempts to restart the PLC")
+    func failedWriteRestartsPLC() throws {
+        let transport = FailingMatrixTransport()
+        let uploader = PLCUploader(session: DbNetSession(transport: transport, address: 1), destination: 1, source: 31)
+        #expect(throws: InjectedFailure.matrixWrite) {
+            try uploader.upload(table: try #require(PLCProgramTable.buildTemplate()))
+        }
+        let last = try #require(transport.sent.last)
+        guard case .success(let request) = DbNetFrame.parseSerial(last) else {
+            Issue.record("the recovery request did not parse")
+            return
+        }
+        #expect(request.data == [2, 0, 0xC0, 0x03, 0, 0],
+                "the final request writes run=0 to variable 960, rather than being another table frame")
+    }
+
     @Test("Progress counts acknowledged steps, not retries or raw replies")
     func progressIsStepBased() throws {
         let table = try #require(PLCProgramTable.buildTemplate())

@@ -169,20 +169,14 @@ public enum MaraflowCatalog {
         makeDefinition("Math.Random", "532B910C-28F3-5AA2-AB98-9C94E8AD9E0E", "Random", "Math", [pin("En", "Enable Execution", "Boolean", "1"), pin("Trig", "Generate Trigger Edge", "Boolean", "1"), pin("Min", "Minimum Value", "Int", "0"), pin("Max", "Maximum Value", "Int", "100")], [pin("Y", "Random Value", "Int", "0")], configurable: true),
         makeDefinition("Math.Scale", "F56C9698-92A6-5F39-ACED-79DD6A550D31", "Scale", "Math", [pin("En", "Enable Execution", "Boolean", "1"), pin("In", "Input Value", "Float", "0"), pin("Ilo", "Input Low", "Float", "0"), pin("Ihi", "Input High", "Float", "100"), pin("Olo", "Output Low", "Float", "0"), pin("Ohi", "Output High", "Float", "10")], [pin("Y", "Scaled Output", "Float", "0")], configurable: true),
         makeDefinition("Math.PID", "CECA7AEF-8489-5C26-8B7D-1A6B22B2ED44", "PID", "Math", [pin("En", "Enable Execution", "Boolean", "1"), pin("PV", "Process Variable", "Float", "0"), pin("SP", "Setpoint", "Float", "0"), pin("Kp", "Proportional Gain", "Float", "1"), pin("Ki", "Integral Gain", "Float", "0"), pin("Kd", "Derivative Gain", "Float", "0"), pin("Rst", "Reset Integrator", "Boolean", "0")], [pin("Out", "Controller Output", "Float", "0")]),
-        makeDefinition("IO.DI", "790C64F1-2D2D-595B-8DFE-8691C9D1DEEF", "DI", "I/O", enableOnlyInputs, [pin("Y", "Digital Input State", "Boolean", "0")]),
-        makeDefinition("IO.DO", "7EC54582-34C7-5480-97EA-6B7FDCF5495C", "DO", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("X", "Output Drive State", "Boolean", "0")], [pin("Y", "Confirmed Output State", "Boolean", "0")]),
-        makeDefinition("IO.8xDI", "F9B0ABD2-12E0-539C-A128-8A5FCB3C492D", "8x DI", "I/O", enableOnlyInputs, [pin("DI0", "Digital Input 0", "Boolean", "0"), pin("DI1", "Digital Input 1", "Boolean", "0"), pin("DI2", "Digital Input 2", "Boolean", "0"), pin("DI3", "Digital Input 3", "Boolean", "0"), pin("DI4", "Digital Input 4", "Boolean", "0"), pin("DI5", "Digital Input 5", "Boolean", "0"), pin("DI6", "Digital Input 6", "Boolean", "0"), pin("DI7", "Digital Input 7", "Boolean", "0")]),
-        makeDefinition("IO.8xDO", "9860B4B6-E1D8-53EF-9897-B7A64B4796AF", "8x DO", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("DO0", "Digital Output 0", "Boolean", "0"), pin("DO1", "Digital Output 1", "Boolean", "0"), pin("DO2", "Digital Output 2", "Boolean", "0"), pin("DO3", "Digital Output 3", "Boolean", "0"), pin("DO4", "Digital Output 4", "Boolean", "0"), pin("DO5", "Digital Output 5", "Boolean", "0"), pin("DO6", "Digital Output 6", "Boolean", "0"), pin("DO7", "Digital Output 7", "Boolean", "0")], [pin("Ok", "Port Write Status", "Boolean", "1")]),
-        makeDefinition("IO.AI", "0E978790-C3C4-5A6B-8D86-613593292718", "AI", "I/O", enableOnlyInputs, [pin("Val", "Analog Input Raw/Scaled", "Int", "0")], configurable: true),
-        makeDefinition("IO.AO", "3D1A47DA-58C0-567D-B912-DFCDE725CFD0", "AO", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("Val", "Analog Output Value", "Int", "0")], [pin("Ok", "DAC Status", "Boolean", "1")], configurable: true),
         makeDefinition("IO.PWM", "685C097D-E81D-5907-98B4-80247C11EF4B", "PWM", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("Frq", "Frequency (Hz)", "Int", "1000"), pin("Dty", "Duty Cycle (0-100%)", "Float", "50")], [pin("Act", "PWM Active", "Boolean", "0")]),
         makeDefinition("IO.Encoder", "9857F4AB-DE72-5AA5-9889-E99701B5E8F1", "Encoder", "I/O", [pin("En", "Enable Execution", "Boolean", "1"), pin("Rst", "Reset Counter", "Boolean", "0")], [pin("Cnt", "Quadrature Count", "Long", "0"), pin("Vel", "Pulse Velocity", "Int", "0")]),
         makeDefinition("IO.CH455G", "6936F594-2ED3-5534-91B2-E683A015F418", "CH455G", "I/O",
                        [pin("En", "Enable Execution", "Boolean", "1"), pin("Val", "Display Value", "Float", "0"),
                         pin("Dec", "Decimal Places (0-3)", "Int", "1"), pin("Brt", "Brightness (1-8)", "Int", "8")],
                        [pin("Act", "Display Active", "Boolean", "1")]),
-        // Legacy Maraflow single-channel references, saved by older projects as `IO.IREF`/`IO.OREF` with a
-        // `Channel` property ("DI0", "DO3", ...). They are the one-bit form of 8xDI/8xDO.
+        // Single-channel references with a `Channel` property ("DI0", "DO3", "AI2", "AO0", ...).
+        // The catalog declares Boolean pins; imported projects may carry numeric pin datatypes.
         makeDefinition("IO.IREF", "E2C49F39-7516-5508-AED3-70F1E3EABD9E", "IREF", "I/O", noInputs,
                        [pin("Y", "Input Reference", "Boolean", "0")]),
         makeDefinition("IO.OREF", "CBC0A94B-8EEB-5F8F-ACE0-E6155CBCEB7A", "OREF", "I/O",
@@ -263,8 +257,7 @@ public enum MaraflowCatalog {
         "Main.Comparators.Hysteresis",
         "Main.Conversion.PackBits", "Main.Conversion.UnpackBits",
         "Main.Switches.Sel", "Main.Switches.Mux", "Main.Switches.Demux",
-        "IO.DI", "IO.DO", "IO.8xDI", "IO.8xDO", "IO.AI", "IO.AO", "IO.PWM", "IO.Encoder",
-        "IO.IREF", "IO.OREF",
+        "IO.PWM", "IO.Encoder", "IO.IREF", "IO.OREF",
         "Main.Timers.DateTime", "Main.Timers.DecodeDate", "Main.Timers.EncodeDate",
         "Main.Timers.PulseGen", "Main.Timers.PulseLen", "Main.Timers.SinglePulse",
         "Main.Timers.Timer", "Main.Timers.Counter",
@@ -292,6 +285,71 @@ public enum MaraflowCatalog {
     /// The definition with the given deterministic UUID v5, or `nil`.
     public static func definition(forGuid guid: UUID) -> MaraflowDefinition? {
         byGuid[guid]
+    }
+
+    /// The numeric type a configurable block starts with. Comparators output Boolean but their
+    /// configurable operand is numeric, so looking only at the first output would start them as BOOL.
+    public static func declaredDataType(for definition: MaraflowDefinition) -> String {
+        let candidates = definition.inputs.dropFirst().map(\.dataType) + definition.outputs.map(\.dataType)
+        let type = candidates.first { value in
+            let upper = value.uppercased()
+            return upper != "BOOL" && upper != "BOOLEAN"
+        } ?? "INT"
+        let upper = type.uppercased()
+        return upper == "BOOLEAN" ? "BOOL" : upper
+    }
+
+    public static func defaultProperties(for definition: MaraflowDefinition) -> [(String, String)] {
+        var properties: [(String, String)] = []
+        if definition.variableInputCount { properties.append(("InputCount", "2")) }
+        if definition.configurableDataType {
+            properties.append(("DataType", declaredDataType(for: definition)))
+        }
+        switch definition.id {
+        case "Math.Div": properties.append(("ModuloOut", "false"))
+        case "Main.Conversion.PackBits", "Main.Conversion.UnpackBits": properties.append(("BitOrder", "LSB"))
+        case "Main.Timers.DecodeDate", "Main.Timers.EncodeDate":
+            properties += [("TimeZone", "UTC"), ("TzStdOffsetMin", "0"), ("TzDstOffsetMin", "0"),
+                           ("TzDstStartMonth", "0"), ("TzDstStartWeek", "0"), ("TzDstStartDow", "0"),
+                           ("TzDstStartHour", "2"), ("TzDstEndMonth", "0"), ("TzDstEndWeek", "0"),
+                           ("TzDstEndDow", "0"), ("TzDstEndHour", "3")]
+        case "IO.IREF": properties.append(("Channel", "DI0"))
+        case "IO.OREF": properties.append(("Channel", "DO0"))
+        case "IO.PWM": properties.append(("Channel", "PWM0"))
+        case "IO.CH455G":
+            properties += [("SclPin", "DIO2"), ("SdaPin", "DIO3"),
+                           ("DisplayMode", "Number (Float / Int)"), ("DigitMask", "1111")]
+        case let id where id.hasPrefix("IO."): properties.append(("HardwareChannel", "CH0 (PA0)"))
+        case let id where id.hasPrefix("Comm.Modbus"):
+            properties += [("SlaveId", "1"), ("RegisterType", "Holding Register (4x)"), ("RegisterAddress", "0")]
+            if id.contains("Tcp") { properties += [("RemoteIP", "192.168.1.100"), ("RemotePort", "502")] }
+        case let id where id.hasPrefix("Comm.REST"):
+            properties += [("EndpointUrl", "http://192.168.1.100/api/val"), ("JsonKey", "value"), ("TimeoutMs", "1000")]
+        case let id where id.hasPrefix("Comm.DS18B20"):
+            properties += [("OneWirePin", "DIO13"), ("RomAddress", "AUTO:0"), ("ResolutionBits", "12")]
+        case "Comm.I2C.TMP75": properties.append(("DeviceAddressHex", "0x48"))
+        case let id where id.hasPrefix("Comm.I2C"):
+            properties += [("DeviceAddressHex", "0x48"), ("RegisterAddressHex", "0x00")]
+        case let id where id.hasPrefix("Comm.SPI"): properties += [("CsPin", "PB12"), ("BitWidth", "8")]
+        case "Main.Execution.Interrupt":
+            properties += [("InterruptSource", "TIM_IC1"), ("TriggerEdge", "RISING"),
+                           ("CaptureMode", "PULSE_WIDTH_US"), ("LatchPolicy", "HOLD_FIRST_UNTIL_RST"),
+                           ("SimPulseValue", "1160")]
+        case let id where id.hasPrefix("Main.Execution."):
+            properties += [("RegisterName", "REG_0"), ("TriggerMode", "Continuous (While En=1)"),
+                           ("RetentiveEeprom", "false")]
+        case "Main.Timers.Timer": properties.append(("TimerMode", "TON (On-Delay)"))
+        case "Main.Filters.MovingAvg": properties.append(("WindowSize", "8"))
+        case "Main.Arrays.ArrayRead", "Main.Arrays.ArrayWrite": properties.append(("ArrayName", "ARR_0"))
+        case let id where id.hasPrefix("Visual.Vars."):
+            properties += [("InputType", id.hasSuffix("BoolVar") ? "Switch" : "Slider"),
+                           ("SwitchMode", "Toggle"), ("ValA", "0"),
+                           ("ValB", id.hasSuffix("BoolVar") ? "1" : "100"), ("CurrentValue", "0")]
+        case let id where id.hasPrefix("Ladder.Coil."):
+            properties.append(("Operand", id == "Ladder.Coil.ANALOG" ? "AO0" : id == "Ladder.Coil.WRITE_REG" ? "REG_0" : "DO0"))
+        default: break
+        }
+        return properties
     }
 
     /// The pin template of a definition, with its trailing variable operand marked as counted.

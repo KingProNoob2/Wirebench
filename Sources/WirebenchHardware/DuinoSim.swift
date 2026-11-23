@@ -21,8 +21,6 @@ public final class DuinoSim: @unchecked Sendable {
     /// - Parameter port: 0 binds the default Duino-S port (5020); pass another to run several.
     public init(port requested: UInt16 = 0) throws {
         guard let handle = wirebench_duinosim_create(requested) else {
-            var probe: UnsafeMutablePointer<WirebenchDuinoSim>? = nil
-            _ = probe
             throw SimError.failed("port \(requested == 0 ? 5020 : requested) is unavailable or a simulator is already running")
         }
         self.handle = handle

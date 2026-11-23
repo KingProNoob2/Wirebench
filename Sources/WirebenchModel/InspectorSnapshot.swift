@@ -24,6 +24,7 @@ public struct InspectorSnapshot: Codable, Sendable {
     public var order: Int
     public var thread: Int
     public var page: String
+    public var interruptSource: String? = nil
     public var x: Double
     public var y: Double
     public var inputs: [Row]
@@ -32,7 +33,7 @@ public struct InspectorSnapshot: Codable, Sendable {
 
     @MainActor
     public static func make(of model: AppModel, moduleId: Int) -> InspectorSnapshot? {
-        guard let module = model.module(id: moduleId) else { return nil }
+        guard let module = model.module(id: moduleId), module.page == model.selectedPage else { return nil }
         let info = BlockTypeCatalog.info(forGuid: module.guid)
         let node = model.getNode(id: moduleId)
 
@@ -65,8 +66,10 @@ public struct InspectorSnapshot: Codable, Sendable {
             id: module.id, name: module.name, type: info?.blockName ?? "", category: info?.category ?? "",
             summary: info?.summary ?? "", className: info?.delphiClass ?? "",
             simulated: CxxSimulationCore.kind(forGUID: module.guid) != nil,
-            order: module.order, thread: module.threadId, page: module.page, x: module.x, y: module.y,
-            inputs: inputs, outputs: outputs, params: params)
+            order: module.order, thread: module.threadId, page: module.page,
+            interruptSource: MaraflowCatalog.definition(forGuid: module.guid)?.id == "Main.Execution.Interrupt"
+                ? module.rawAttributes["MARAFLOW_PROP_InterruptSource"] ?? "TIM_IC1" : nil,
+            x: module.x, y: module.y, inputs: inputs, outputs: outputs, params: params)
     }
 }
 

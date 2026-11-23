@@ -132,6 +132,7 @@ Popup {
 
                 // A number, with steppers.
                 Row {
+                    enabled: !(field.modelData.disabled ?? false)
                     visible: field.modelData.kind === "int"
                     spacing: 6
                     IconButton { icon: "minus"; onClicked: dialog.setValue(field.modelData.key, Math.max(field.modelData.min, (parseInt(dialog.values[field.modelData.key]) || 0) - 1)) }
@@ -152,6 +153,7 @@ Popup {
 
                 // Free text.
                 Rectangle {
+                    enabled: !(field.modelData.disabled ?? false)
                     visible: field.modelData.kind === "text"
                     width: parent.width; height: 32; radius: 8; color: AppTheme.field
                     border.width: txt.activeFocus ? 2 : 0; border.color: AppTheme.accent
@@ -167,6 +169,7 @@ Popup {
 
                 // A switch.
                 Row {
+                    enabled: !(field.modelData.disabled ?? false)
                     visible: field.modelData.kind === "bool"
                     spacing: 10
                     Rectangle {
@@ -184,6 +187,7 @@ Popup {
 
                 // One of several.
                 Column {
+                    enabled: !(field.modelData.disabled ?? false)
                     visible: field.modelData.kind === "choice"
                     width: parent.width
                     spacing: 4
@@ -207,6 +211,7 @@ Popup {
 
                 // A row of channels to show or hide.
                 Flow {
+                    enabled: !(field.modelData.disabled ?? false)
                     visible: field.modelData.kind === "bits"
                     width: parent.width
                     spacing: 6

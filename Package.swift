@@ -2,6 +2,8 @@
 import Foundation
 import PackageDescription
 
+let platforms: [SupportedPlatform] = [.macOS(.v15)]
+
 /// The agent is a build option, off unless asked for: `WIREBENCH_AI=1 swift build` (or `swift test`) defines
 /// `WIREBENCH_AI`, and nothing of the agent is compiled without it.
 let aiSettings: [SwiftSetting] = ProcessInfo.processInfo.environment["WIREBENCH_AI"] == "1"
@@ -115,9 +117,7 @@ let featureTargets: [Target] = [
 
 let package = Package(
     name: "Wirebench",
-    platforms: [
-        .macOS(.v26)
-    ],
+    platforms: platforms,
     products: [
         .library(name: "WirebenchCore", targets: ["WirebenchCore"]),
         .library(name: "WirebenchLibrary", targets: ["WirebenchLibrary"]),

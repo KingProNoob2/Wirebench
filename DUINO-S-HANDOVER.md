@@ -140,9 +140,8 @@ Explicitly rejected with a compile error:
 
 - ST and LD pages (FBD only in this pass; Maraflow's ST and LD compilation is not ported)
 - Blocks with no `MaraflowDefinition` and no bridge mapping
-- Blocks whose VM opcode does not exist or is not emitted yet, including `IO.8xDI`/`IO.8xDO`
-  (no emitter upstream either), `Math.Pow` (no VM opcode), and the Modbus/REST/SPI transfers
-  (no VM behavior upstream either). The shield blocks `Comm.I2C.TMP75`, `Comm.DS18B20.DS18B20Read`
+- Blocks whose VM opcode does not exist or is not emitted yet, including `Math.Pow` (no VM opcode)
+  and the Modbus/REST/SPI transfers (no VM behavior upstream either). The shield blocks `Comm.I2C.TMP75`, `Comm.DS18B20.DS18B20Read`
   and `IO.CH455G` are emitted (`COMM_EXEC`) since the simulator renders the shield.
 
 A wire from a display/unsupported block is treated as constant 0 and reported in `notes`; it does
@@ -267,17 +266,21 @@ swift test --disable-sandbox --filter 'DuinoCompilerTests|MaraProtTests'
 2. RS-485 transport; USB CDC and Ethernet TCP 5020 are implemented.
 3. ST/LD pages (Maraflow's `StBytecodeCompiler`/ladder) are not ported.
 4. Broad native Dirigo block coverage; many `TM*` blocks still have no Duino-S mapping.
-5. `IO.8xDI`/`IO.8xDO`: importer/bridge exists; there is no emitter for them upstream either, and the
-   VM has no packed digital I/O opcode, so they stay rejected. PulseGen is implemented since the
-   2026-11-20 upstream sync brought `VM_OP_PULSE_GEN`.
-6. Project-level e-stop configuration, retentive/EEPROM parameters and the project's declared target
+5. Project-level e-stop configuration, retentive/EEPROM parameters and the project's declared target
    model are not carried into the image header yet; the compiler always emits model 0x0407. The
    `Main.Safety.EStop` and `Main.Execution.ReadReg`/`WriteReg` blocks do emit their opcodes.
-7. Firmware update/DFU: `MaraProtClient.enterROMDFU()` (opcode `0xF3`) is implemented; there is no UI
+6. Firmware update/DFU: `MaraProtClient.enterROMDFU()` (opcode `0xF3`) is implemented; there is no UI
    for it and no DFU file transfer (the device jumps to the ROM USB bootloader).
-8. No physical Duino-S has been tested yet. The protocol and image path are validated against the
+7. No physical Duino-S has been tested yet. The protocol and image path are validated against the
    firmware VM, a frame-level fake, and a pseudo-terminal serial pair, not real hardware.
-9. Project target/profile is a global Hardware Link choice; it is not yet stored in the project.
+8. Project target/profile is a global Hardware Link choice; it is not yet stored in the project.
+
+## Maramat catalog audit (2026-11-22)
+
+The 91 static definitions match MaraFlow's local source exactly in id, category, type, pins, defaults,
+datatypes and variadic/configurable-datatype flags. The six definitions that did not exist upstream
+(`IO.DI`, `IO.DO`, `IO.8xDI`, `IO.8xDO`, `IO.AI`, `IO.AO`) were removed. Runtime fixes cover digital and
+analog IREF/OREF channels, SinglePulse and CH455G disable behavior, and timezone/DST-aware date coding.
 
 ## Upstream sync (2026-11-20)
 

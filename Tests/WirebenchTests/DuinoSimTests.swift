@@ -320,6 +320,19 @@ struct DuinoSimTests {
         #expect(session.ds18b20Attached == false)
     }
 
+    @Test("A new button pulse is not cut short by the previous pulse's release")
+    @MainActor
+    func overlappingButtonPulses() async throws {
+        let session = try DuinoSimSession(port: 15028)
+        session.pulseButton(channel: 10)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        session.pulseButton(channel: 10)
+        try await Task.sleep(nanoseconds: 75_000_000)
+        #expect(session.sim.digitalInput(10), "the first release must not clear the second pulse")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(!session.sim.digitalInput(10))
+    }
+
 #if canImport(SwiftUI)
     @Test("The 3D CH455G decoder handles numeric decimal points and raw segments")
     @MainActor

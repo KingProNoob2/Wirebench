@@ -165,6 +165,55 @@ struct UnsavedChangesTests {
         #expect(!model.shouldTerminateNow(), "a quit AppKit refused asks again next time")
     }
 
+    @Test("Opening a legacy project routes the Hardware Link back to Duino-P")
+    func legacyDocumentSelectsLegacyHardware() throws {
+        let model = try Self.model()
+        model.hardwareFamily = .duinoS
+        let legacy = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-family-\(UUID()).pcc")
+        try PCCSerializer().serialize(project: BlockDeletionTests.project()).write(to: legacy, atomically: true, encoding: .utf8)
+        model.loadProject(url: legacy)
+        #expect(model.hardwareFamily == .dirigo)
+    }
+
+    @Test("A new document does not inherit the last build report or watch session")
+    func transientStateIsDocumentScoped() throws {
+        let model = try Self.model()
+        model.duinoBuildResult = DuinoCompiler.Result(image: [], slots: [:], slotNames: [:], slotTypes: [:], notes: [])
+        model.isShowingBuildReport = true
+        model.isShowingPLCConfiguration = true
+        model.isWatchingDuino = true
+        model.duinoWatchValues = [1: 42]
+        model.duinoWatchTask = Task {}
+
+        model.createNewProject(platform: .maraflow)
+        #expect(model.duinoBuildResult == nil)
+        #expect(!model.isBuildReportVisible)
+        #expect(!model.isShowingPLCConfiguration)
+        #expect(!model.isWatchingDuino)
+        #expect(model.duinoWatchValues.isEmpty)
+    }
+
+    @Test("The unsaved question dismisses every model-owned sheet that would cover it")
+    func unsavedQuestionDismissesSheets() throws {
+        let model = try Self.model()
+        _ = model.deleteModule(id: 2)
+        model.isShowingPLCConfiguration = true
+        model.configuringModuleId = 1
+        model.isShowingBuildReport = true
+
+        model.createNewProject()
+        #expect(model.pendingUnsavedIntent == .newProject(.maraflow))
+        #expect(!model.isShowingPLCConfiguration)
+        #expect(model.configuringModuleId == nil)
+        #expect(!model.isShowingBuildReport)
+        model.answerUnsavedChanges(.cancel)
+
+        model.isShowingPLCConfiguration = true
+        #expect(!model.shouldTerminateNow())
+        #expect(model.pendingUnsavedIntent == .quit)
+        #expect(!model.isShowingPLCConfiguration)
+    }
+
     @Test("Quit with nothing to lose does not ask")
     func cleanQuitDoesNotAsk() throws {
         let model = try Self.model()

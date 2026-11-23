@@ -61,16 +61,18 @@ public enum BlockFactory {
     ) -> PCCModule {
         let template = layoutOverrides[guid.uuidString.uppercased()]
             ?? PinTemplateCatalog.template(forGuid: guid)
-        let inputs = makePins(from: template?.inputs ?? [], counted: template?.defaultInputCount)
-        let params = makePins(from: template?.params ?? [], counted: nil)
+        let maraflow = MaraflowCatalog.definition(forGuid: guid) != nil
+        let inputs = makePins(from: template?.inputs ?? [], counted: template?.defaultInputCount,
+                              respectDeclaredTypes: maraflow)
+        let params = makePins(from: template?.params ?? [], counted: nil, respectDeclaredTypes: maraflow)
         // A type with no recovered pin layout still gets a connected-looking block rather than one
         // with no pins at all, which would be unselectable and un-wireable.
         let outputs = template == nil
             ? makePins(from: [PinTemplate(abbrev: "Y", name: "Y", dataType: "Boolean",
                                           defaultValue: "-")], counted: nil, isOutput: true)
-            : makePins(from: template!.outputs, counted: nil, isOutput: true)
+            : makePins(from: template!.outputs, counted: nil, isOutput: true, respectDeclaredTypes: maraflow)
 
-        return PCCModule(
+        var module = PCCModule(
             id: id,
             guid: guid,
             name: name,
@@ -87,6 +89,13 @@ public enum BlockFactory {
             paramPins: params,
             outPins: outputs
         )
+        if let definition = MaraflowCatalog.definition(forGuid: guid) {
+            module.rawAttributes["MARAFLOW_DEF"] = definition.id
+            for (key, value) in MaraflowCatalog.defaultProperties(for: definition) {
+                module.rawAttributes["MARAFLOW_PROP_\(key)"] = value
+            }
+        }
+        return module
     }
 
     /// Builds the pin list, expanding a configurable input count.
@@ -96,7 +105,18 @@ public enum BlockFactory {
     /// with N = 2 becomes `En, X0, X1`, matching what Dirigo itself writes.
     /// A pin's starting value. An output whose template says `-` (no default) starts at its type's zero rather than
     /// "no value yet", so a new block has a readable Y before the simulation runs.
-    static func defaultPinValue(for spec: PinTemplate, isOutput: Bool) -> PinValue {
+    static func defaultPinValue(for spec: PinTemplate, isOutput: Bool, respectDeclaredType: Bool = false) -> PinValue {
+        if respectDeclaredType {
+            let prototype: PinValue = switch spec.dataType.lowercased() {
+            case "boolean", "bit", "bool": .bool(false)
+            case "float", "real": .float(0)
+            case "long", "int64": .int64(0)
+            default: .int32(0)
+            }
+            let parsed = PinValue.parse(spec.defaultValue, preservingTypeOf: prototype)
+            if case .undefined = parsed { return prototype }
+            return parsed
+        }
         let parsed = PinValue.parse(spec.defaultValue)
         guard isOutput, case .undefined = parsed else { return parsed }
         switch spec.dataType.lowercased() {
@@ -109,14 +129,15 @@ public enum BlockFactory {
     static func makePins(
         from specs: [PinTemplate],
         counted: Int?,
-        isOutput: Bool = false
+        isOutput: Bool = false,
+        respectDeclaredTypes: Bool = false
     ) -> [Pin] {
         var pins: [Pin] = []
 
         func append(_ spec: PinTemplate, abbrev: String) {
             pins.append(Pin(
                 id: pins.count,
-                value: defaultPinValue(for: spec, isOutput: isOutput),
+                value: defaultPinValue(for: spec, isOutput: isOutput, respectDeclaredType: respectDeclaredTypes),
                 inverted: false,
                 rights: isOutput ? 2 : 0,
                 name: nil,

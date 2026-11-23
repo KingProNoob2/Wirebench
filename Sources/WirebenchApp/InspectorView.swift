@@ -19,7 +19,7 @@ public struct InspectorView: View {
 
     public var body: some View {
         if let modId = model.selectedModuleId,
-           let mod = model.project?.modules.first(where: { $0.id == modId }) {
+           let mod = model.project?.modules.first(where: { $0.id == modId && $0.page == model.selectedPage }) {
             let node = model.getNode(id: modId)
             let blockTypeName = BlockRegistry.shared.resolvedTypeName(for: mod) ?? mod.name
             let info = BlockTypeCatalog.info(forGuid: mod.guid)
@@ -34,8 +34,11 @@ public struct InspectorView: View {
                         symbol: Self.iconForBlockType(blockTypeName),
                         tint: Theme.tint(forCategory: info?.category ?? ""),
                         isSimulated: CxxSimulationCore.kind(forGUID: mod.guid) != nil,
+                        interruptSource: MaraflowCatalog.definition(forGuid: mod.guid)?.id == "Main.Execution.Interrupt"
+                            ? mod.rawAttributes["MARAFLOW_PROP_InterruptSource"] ?? "TIM_IC1" : nil,
                         onToggleFirstInput: { model.toggleModuleInput(moduleId: mod.id, pinIndex: 0) },
                         onReset: { model.resetModuleState(id: mod.id) },
+                        onFireInterrupt: { model.fireInterrupt(source: mod.rawAttributes["MARAFLOW_PROP_InterruptSource"] ?? "TIM_IC1") },
                         onConfigure: { model.openConfigureModule(id: mod.id) })
                         .equatable()
                 }
@@ -352,7 +355,7 @@ struct InspectorRows<Row: View>: View {
 
 /// The block's identity, its one-line description, and the actions that act on it.
 ///
-/// `Equatable` over the data alone — the two closures are excluded, as `ModuleCardView` does — so a
+/// `Equatable` over the data alone — the action closures are excluded, as `ModuleCardView` does — so a
 /// simulation tick, which changes the pin values below it, does not re-render the header.
 ///
 /// It draws no background: it sits in an `InspectorCard`, which is the container. Internal rather than private so a
@@ -365,8 +368,10 @@ struct InspectorHero: View, Equatable {
     let symbol: String
     let tint: Color
     let isSimulated: Bool
+    let interruptSource: String?
     let onToggleFirstInput: () -> Void
     let onReset: () -> Void
+    var onFireInterrupt: () -> Void = {}
     var onConfigure: () -> Void = {}
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -377,6 +382,7 @@ struct InspectorHero: View, Equatable {
             && lhs.symbol == rhs.symbol
             && lhs.tint == rhs.tint
             && lhs.isSimulated == rhs.isSimulated
+            && lhs.interruptSource == rhs.interruptSource
     }
 
     var body: some View {
@@ -435,6 +441,11 @@ struct InspectorHero: View, Equatable {
                 .controlSize(.small)
             }
             .padding(.top, 2)
+            if interruptSource != nil {
+                Button(action: onFireInterrupt) { Text("Fire Interrupt Pulse").frame(maxWidth: .infinity) }
+                    .glassButtonStyle()
+                    .controlSize(.small)
+            }
         }
         // No container of its own: the card it sits in is the container.
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -172,6 +172,132 @@ inline void civilFrom1980(int64_t days, int64_t &year, int64_t &month, int64_t &
     year = yoe + era * 400 + (month <= 2);
 }
 
+inline int64_t maraflowFloorDiv(int64_t a, int64_t b) {
+    return a >= 0 ? a / b : -((-a + b - 1) / b);
+}
+
+inline int64_t maraflowDaysFromCivil(int64_t y, int m, int d) {
+    y -= m <= 2;
+    const int64_t era = maraflowFloorDiv(y, 400);
+    const int yoe = static_cast<int>(y - era * 400);
+    const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+inline int maraflowCivilYearFromDays(int64_t z) {
+    z += 719468;
+    const int64_t era = maraflowFloorDiv(z, 146097);
+    const int doe = static_cast<int>(z - era * 146097);
+    const int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const int y = static_cast<int>(yoe + era * 400);
+    const int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const int mp = (5 * doy + 2) / 153;
+    const int m = mp + (mp < 10 ? 3 : -9);
+    return y + (m <= 2);
+}
+
+struct MaraTimeZone {
+    int stdOffset = 0, dstOffset = 0;
+    int startMonth = 0, startWeek = 0, startDow = 0, startHour = 0;
+    int endMonth = 0, endWeek = 0, endDow = 0, endHour = 0;
+
+    static int number(const std::map<std::string, std::string> &strings,
+                      const char *key, int fallback) {
+        const auto it = strings.find(key);
+        if (it == strings.end() || it->second.empty()) return fallback;
+        try { return std::stoi(it->second); } catch (...) { return fallback; }
+    }
+
+    static MaraTimeZone from(const std::map<std::string, std::string> &strings) {
+        static const std::map<std::string, MaraTimeZone> presets = {
+            {"UTC", {}},
+            {"Europe/Prague", {60,60,3,-1,0,2,10,-1,0,3}},
+            {"Europe/London", {0,60,3,-1,0,1,10,-1,0,2}},
+            {"Europe/Athens", {120,60,3,-1,0,3,10,-1,0,4}},
+            {"Europe/Moscow", {180,0,0,0,0,0,0,0,0,0}},
+            {"America/New_York", {-300,60,3,2,0,2,11,1,0,2}},
+            {"America/Chicago", {-360,60,3,2,0,2,11,1,0,2}},
+            {"America/Denver", {-420,60,3,2,0,2,11,1,0,2}},
+            {"America/Phoenix", {-420,0,0,0,0,0,0,0,0,0}},
+            {"America/Los_Angeles", {-480,60,3,2,0,2,11,1,0,2}},
+            {"America/Anchorage", {-540,60,3,2,0,2,11,1,0,2}},
+            {"Pacific/Honolulu", {-600,0,0,0,0,0,0,0,0,0}},
+            {"America/St_Johns", {-210,60,3,2,0,2,11,1,0,2}},
+            {"America/Sao_Paulo", {-180,0,0,0,0,0,0,0,0,0}},
+            {"America/Santiago", {-240,60,9,1,6,24,4,1,6,24}},
+            {"Asia/Dubai", {240,0,0,0,0,0,0,0,0,0}},
+            {"Asia/Kolkata", {330,0,0,0,0,0,0,0,0,0}},
+            {"Asia/Kathmandu", {345,0,0,0,0,0,0,0,0,0}},
+            {"Asia/Shanghai", {480,0,0,0,0,0,0,0,0,0}},
+            {"Asia/Tokyo", {540,0,0,0,0,0,0,0,0,0}},
+            {"Australia/Adelaide", {570,60,10,1,0,2,4,1,0,3}},
+            {"Australia/Sydney", {600,60,10,1,0,2,4,1,0,3}},
+            {"Australia/Lord_Howe", {630,30,10,1,0,2,4,1,0,2}},
+            {"Pacific/Auckland", {720,60,9,-1,0,2,4,1,0,3}},
+            {"Pacific/Chatham", {765,60,9,-1,0,2,4,1,0,3}},
+            {"Pacific/Kiritimati", {840,0,0,0,0,0,0,0,0,0}},
+        };
+        const auto id = strings.find("TimeZone");
+        const std::string name = id == strings.end() ? "UTC" : id->second;
+        const auto preset = presets.find(name);
+        if (name != "Custom" && preset != presets.end()) return preset->second;
+        return {number(strings,"TzStdOffsetMin",0), number(strings,"TzDstOffsetMin",0),
+                number(strings,"TzDstStartMonth",0), number(strings,"TzDstStartWeek",0),
+                number(strings,"TzDstStartDow",0), number(strings,"TzDstStartHour",2),
+                number(strings,"TzDstEndMonth",0), number(strings,"TzDstEndWeek",0),
+                number(strings,"TzDstEndDow",0), number(strings,"TzDstEndHour",3)};
+    }
+
+    static int daysInMonth(int year, int month) {
+        if (month == 2) return (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) ? 29 : 28;
+        return (month == 4 || month == 6 || month == 9 || month == 11) ? 30 : 31;
+    }
+
+    static int dowFromDays(int64_t days) {
+        return static_cast<int>((days + 4) % 7 < 0 ? (days + 4) % 7 + 7 : (days + 4) % 7);
+    }
+
+    static int64_t transitionLocal(int year, int month, int week, int dow, int hour) {
+        int day;
+        if (week == 0) {
+            day = std::max(1, std::min(daysInMonth(year, month), dow));
+        } else if (week > 0) {
+            const int first = dowFromDays(maraflowDaysFromCivil(year, month, 1));
+            day = 1 + (dow - first + 7) % 7 + (week - 1) * 7;
+            while (day > daysInMonth(year, month)) day -= 7;
+        } else {
+            const int lastDay = daysInMonth(year, month);
+            const int last = dowFromDays(maraflowDaysFromCivil(year, month, lastDay));
+            day = lastDay - (last - dow + 7) % 7;
+        }
+        return maraflowDaysFromCivil(year, month, day) * 86400 + static_cast<int64_t>(hour) * 3600;
+    }
+
+    static int64_t transitionUtc(int year, int month, int week, int dow, int hour, int activeOffset) {
+        return transitionLocal(year, month, week, dow, hour) - static_cast<int64_t>(activeOffset) * 60;
+    }
+
+    int64_t offsetSecondsAtUtc(int64_t utc) const {
+        if (startMonth <= 0 || endMonth <= 0 || dstOffset == 0) return static_cast<int64_t>(stdOffset) * 60;
+        const int year = maraflowCivilYearFromDays(maraflowFloorDiv(utc + static_cast<int64_t>(stdOffset) * 60, 86400));
+        const int64_t start = transitionUtc(year,startMonth,startWeek,startDow,startHour,stdOffset);
+        const int64_t end = transitionUtc(year,endMonth,endWeek,endDow,endHour,stdOffset + dstOffset);
+        const bool dst = startMonth < endMonth ? (utc >= start && utc < end) : (utc >= start || utc < end);
+        return static_cast<int64_t>(stdOffset + (dst ? dstOffset : 0)) * 60;
+    }
+
+    int64_t localToUtc(int year, int month, int day, int hour, int minute, int second) const {
+        const int64_t local = maraflowDaysFromCivil(year,month,day) * 86400
+            + hour * 3600 + minute * 60 + second;
+        if (startMonth <= 0 || endMonth <= 0 || dstOffset == 0) return local - static_cast<int64_t>(stdOffset) * 60;
+        const int64_t start = transitionLocal(year,startMonth,startWeek,startDow,startHour);
+        const int64_t end = transitionLocal(year,endMonth,endWeek,endDow,endHour);
+        const bool dst = startMonth < endMonth ? (local >= start && local < end) : (local >= start || local < end);
+        return local - static_cast<int64_t>(stdOffset + (dst ? dstOffset : 0)) * 60;
+    }
+};
+
 inline WirebenchValue undefinedValue() {
     WirebenchValue v{};
     v.kind = WIREBENCH_VALUE_UNDEFINED;
@@ -223,6 +349,7 @@ struct Module {
     int32_t currentCount = 0;      /* Counter */
     int32_t intValue = 0;          /* IntVar: the variable itself, not a pin */
     bool lastTr = false;           /* Counter: for the 0->1 edge */
+    uint64_t lastInterruptPulse = 0;
     int32_t variant = 0;           /* WirebenchModuleDesc.variant */
     int64_t config[4] = {0, 0, 0, 0};
     int64_t remaining = 0;         /* SinglePulse */
@@ -250,6 +377,30 @@ struct Module {
     std::vector<size_t> incoming;
     std::vector<size_t> outgoing;
 };
+
+bool isMaraflowVisualVariable(const Module &m) {
+    return m.kind == WIREBENCH_BLOCK_MARAFLOW
+        && (m.variant == MARAFLOW_Visual_Vars_BoolVar || m.variant == MARAFLOW_Visual_Vars_IntVar
+            || m.variant == MARAFLOW_Visual_Vars_LongVar);
+}
+
+double maraflowVisualProperty(const Module &m, const char *key, double fallback) {
+    const auto found = m.strings.find(key);
+    if (found == m.strings.end()) return fallback;
+    if (found->second == "true" || found->second == "TRUE") return 1.0;
+    if (found->second == "false" || found->second == "FALSE") return 0.0;
+    try { return std::stod(found->second); } catch (...) { return fallback; }
+}
+
+void setMaraflowVisualCurrent(Module &m, double value) {
+    const double converted = m.variant == MARAFLOW_Visual_Vars_BoolVar ? (value != 0.0 ? 1.0 : 0.0) : value;
+    int64_t raw = 0;
+    std::memcpy(&raw, &converted, sizeof(double));
+    m.config[0] = raw;
+    m.strings["CurrentValue"] = m.variant == MARAFLOW_Visual_Vars_BoolVar
+        ? (converted != 0.0 ? "1" : "0") : std::to_string(converted);
+    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(converted, m.outPins[0]);
+}
 
 constexpr size_t kNoModule = static_cast<size_t>(-1);
 
@@ -299,6 +450,8 @@ struct WirebenchSim {
     std::map<int64_t, std::vector<double>> arrays;
     /// The Maraflow operand namespace: DI/DO/AI/AO/PWM channel registers and named registers.
     std::map<std::string, double> operands;
+    uint64_t interruptPulseCounter = 0;
+    std::map<std::string, uint64_t> interruptSourcePulseCounters;
     /// Maraflow ArrayRead/ArrayWrite: one 64-element store per distinct array name.
     std::map<std::string, std::vector<double>> maraflowArrays;
     bool maraflowEStopActive = false;
@@ -640,8 +793,13 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
     }
     /* Every kind below writes outputs and nothing else a reader can see (`Set` works in the step loop, not
        here), so a module without out pins has nothing to do — and the cases may then index `outPins[0]`.
-       OREF is the exception: its visible effect is the DO register it writes. */
-    const bool writesRegistersWithoutOutputs = m.kind == WIREBENCH_BLOCK_MARAFLOW && m.variant == MARAFLOW_IO_OREF;
+       OREF and the ladder output coils are the exception: their visible effect is the register they write. */
+    const bool writesRegistersWithoutOutputs = m.kind == WIREBENCH_BLOCK_MARAFLOW
+        && (m.variant == MARAFLOW_IO_OREF || m.variant == MARAFLOW_Ladder_Coil_NORMAL
+            || m.variant == MARAFLOW_Ladder_Coil_NEGATED || m.variant == MARAFLOW_Ladder_Coil_SET
+            || m.variant == MARAFLOW_Ladder_Coil_RESET || m.variant == MARAFLOW_Ladder_Coil_POS
+            || m.variant == MARAFLOW_Ladder_Coil_NEG || m.variant == MARAFLOW_Ladder_Coil_ANALOG
+            || m.variant == MARAFLOW_Ladder_Coil_WRITE_REG);
     if (m.outPins.empty() && !writesRegistersWithoutOutputs) return;
     switch (m.kind) {
         case WIREBENCH_BLOCK_NOT: {
@@ -1416,7 +1574,19 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                 }
                 return;
             }
-            if (m.hasEnable && !m.inPins.empty() && !asBool(m.inPins[0])) return;   /* En gate; outputs hold */
+            const bool booleanCoil = m.variant == MARAFLOW_Ladder_Coil_NORMAL
+                || m.variant == MARAFLOW_Ladder_Coil_NEGATED || m.variant == MARAFLOW_Ladder_Coil_SET
+                || m.variant == MARAFLOW_Ladder_Coil_RESET || m.variant == MARAFLOW_Ladder_Coil_POS
+                || m.variant == MARAFLOW_Ladder_Coil_NEG;
+            if (!booleanCoil && m.hasEnable && !m.inPins.empty() && !asBool(m.inPins[0])) {
+                if (m.variant == MARAFLOW_Main_Timers_SinglePulse) {
+                    m.flagA = false;
+                    if (!m.outPins.empty()) m.outPins[0] = boolean(false);
+                } else if (m.variant == MARAFLOW_IO_CH455G && !m.outPins.empty()) {
+                    m.outPins[0] = boolean(false);
+                }
+                return;
+            }
             switch (m.variant) {
                 case MARAFLOW_Bool_And:
                 case MARAFLOW_Bool_Nand:
@@ -1456,59 +1626,50 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     if (m.outPins.size() > 1) m.outPins[1] = boolean(!m.flagA);
                     return;
                 }
-                case MARAFLOW_IO_DI: {
-                    const std::string channel = "DI" + std::to_string(m.config[0]);
-                    if (!m.outPins.empty()) m.outPins[0] = boolean(sim->operands.count(channel) ? sim->operands[channel] != 0.0 : false);
-                    return;
-                }
-                case MARAFLOW_IO_DO: {
-                    const bool value = m.inPins.size() > 1 && asBool(m.inPins[1]);
-                    if (sim) sim->operands["DO" + std::to_string(m.config[0])] = value ? 1.0 : 0.0;
-                    if (!m.outPins.empty()) m.outPins[0] = boolean(value);
-                    return;
-                }
-                case MARAFLOW_IO_AI: {
-                    const std::string channel = "AI" + std::to_string(m.config[0]);
-                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(sim->operands.count(channel) ? sim->operands[channel] : 0.0, m.outPins[0]);
-                    return;
-                }
-                case MARAFLOW_IO_AO: {
-                    const double value = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
-                    if (sim) sim->operands["AO" + std::to_string(m.config[0])] = value;
-                    if (!m.outPins.empty()) m.outPins[0] = boolean(true);
-                    return;
-                }
                 case MARAFLOW_IO_PWM: {
                     const double duty = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
                     if (sim) sim->operands["PWM" + std::to_string(m.config[0])] = duty;
                     if (!m.outPins.empty()) m.outPins[0] = boolean(duty > 0.0);
                     return;
                 }
-                case MARAFLOW_IO_8xDI: {
-                    for (size_t i = 0; i < m.outPins.size(); ++i) {
-                        const std::string channel = "DI" + std::to_string(i);
-                        if (sim->operands.count(channel)) m.outPins[i] = boolean(sim->operands[channel] != 0.0);
-                    }
-                    return;
-                }
-                case MARAFLOW_IO_8xDO: {
-                    for (size_t i = 1; i < m.inPins.size(); ++i) {
-                        if (sim) sim->operands["DO" + std::to_string(i - 1)] = asBool(m.inPins[i]) ? 1.0 : 0.0;
-                    }
-                    return;
-                }
                 case MARAFLOW_IO_IREF: {
-                    // A single digital input reference: `Channel` names DI0..DI15.
-                    const std::string channel = "DI" + std::to_string(m.config[0]);
+                    const std::string channel = m.strings.count("Channel")
+                        ? m.strings["Channel"] : "DI" + std::to_string(m.config[0]);
                     if (!m.outPins.empty()) {
-                        m.outPins[0] = boolean(sim && sim->operands.count(channel) && sim->operands[channel] != 0.0);
+                        m.outPins[0] = maraflowNumber(sim->operands.count(channel) ? sim->operands[channel] : 0.0,
+                                                     m.outPins[0]);
                     }
                     return;
                 }
                 case MARAFLOW_IO_OREF: {
-                    // A single digital output reference: `Channel` names DO0..DO15.
-                    if (sim) sim->operands["DO" + std::to_string(m.config[0])] =
-                        m.inPins.empty() ? 0.0 : (asBool(m.inPins[0]) ? 1.0 : 0.0);
+                    const std::string channel = m.strings.count("Channel")
+                        ? m.strings["Channel"] : "DO" + std::to_string(m.config[0]);
+                    if (sim) sim->operands[channel] = m.inPins.empty() ? 0.0 : asFloat(m.inPins[0]);
+                    return;
+                }
+                case MARAFLOW_Ladder_Coil_NORMAL:
+                case MARAFLOW_Ladder_Coil_NEGATED:
+                case MARAFLOW_Ladder_Coil_SET:
+                case MARAFLOW_Ladder_Coil_RESET:
+                case MARAFLOW_Ladder_Coil_POS:
+                case MARAFLOW_Ladder_Coil_NEG: {
+                    const std::string operand = m.strings.count("Operand") ? m.strings["Operand"] : "DO0";
+                    const bool power = !m.inPins.empty() && asBool(m.inPins[0]);
+                    const bool previous = m.lastTr;
+                    m.lastTr = power;
+                    if (m.variant == MARAFLOW_Ladder_Coil_NORMAL) ldWrite(sim, operand, power ? 1.0 : 0.0);
+                    else if (m.variant == MARAFLOW_Ladder_Coil_NEGATED) ldWrite(sim, operand, power ? 0.0 : 1.0);
+                    else if (m.variant == MARAFLOW_Ladder_Coil_SET) { if (power) ldWrite(sim, operand, 1.0); }
+                    else if (m.variant == MARAFLOW_Ladder_Coil_RESET) { if (power) ldWrite(sim, operand, 0.0); }
+                    else if (m.variant == MARAFLOW_Ladder_Coil_POS) ldWrite(sim, operand, power && !previous ? 1.0 : 0.0);
+                    else ldWrite(sim, operand, !power && previous ? 1.0 : 0.0);
+                    return;
+                }
+                case MARAFLOW_Ladder_Coil_ANALOG:
+                case MARAFLOW_Ladder_Coil_WRITE_REG: {
+                    const std::string fallback = m.variant == MARAFLOW_Ladder_Coil_ANALOG ? "AO0" : "REG_0";
+                    const std::string operand = m.strings.count("Operand") ? m.strings["Operand"] : fallback;
+                    if (sim && m.inPins.size() > 1 && asBool(m.inPins[0])) ldWrite(sim, operand, asFloat(m.inPins[1]));
                     return;
                 }
                 case MARAFLOW_Main_Timers_Timer: {
@@ -1600,11 +1761,13 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     return;
                 }
                 case MARAFLOW_Main_Timers_DecodeDate: {
-                    const int64_t seconds = static_cast<int64_t>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
-                    const int64_t days = static_cast<int64_t>(std::floor(static_cast<double>(seconds) / 86400.0));
+                    const int64_t utc = static_cast<int64_t>(m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0);
+                    const MaraTimeZone timeZone = MaraTimeZone::from(m.strings);
+                    const int64_t seconds = utc + timeZone.offsetSecondsAtUtc(utc);
+                    const int64_t days = maraflowFloorDiv(seconds, 86400);
                     const int64_t secondOfDay = seconds - days * 86400;
                     int64_t year = 1970, month = 1, day = 1;
-                    civilFrom1980(days, year, month, day);
+                    civilFrom1980(days - 3652, year, month, day);
                     if (m.outPins.size() > 0) m.outPins[0] = maraflowNumber(static_cast<double>(year), m.outPins[0]);
                     if (m.outPins.size() > 1) m.outPins[1] = maraflowNumber(static_cast<double>(month), m.outPins[1]);
                     if (m.outPins.size() > 2) m.outPins[2] = maraflowNumber(static_cast<double>(day), m.outPins[2]);
@@ -1616,6 +1779,10 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                 case MARAFLOW_Visual_Vars_BoolVar:
                 case MARAFLOW_Visual_Vars_IntVar:
                 case MARAFLOW_Visual_Vars_LongVar: {
+                    if (m.pulseRemaining > 0) {
+                        m.pulseRemaining -= 1;
+                        if (m.pulseRemaining == 0) setMaraflowVisualCurrent(m, maraflowVisualProperty(m, "ValA", 0.0));
+                    }
                     int64_t bits = m.config[0];
                     double value = 0.0;
                     std::memcpy(&value, &bits, sizeof(double));
@@ -1657,8 +1824,19 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                 case MARAFLOW_Math_Div: {
                     const double a = m.inPins.size() > 1 ? asFloat(m.inPins[1]) : 0.0;
                     const double b = m.inPins.size() > 2 ? asFloat(m.inPins[2]) : 0.0;
-                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(std::abs(b) < 1e-12 ? 0.0 : a / b, m.outPins[0]);
-                    if (m.outPins.size() > 1) m.outPins[1] = boolean(std::abs(b) < 1e-12);
+                    const bool divideByZero = std::abs(b) < 1e-12;
+                    if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(divideByZero ? 0.0 : a / b, m.outPins[0]);
+                    if (m.outPins.size() > 1) m.outPins[1] = boolean(divideByZero);
+                    if (m.outPins.size() > 2) {
+                        if (divideByZero) {
+                            m.outPins[2] = maraflowNumber(0.0, m.outPins[2]);
+                        } else if (m.outPins[2].kind == WIREBENCH_VALUE_FLOAT) {
+                            m.outPins[2] = maraflowNumber(std::fmod(a, b), m.outPins[2]);
+                        } else {
+                            const int64_t remainder = static_cast<int64_t>(a) % static_cast<int64_t>(b);
+                            m.outPins[2] = maraflowNumber(static_cast<double>(remainder), m.outPins[2]);
+                        }
+                    }
                     return;
                 }
                 case MARAFLOW_Math_Mod: {
@@ -1822,6 +2000,14 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     }
                     bool event = false;
                     double captured = simulated;
+                    const std::string sourceKey = ldUpper(source);
+                    const auto specific = sim->interruptSourcePulseCounters.find(sourceKey);
+                    const uint64_t pulseCount = sim->interruptPulseCounter
+                        + (specific == sim->interruptSourcePulseCounters.end() ? 0 : specific->second);
+                    if (pulseCount != m.lastInterruptPulse) {
+                        event = true;
+                        m.lastInterruptPulse = pulseCount;
+                    }
                     if (source.rfind("EXTI_DI", 0) == 0) {
                         const std::string channel = source.substr(5);
                         const bool current = sim->operands.count(channel) ? sim->operands[channel] != 0.0 : false;
@@ -1975,14 +2161,8 @@ void processModule(WirebenchSim *sim, Module &m, const Sample &sample, const Wir
                     const int hour = std::clamp(static_cast<int>(m.inPins.size() > 4 ? asFloat(m.inPins[4]) : 0), 0, 23);
                     const int minute = std::clamp(static_cast<int>(m.inPins.size() > 5 ? asFloat(m.inPins[5]) : 0), 0, 59);
                     const int second = std::clamp(static_cast<int>(m.inPins.size() > 6 ? asFloat(m.inPins[6]) : 0), 0, 59);
-                    // Days-from-civil (Hinnant), UTC — the same calendar DecodeDate splits with.
-                    int y = year - (month <= 2 ? 1 : 0);
-                    const int era = (y >= 0 ? y : y - 399) / 400;
-                    const unsigned yoe = static_cast<unsigned>(y - era * 400);
-                    const unsigned doy = static_cast<unsigned>((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1);
-                    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-                    const int64_t epoch = (static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468) * 86400
-                        + hour * 3600 + minute * 60 + second;
+                    const MaraTimeZone timeZone = MaraTimeZone::from(m.strings);
+                    const int64_t epoch = timeZone.localToUtc(year, month, day, hour, minute, second);
                     if (!m.outPins.empty()) m.outPins[0] = maraflowNumber(static_cast<double>(epoch), m.outPins[0]);
                     return;
                 }
@@ -2082,6 +2262,7 @@ void resetModule(Module &m) {
     m.pulseRemaining = 0;
     m.currentCount = 0;
     m.lastTr = false;
+    m.lastInterruptPulse = 0;
     m.remaining = 0;
     m.total = 0;
     m.filterValue = 0;
@@ -2569,6 +2750,8 @@ void wirebench_sim_reset(WirebenchSim *sim) {
     sim->threadElapsedMs.clear();
     sim->threadRunCounts.clear();
     sim->arrays.clear();             /* the data area is the PLC's, and a reset clears it */
+    sim->interruptPulseCounter = 0;
+    sim->interruptSourcePulseCounters.clear();
     for (Module &m : sim->modules) {
         // A reset clears state, not configuration: the pins keep the values the project gave them, as the
         // per-module reset already does.
@@ -2665,13 +2848,14 @@ static int32_t stepImpl(WirebenchSim *sim, double deltaMs, bool forceAll) {
                         || (!page->second.empty() && page->second.front() == '!'));
                 if (!isEStopPage) continue;
             }
-            /* The engine-level gate: a module inside a false branch, or whose first in pin reads 0, does
-               not run and does not push, so all its outputs hold. That is not each block's own `En` rule —
-               it applies even where pin 0 is an operand (`Int2Bits`'s `X`) — and it reads pin 0 *before*
-               the pull, as the Swift does. */
+            /* Dirigo's engine-level gate: a module inside a false branch, or whose first in pin reads 0, does
+               not run and does not push, so all its outputs hold. It applies even where pin 0 is an operand
+               (`Int2Bits`'s `X`) and reads pin 0 *before* the pull. Native Maraflow blocks instead reach
+               processModule, which implements their own enable and state-reset rules. */
             const Module &gated = sim->modules[index];
             if (sim->condStack != 0) continue;
-            if (gated.hasEnable && !gated.inPins.empty() && !asBool(gated.inPins[0])) continue;
+            if (gated.kind != WIREBENCH_BLOCK_MARAFLOW && gated.hasEnable && !gated.inPins.empty()
+                && !asBool(gated.inPins[0])) continue;
             pullInputs(sim, index);
             processModule(sim, sim->modules[index], sample, sim->wallClock);
             const int32_t kind = sim->modules[index].kind;
@@ -2739,6 +2923,7 @@ void wirebench_sim_set_out(WirebenchSim *sim, int32_t index, int32_t pin, Wirebe
     /* A variable's value is its *state*, not its pin: writing the pin alone is undone the next time the
        variable runs, so a value set by hand has to reach `intValue` too. */
     if (m.kind == WIREBENCH_BLOCK_INTVAR && pin == 0) m.intValue = static_cast<int32_t>(asInt(value));
+    if (isMaraflowVisualVariable(m) && pin == 0) setMaraflowVisualCurrent(m, asFloat(value));
     if (m.kind == WIREBENCH_BLOCK_FLOATVAR && pin == 0) {
         m.floatVar = asFloat(value);
         m.outPins[0] = floatValue(m.floatVar);
@@ -2749,7 +2934,11 @@ void wirebench_sim_pulse_out(WirebenchSim *sim, int32_t index, int32_t pin, int3
     if (!sim || index < 0 || static_cast<size_t>(index) >= sim->modules.size()) return;
     Module &m = sim->modules[index];
     if (pin < 0 || static_cast<size_t>(pin) >= m.outPins.size()) return;
-    m.outPins[pin] = boolean(true);
+    if (isMaraflowVisualVariable(m) && pin == 0) {
+        setMaraflowVisualCurrent(m, maraflowVisualProperty(m, "ValB", 1.0));
+    } else {
+        m.outPins[pin] = boolean(true);
+    }
     m.pulseRemaining = std::max(0, cycles);
 }
 
@@ -2801,6 +2990,12 @@ void wirebench_sim_set_estop_config(WirebenchSim *sim, int32_t enabled, int32_t 
         if (end == std::string::npos) break;
         start = end + 1;
     }
+}
+
+void wirebench_sim_fire_interrupt(WirebenchSim *sim, const char *source) {
+    if (!sim) return;
+    if (!source || !*source) sim->interruptPulseCounter += 1;
+    else sim->interruptSourcePulseCounters[ldUpper(source)] += 1;
 }
 
 double wirebench_sim_get_operand(WirebenchSim *sim, const char *name) {
