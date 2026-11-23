@@ -454,7 +454,7 @@ public struct ModuleCardView: View, Equatable {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 6 * s)
             .padding(.vertical, 1 * s)
-            .help("\(value)  (0 – \(maximum))")
+            .help("\(value)  (\(minimum) – \(maximum))")
     }
 
     /// The control chip. Shared by the push button and the latch so neither can end up without a control —

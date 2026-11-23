@@ -336,7 +336,12 @@ public extension AppModel {
             duinoDiscoveryStatus = ""
             return
         }
-        guard !isDiscoveringDuino else { return }
+        guard !isDiscoveringDuino else {
+            duinoDiscoveryNeedsRefresh = true
+            return
+        }
+        let transport = duinoTransport
+        let family = hardwareFamily
         await MainActor.run {
             self.isDiscoveringDuino = true
             self.duinoDiscoveryStatus = duinoTransport == .usbCDC
@@ -354,16 +359,22 @@ public extension AppModel {
                 MaraDiscovery.scanLocalNetwork(port: tcpPort, timeout: 0.15)
             }.value
         }
+        var stale = false
         await MainActor.run {
             self.isDiscoveringDuino = false
+            guard self.hardwareFamily == family, self.duinoTransport == transport else {
+                stale = true
+                self.duinoDiscoveryStatus = "Discovery cancelled: the endpoint changed."
+                return
+            }
             self.duinoDiscoveredDevices = devices
             if devices.isEmpty {
-                self.duinoDiscoveryStatus = duinoTransport == .usbCDC
+                self.duinoDiscoveryStatus = transport == .usbCDC
                     ? "No Duino-S answered on the serial ports."
                     : "No Duino-S answered on the local network."
                 return
             }
-            if duinoTransport == .usbCDC {
+            if transport == .usbCDC {
                 if self.selectedPortPath.isEmpty || !devices.contains(where: { $0.endpoint == self.selectedPortPath }) {
                     self.selectedPortPath = devices[0].endpoint
                 }
@@ -376,6 +387,13 @@ public extension AppModel {
             self.duinoDiscoveryStatus = devices.count == 1
                 ? "Found \(devices[0].displayName)."
                 : "Found \(devices.count) Duino-S boards; pick one."
+        }
+        if await MainActor.run(body: {
+            let again = stale || self.duinoDiscoveryNeedsRefresh
+            self.duinoDiscoveryNeedsRefresh = false
+            return again
+        }) {
+            await discoverDuinoDevices()
         }
     }
 

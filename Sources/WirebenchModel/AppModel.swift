@@ -269,6 +269,7 @@ public final class AppModel: @unchecked Sendable {
     public var duinoDiscoveredDevices: [MaraDiscoveredDevice] = []
     public var isDiscoveringDuino: Bool = false
     public var duinoDiscoveryStatus: String = ""
+    var duinoDiscoveryNeedsRefresh = false
 
     /// What the last Get Info from a Duino-S reported.
     public var duinoInfo: MaraProtClient.Info?
